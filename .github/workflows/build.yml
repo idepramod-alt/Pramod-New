@@ -108,6 +108,61 @@ jobs:
           include ':app'
           GRADLE
 
+      - name: Write clean AndroidManifest.xml
+        run: |
+          cat > gradle_build/app/src/main/AndroidManifest.xml << 'MANIFEST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              android:versionCode="1"
+              android:versionName="1.0">
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-feature android:name="android.hardware.usb.host"/>
+              <uses-feature android:name="android.software.midi" android:required="true"/>
+              <permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="signature"/>
+              <uses-permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
+              <application
+                  android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+                  android:label="Pramod Octapad Loops"
+                  android:icon="@mipmap/ic_launcher"
+                  android:allowBackup="true"
+                  android:appComponentFactory="androidx.core.app.CoreComponentFactory">
+                  <activity android:name="com.pramod.loopmidi.ActivationActivity" android:exported="true" android:screenOrientation="landscape"/>
+                  <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <activity android:name="com.pramod.loopmidi.MainActivity" android:exported="false" android:screenOrientation="landscape"/>
+                  <service android:name="com.google.firebase.components.ComponentDiscoveryService" android:exported="false" android:directBootAware="true">
+                      <meta-data android:name="com.google.firebase.components:com.google.firebase.database.FirebaseDatabaseKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
+                      <meta-data android:name="com.google.firebase.components:com.google.firebase.database.DatabaseRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
+                      <meta-data android:name="com.google.firebase.components:com.google.firebase.ktx.FirebaseCommonLegacyRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
+                      <meta-data android:name="com.google.firebase.components:com.google.firebase.FirebaseCommonKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
+                  </service>
+                  <provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:exported="false" android:authorities="com.pramod.loopmidi.firebaseinitprovider" android:initOrder="100" android:directBootAware="true"/>
+                  <activity android:theme="@android:style/Theme.Translucent.NoTitleBar" android:name="com.google.android.gms.common.api.GoogleApiActivity" android:exported="false"/>
+                  <meta-data android:name="com.google.android.gms.version" android:value="@integer/google_play_services_version"/>
+                  <provider android:name="androidx.startup.InitializationProvider" android:exported="false" android:authorities="com.pramod.loopmidi.androidx-startup">
+                      <meta-data android:name="androidx.emoji2.text.EmojiCompatInitializer" android:value="androidx.startup"/>
+                      <meta-data android:name="androidx.lifecycle.ProcessLifecycleInitializer" android:value="androidx.startup"/>
+                      <meta-data android:name="androidx.profileinstaller.ProfileInstallerInitializer" android:value="androidx.startup"/>
+                  </provider>
+                  <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" android:permission="android.permission.DUMP" android:enabled="true" android:exported="true" android:directBootAware="false">
+                      <intent-filter><action android:name="androidx.profileinstaller.action.INSTALL_PROFILE"/></intent-filter>
+                      <intent-filter><action android:name="androidx.profileinstaller.action.SKIP_FILE"/></intent-filter>
+                      <intent-filter><action android:name="androidx.profileinstaller.action.SAVE_PROFILE"/></intent-filter>
+                      <intent-filter><action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION"/></intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          MANIFEST
+
       - name: Create google-services.json
         working-directory: gradle_build/app
         run: |
@@ -122,15 +177,11 @@ jobs:
               {
                 "client_info": {
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
-                  "android_client_info": {
-                    "package_name": "com.pramod.loopmidi"
-                  }
+                  "android_client_info": { "package_name": "com.pramod.loopmidi" }
                 },
                 "oauth_client": [],
                 "api_key": [{ "current_key": "placeholder" }],
-                "services": {
-                  "appinvite_service": { "other_platform_oauth_client": [] }
-                }
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
               }
             ],
             "configuration_version": "1"
@@ -149,24 +200,16 @@ jobs:
           rm -rf gradle_build/app/src/main/res/values-anydpi
           rm -rf gradle_build/app/src/main/res/values-anydpi-v24
 
-      - name: Fix native libs folder (lib -> jniLibs)
+      - name: Move native libs to jniLibs
         run: |
           mkdir -p gradle_build/app/src/main/jniLibs
           cp -r gradle_build/app/src/main/lib/* gradle_build/app/src/main/jniLibs/ 2>/dev/null || true
           rm -rf gradle_build/app/src/main/lib
 
-      - name: Remove binary kotlin metadata from src/main/kotlin
+      - name: Remove binary kotlin metadata and META-INF
         run: |
           rm -rf gradle_build/app/src/main/kotlin
-
-      - name: Remove META-INF from src/main
-        run: |
           rm -rf gradle_build/app/src/main/META-INF
-
-      - name: Fix AndroidManifest.xml
-        run: |
-          sed -i 's/package="com.pramod.loopmidi"[[:space:]]*//' gradle_build/app/src/main/AndroidManifest.xml
-          sed -i '/android:extractNativeLibs/d' gradle_build/app/src/main/AndroidManifest.xml
 
       - name: Copy Java sources from decompiled
         run: |
