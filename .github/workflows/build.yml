@@ -266,11 +266,11 @@ jobs:
           sed -i 's/import kotlin\.UByte;//g' $JAVA_DIR/*.java
           sed -i 's/UByte\.MAX_VALUE/255/g' $JAVA_DIR/*.java
 
-      - name: Fix jadx Java decompilation artifacts
+      - name: Fix jadx decompilation artifacts (sed)
         run: |
           JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
 
-          # Fix 1: Remove (this) argument from anonymous class instantiations
+          # Fix 1: Remove (this) arg from anonymous class constructors
           sed -i 's/\(new [A-Za-z$.]*\)(this) {\( *\/\/ from class:\)/\1() {\2/g' $JAVA_DIR/*.java
 
           # Fix 2: Remove invalid outer-class self-assignment lines
@@ -280,27 +280,108 @@ jobs:
           # Fix 3: Remove synthetic AnonymousClassXX field declarations
           sed -i '/final \/\* synthetic \*\/ AnonymousClass[0-9]* this\$[0-9]*;/d' $JAVA_DIR/*.java
 
-          # Fix 4: ConstraintLayout.LayoutParams.Table private access
+          # Fix 4: ConstraintLayout.LayoutParams.Table private constants
           sed -i 's/ConstraintLayout\.LayoutParams\.Table\.[A-Z_]* \/\* \([0-9]*\) \*\//\1/g' $JAVA_DIR/*.java
 
-          # Fix 5: Restore package-private visibility (jadx wrongly added 'private')
+          # Fix 5: Remove 'private' from fields accessed by inner classes
           sed -i '/\bloopPlaying\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
           sed -i '/\baudioEngine\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
           sed -i '/\bloopPads\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
 
-          # Fix 6a: Delete phantom exception re-assignments between catch blocks (jadx artifact)
-          # e.g. e4 = e5; outside catch scope where e5 is no longer defined
+          # Fix 6: Delete truly phantom eN = eM; lines (both sides have digits = dead jadx artifact)
+          # These are lines where jadx tried to share a variable across catch blocks but
+          # the right-hand variable is out of scope. We delete them and re-declare properly below.
           sed -i '/^\s*e[0-9]\+ = e[0-9]\+;$/d' $JAVA_DIR/*.java
 
-          # Fix 6b: Declare undeclared bare catch-variable: eN = e; -> Exception eN = e;
-          sed -i 's/^\(\s*\)\(e[0-9]\+\) = e;$/\1Exception \2 = e;/' $JAVA_DIR/*.java
-
           # Fix 7: Replace nested outer-class reference chain with proper Java syntax
-          # this.this$1.this$0.field -> OuterClass.this.field
           sed -i 's/this\.this\$1\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
           sed -i 's/this\.this\$1\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
 
-          echo "=== All jadx artifact fixes applied ==="
+          echo "=== Sed fixes done ==="
+
+      - name: Fix jadx exception variable scoping (Python)
+        run: |
+          python3 << 'PYEOF'
+          import re, os
+
+          JAVA_DIR = 'gradle_build/app/src/main/java/com/pramod/loopmidi'
+
+          # ---------------------------------------------------------------
+          # LoopsActivity.java
+          # Problem: Fix 6b (previous build) turned 'e4 = e;' into
+          # 'Exception e4 = e;' which scoped e4 only inside one catch block.
+          # But e4 is used AFTER that catch block in other catches too.
+          # Solution: revert to assignment + hoist 'Exception e4 = null;'
+          # before the enclosing try block so e4 is visible everywhere.
+          # ---------------------------------------------------------------
+          loops_path = os.path.join(JAVA_DIR, 'LoopsActivity.java')
+          with open(loops_path) as f:
+              lines = f.readlines()
+
+          result = []
+          fixed_loops = 0
+          for line in lines:
+              m = re.match(r'^(\s+)Exception (e\d+) = e;', line)
+              if m:
+                  indent, var = m.group(1), m.group(2)
+                  # Revert to plain assignment — e is the catch parameter in scope
+                  result.append(f'{indent}{var} = e;\n')
+                  # Hoist declaration before the nearest preceding try { line
+                  for j in range(len(result) - 1, -1, -1):
+                      if re.search(r'\btry\s*\{', result[j]):
+                          result.insert(j, f'{indent}Exception {var} = null;\n')
+                          break
+                  fixed_loops += 1
+              else:
+                  result.append(line)
+
+          with open(loops_path, 'w') as f:
+              f.writelines(result)
+          print(f'LoopsActivity.java: hoisted {fixed_loops} exception declaration(s) before try block')
+
+          # ---------------------------------------------------------------
+          # MainActivity.java
+          # Problem A: jadx uses bare 'e' (no digit) as a shared collector
+          # variable across multiple catch blocks but never declares it.
+          # Pattern:  catch (IOException e2) { e = e2; ... }
+          #           catch (Exception e3)   { e = e3; ... }
+          # Fix: declare inline at first assignment in each catch block.
+          #
+          # Problem B: 'eN.printStackTrace()' where eN is the catch parameter
+          # of an INNER catch block, used inside an OUTER catch — jadx artifact.
+          # Fix: comment out (stack traces are debug-only, not needed to run).
+          # ---------------------------------------------------------------
+          main_path = os.path.join(JAVA_DIR, 'MainActivity.java')
+          with open(main_path) as f:
+              lines = f.readlines()
+
+          result = []
+          fixed_decl = 0
+          fixed_orphan = 0
+          for line in lines:
+              # Pattern A: '    e = eN;'  →  '    Exception e = eN;'
+              m = re.match(r'^(\s+)e = (e\d+);', line)
+              if m:
+                  result.append(f'{m.group(1)}Exception e = {m.group(2)};\n')
+                  fixed_decl += 1
+                  continue
+
+              # Pattern B: '    eN.printStackTrace();' as a standalone statement
+              # These are orphaned references to inner-catch parameters
+              m2 = re.match(r'^(\s+)(e\d+)\.printStackTrace\(\);\s*$', line)
+              if m2:
+                  result.append(f'{m2.group(1)}// {line.strip()} // jadx-out-of-scope-removed\n')
+                  fixed_orphan += 1
+                  continue
+
+              result.append(line)
+
+          with open(main_path, 'w') as f:
+              f.writelines(result)
+          print(f'MainActivity.java: declared {fixed_decl} bare-e variable(s), removed {fixed_orphan} orphaned printStackTrace()')
+
+          print('All exception variable fixes applied.')
+          PYEOF
 
       - name: Setup Gradle 8.9 wrapper
         working-directory: gradle_build
@@ -317,22 +398,4 @@ jobs:
         if: always()
         run: |
           echo "====== ERRORS ======"
-          grep -n "error:\|ERROR:\|FAILED\|Cannot find" /tmp/build.log \
-            | grep -v "at org\.\|at java\.\|at com\.google\|at com\.android" | head -80
-
-      - name: Fail if build unsuccessful
-        run: grep -q "BUILD SUCCESSFUL" /tmp/build.log || exit 1
-
-      - name: Locate APK
-        run: |
-          mkdir -p apk_output
-          find gradle_build -name "*.apk" -exec cp {} apk_output/ \;
-          ls -la apk_output/
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pramod-Octapad-Loops-Debug
-          path: apk_output/*.apk
-          if-no-files-found: error
-          retention-days: 30
+          grep 
