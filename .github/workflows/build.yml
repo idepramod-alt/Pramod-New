@@ -1,0 +1,35 @@
+name: Build APK
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - uses: android-actions/setup-android@v3
+      - name: Copy Java sources
+        run: |
+          mkdir -p gradle_build/app/src/main/java/com/pramod/loopmidi
+          find decompiled_apk_jadx/sources/com/pramod/loopmidi -name "*.java" ! -name "R.java" \
+            -exec cp {} gradle_build/app/src/main/java/com/pramod/loopmidi/ \;
+      - name: Remove .dex files
+        run: rm -f gradle_build/app/src/main/classes*.dex gradle_build/app/src/main/DebugProbesKt.bin
+      - name: Create google-services.json
+        run: |
+          cat > gradle_build/app/google-services.json << 'EOF'
+          {"project_info":{"project_number":"000000000000","project_id":"pramod-placeholder","storage_bucket":"pramod-placeholder.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000","android_client_info":{"package_name":"com.pramod.loopmidi"}},"oauth_client":[],"api_key":[{"current_key":"placeholder"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}
+          EOF
+      - name: Build Debug APK
+        working-directory: gradle_build
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pramod-Octapad-Loops-Debug
+          path: gradle_build/app/build/outputs/apk/debug/*.apk
