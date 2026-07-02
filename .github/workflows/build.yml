@@ -275,13 +275,11 @@ jobs:
           with open(filepath, "r") as f:
               content = f.read()
 
-          # The working Java WAV decoder to replace the broken jadx stub
           new_method = '''    private short[] decodePcmFromWav(byte[] wavData) {
               if (wavData == null || wavData.length < 44) {
                   android.util.Log.e(TAG, "WAV data too short or null");
                   return null;
               }
-              // Validate RIFF header
               if (wavData[0] != 'R' || wavData[1] != 'I' || wavData[2] != 'F' || wavData[3] != 'F') {
                   android.util.Log.e(TAG, "Not a RIFF file");
                   return null;
@@ -290,7 +288,6 @@ jobs:
                   android.util.Log.e(TAG, "Not a WAVE file");
                   return null;
               }
-              // Parse chunks to find fmt and data
               int offset = 12;
               int channels = 1;
               int bitsPerSample = 16;
@@ -313,14 +310,13 @@ jobs:
                       dataSize   = chunkSize;
                       break;
                   }
-                  offset += 8 + chunkSize + (chunkSize % 2); // word-align
+                  offset += 8 + chunkSize + (chunkSize % 2);
               }
               if (dataOffset < 0 || dataSize <= 0 || dataOffset + dataSize > wavData.length) {
                   android.util.Log.e(TAG, "No valid data chunk found in WAV");
                   return null;
               }
               if (channels < 1) channels = 1;
-              // Convert raw bytes to 16-bit PCM short[], mixing to mono
               if (bitsPerSample == 16) {
                   int bytesPerFrame = 2 * channels;
                   int frames = dataSize / bytesPerFrame;
@@ -355,7 +351,6 @@ jobs:
               return null;
           }'''
 
-          # Replace the broken method (from its JADX WARN comment through the closing brace)
           broken_pattern = re.compile(
               r'/\* JADX WARN: Code restructure failed.*?throw new UnsupportedOperationException\("Method not decompiled.*?"\);\s*\}',
               re.DOTALL
@@ -374,7 +369,7 @@ jobs:
         run: |
           JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
 
-          # Fix 1: Remove (this) argument from anonymous class/interface instantiations
+          # Fix 1: Remove (this) argument from anonymous class instantiations
           sed -i 's/\(new [A-Za-z$.]*\)(this) {\( *\/\/ from class:\)/\1() {\2/g' $JAVA_DIR/*.java
 
           # Fix 2: Remove invalid outer-class self-assignment
@@ -384,10 +379,17 @@ jobs:
           # Fix 3: Remove synthetic AnonymousClassXX field declarations
           sed -i '/final \/\* synthetic \*\/ AnonymousClass[0-9]* this\$[0-9]*;/d' $JAVA_DIR/*.java
 
-          # Fix 4: ConstraintLayout.LayoutParams.Table private access
-          # jadx puts the int value in the comment - use it directly
+          # Fix 4: ConstraintLayout.LayoutParams.Table private access - use int value from comment
           sed -i 's/ConstraintLayout\.LayoutParams\.Table\.[A-Z_]* \/\* \([0-9]*\) \*\//\1/g' $JAVA_DIR/*.java
 
-          # Fix 5: Private field access in LoopsActivity used from MainActivity
-          # In original APK these were package-private; jadx wrongly added 'private'
-     
+          # Fix 5: Restore package-private visibility (jadx wrongly added 'private')
+          sed -i '/\bloopPlaying\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
+          sed -i '/\baudioEngine\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
+          sed -i '/\bloopPads\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
+
+          # Fix 6: Catch block variable reuse (jadx artifact)
+          sed -i 's/^\(\s*\)\(e[0-9]*\) = \(e[0-9]\+\);$/\1Exception \2 = \3;/' $JAVA_DIR/*.java
+
+          echo "=== All jadx artifact fixes applied ==="
+
+      - name: S
