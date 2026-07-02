@@ -1,0 +1,309 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.pramod.loopmidi"
+4    platformBuildVersionCode="33"
+5    platformBuildVersionName="13.0.0"
+6    android:compileSdkVersion="33"
+7    android:compileSdkVersionCodename="13.0.0"
+8    android:versionCode="1"
+9    android:versionName="1.0" >
+10
+11    <uses-sdk
+11-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:3:5-73
+12        android:minSdkVersion="23"
+12-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:3:15-41
+13        android:targetSdkVersion="34" />
+13-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:3:42-71
+14
+15    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+15-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:4:5-79
+15-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:4:22-77
+16    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+16-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:5:5-80
+16-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:5:22-78
+17    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+17-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:6:5-70
+17-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:6:22-68
+18    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+18-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:7:5-79
+18-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:7:22-77
+19    <uses-permission android:name="android.permission.INTERNET" />
+19-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:8:5-66
+19-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:8:22-64
+20    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+20-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:9:5-78
+20-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:9:22-76
+21
+22    <uses-feature android:name="android.hardware.usb.host" />
+22-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:10:5-61
+22-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:10:19-59
+23    <uses-feature
+23-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:11:5-81
+24        android:name="android.software.midi"
+24-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:11:19-55
+25        android:required="true" />
+25-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:11:56-79
+26
+27    <permission
+27-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:12:5-130
+28        android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+28-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:12:17-92
+29        android:protectionLevel="signature" />
+29-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:12:93-128
+30
+31    <uses-permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+31-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:13:5-99
+31-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:13:22-97
+32
+33    <application
+33-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:5-50:19
+34        android:allowBackup="true"
+34-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:181-207
+35        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+35-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:241-309
+36        android:debuggable="true"
+36-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:155-180
+37        android:extractNativeLibs="true"
+37-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:208-240
+38        android:icon="@mipmap/ic_launcher"
+38-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:120-154
+39        android:label="Pramod Octapad Loops"
+39-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:83-119
+40        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" >
+40-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:14:18-82
+41        <activity
+41-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:15:9-136
+42            android:name="com.pramod.loopmidi.ActivationActivity"
+42-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:15:19-72
+43            android:exported="true"
+43-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:15:73-96
+44            android:screenOrientation="landscape" />
+44-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:15:97-134
+45        <activity
+45-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:16:9-21:20
+46            android:name="com.pramod.loopmidi.LoopsActivity"
+46-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:16:19-67
+47            android:exported="true"
+47-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:16:68-91
+48            android:screenOrientation="landscape" >
+48-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:16:92-129
+49            <intent-filter>
+49-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:17:13-20:29
+50                <action android:name="android.intent.action.MAIN" />
+50-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:18:17-68
+50-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:18:25-66
+51
+52                <category android:name="android.intent.category.LAUNCHER" />
+52-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:19:17-76
+52-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:19:27-74
+53            </intent-filter>
+54        </activity>
+55
+56        <service
+56-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:22:9-27:19
+57            android:name="com.google.firebase.components.ComponentDiscoveryService"
+57-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:22:18-89
+58            android:directBootAware="true"
+58-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:22:115-145
+59            android:exported="false" >
+59-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:22:90-114
+60            <meta-data
+60-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:23:13-195
+61                android:name="com.google.firebase.components:com.google.firebase.database.FirebaseDatabaseKtxRegistrar"
+61-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:23:24-127
+62                android:value="com.google.firebase.components.ComponentRegistrar" />
+62-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:23:128-193
+63            <meta-data
+63-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:24:13-184
+64                android:name="com.google.firebase.components:com.google.firebase.database.DatabaseRegistrar"
+64-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:24:24-116
+65                android:value="com.google.firebase.components.ComponentRegistrar" />
+65-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:24:117-182
+66            <meta-data
+66-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:25:13-191
+67                android:name="com.google.firebase.components:com.google.firebase.ktx.FirebaseCommonLegacyRegistrar"
+67-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:25:24-123
+68                android:value="com.google.firebase.components.ComponentRegistrar" />
+68-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:25:124-189
+69            <meta-data
+69-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:26:13-184
+70                android:name="com.google.firebase.components:com.google.firebase.FirebaseCommonKtxRegistrar"
+70-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:26:24-116
+71                android:value="com.google.firebase.components.ComponentRegistrar" />
+71-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:26:117-182
+72            <meta-data
+72-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:69:13-71:85
+73                android:name="com.google.firebase.components:com.google.firebase.auth.FirebaseAuthRegistrar"
+73-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:70:17-109
+74                android:value="com.google.firebase.components.ComponentRegistrar" />
+74-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:71:17-82
+75        </service>
+76
+77        <provider
+77-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:9-228
+78            android:name="com.google.firebase.provider.FirebaseInitProvider"
+78-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:19-83
+79            android:authorities="com.pramod.loopmidi.firebaseinitprovider"
+79-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:109-171
+80            android:directBootAware="true"
+80-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:196-226
+81            android:exported="false"
+81-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:84-108
+82            android:initOrder="100" />
+82-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:28:172-195
+83
+84        <activity
+84-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:29:9-172
+85            android:name="com.google.android.gms.common.api.GoogleApiActivity"
+85-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:29:79-145
+86            android:exported="false"
+86-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:29:146-170
+87            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+87-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:29:19-78
+88
+89        <meta-data
+89-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:30:9-121
+90            android:name="com.google.android.gms.version"
+90-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:30:20-65
+91            android:value="@integer/google_play_services_version" />
+91-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:30:66-119
+92
+93        <provider
+93-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:31:9-35:20
+94            android:name="androidx.startup.InitializationProvider"
+94-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:31:19-73
+95            android:authorities="com.pramod.loopmidi.androidx-startup"
+95-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:31:99-157
+96            android:exported="false" >
+96-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:31:74-98
+97            <meta-data
+97-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:32:13-117
+98                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+98-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:32:24-82
+99                android:value="androidx.startup" />
+99-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:32:83-115
+100            <meta-data
+100-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:33:13-120
+101                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+101-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:33:24-85
+102                android:value="androidx.startup" />
+102-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:33:86-118
+103            <meta-data
+103-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:34:13-127
+104                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+104-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:34:24-92
+105                android:value="androidx.startup" />
+105-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:34:93-125
+106        </provider>
+107
+108        <receiver
+108-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:9-49:20
+109            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+109-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:19-82
+110            android:directBootAware="false"
+110-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:175-206
+111            android:enabled="true"
+111-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:128-150
+112            android:exported="true"
+112-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:151-174
+113            android:permission="android.permission.DUMP" >
+113-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:36:83-127
+114            <intent-filter>
+114-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:37:13-39:29
+115                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+115-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:38:17-90
+115-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:38:25-88
+116            </intent-filter>
+117            <intent-filter>
+117-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:40:13-42:29
+118                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+118-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:41:17-84
+118-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:41:25-82
+119            </intent-filter>
+120            <intent-filter>
+120-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:43:13-45:29
+121                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+121-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:44:17-87
+121-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:44:25-85
+122            </intent-filter>
+123            <intent-filter>
+123-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:46:13-48:29
+124                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+124-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:47:17-94
+124-->/workspaces/Pramod-New/gradle_build/app/src/main/AndroidManifest.xml:47:25-92
+125            </intent-filter>
+126        </receiver>
+127
+128        <activity
+128-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:29:9-46:20
+129            android:name="com.google.firebase.auth.internal.GenericIdpActivity"
+129-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:30:13-80
+130            android:excludeFromRecents="true"
+130-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:31:13-46
+131            android:exported="true"
+131-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:32:13-36
+132            android:launchMode="singleTask"
+132-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:33:13-44
+133            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
+133-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:34:13-72
+134            <intent-filter>
+134-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:35:13-45:29
+135                <action android:name="android.intent.action.VIEW" />
+135-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:36:17-69
+135-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:36:25-66
+136
+137                <category android:name="android.intent.category.DEFAULT" />
+137-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:38:17-76
+137-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:38:27-73
+138                <category android:name="android.intent.category.BROWSABLE" />
+138-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:39:17-78
+138-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:39:27-75
+139
+140                <data
+140-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:41:17-44:51
+141                    android:host="firebase.auth"
+141-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:42:21-49
+142                    android:path="/"
+142-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:43:21-37
+143                    android:scheme="genericidp" />
+143-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:44:21-48
+144            </intent-filter>
+145        </activity>
+146        <activity
+146-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:47:9-64:20
+147            android:name="com.google.firebase.auth.internal.RecaptchaActivity"
+147-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:48:13-79
+148            android:excludeFromRecents="true"
+148-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:49:13-46
+149            android:exported="true"
+149-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:50:13-36
+150            android:launchMode="singleTask"
+150-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:51:13-44
+151            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
+151-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:52:13-72
+152            <intent-filter>
+152-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:53:13-63:29
+153                <action android:name="android.intent.action.VIEW" />
+153-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:36:17-69
+153-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:36:25-66
+154
+155                <category android:name="android.intent.category.DEFAULT" />
+155-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:38:17-76
+155-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:38:27-73
+156                <category android:name="android.intent.category.BROWSABLE" />
+156-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:39:17-78
+156-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:39:27-75
+157
+158                <data
+158-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:41:17-44:51
+159                    android:host="firebase.auth"
+159-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:42:21-49
+160                    android:path="/"
+160-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:43:21-37
+161                    android:scheme="recaptcha" />
+161-->[com.google.firebase:firebase-auth:22.0.0] /home/codespace/.gradle/caches/9.4.0/transforms/f337c4a65ee17bc15abc4a67ccedc1ce/transformed/jetified-firebase-auth-22.0.0/AndroidManifest.xml:44:21-48
+162            </intent-filter>
+163        </activity>
+164    </application>
+165
+166</manifest>

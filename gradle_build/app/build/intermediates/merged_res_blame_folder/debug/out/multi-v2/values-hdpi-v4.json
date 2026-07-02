@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-hdpi-v4/values-hdpi-v4.xml",
+            "map": [
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-hdpi/styles.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "6",
+                        "endColumns": "12",
+                        "endOffsets": "327"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-h480dp-land-v13/values-h480dp-land-v13.xml",
+            "map": [
+                {
+                    "source": "/home/codespace/.gradle/caches/9.4.0/transforms/3556e15084b367443caf1de09fbacf64/transformed/material-1.13.0/res/values-h480dp-land-v13/values-h480dp-land-v13.xml",
+                    "from": {
+                        "startLines": "5,6,8",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "226,293,413",
+                        "endColumns": "66,64,64",
+                        "endOffsets": "288,353,473"
+                    }
+                },
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-h480dp-land/dimens.xml",
+                    "from": {
+                        "startLines": "2,3,4,5,6,7",
+                        "startColumns": "4,4,4,4,4,4",
+                        "startOffsets": "55,114,170,226,281,350",
+                        "endColumns": "58,55,55,54,68,68",
+                        "endOffsets": "109,165,221,276,345,414"
+                    },
+                    "to": {
+                        "startLines": "2,3,4,7,9,10",
+                        "startColumns": "4,4,4,4,4,4",
+                        "startOffsets": "55,114,170,358,478,547",
+                        "endColumns": "58,55,55,54,68,68",
+                        "endOffsets": "109,165,221,408,542,611"
+                    }
+                }
+            ]
+        }
+    ]
+}

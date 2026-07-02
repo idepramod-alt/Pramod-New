@@ -1,0 +1,37 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-v24/values-v24.xml",
+            "map": [
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-v24/styles.xml",
+                    "from": {
+                        "startLines": "2,4,6,8,10,12,14,64,107,156,198,201,204,207",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "55,231,385,489,607,713,833,5780,10005,14849,18966,19178,19404,19618",
+                        "endLines": "3,5,7,9,11,13,63,106,155,197,200,203,206,209",
+                        "endColumns": "12,12,12,12,12,12,12,12,12,12,12,12,12,12",
+                        "endOffsets": "226,380,484,602,708,828,5775,10000,14844,18961,19173,19399,19613,19841"
+                    }
+                },
+                {
+                    "source": "/home/codespace/.gradle/caches/9.4.0/transforms/3a41179cfe0badd49e248f345ed1cba0/transformed/media-1.0.0/res/values-v24/values-v24.xml",
+                    "from": {
+                        "startLines": "2,3,4,5",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "55,121,182,248",
+                        "endColumns": "65,60,65,66",
+                        "endOffsets": "116,177,243,310"
+                    },
+                    "to": {
+                        "startLines": "210,211,212,213",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "19846,19912,19973,20039",
+                        "endColumns": "65,60,65,66",
+                        "endOffsets": "19907,19968,20034,20101"
+                    }
+                }
+            ]
+        }
+    ]
+}

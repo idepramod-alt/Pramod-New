@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-h550dp-port-v13/values-h550dp-port-v13.xml",
+            "map": [
+                {
+                    "source": "/home/codespace/.gradle/caches/9.4.0/transforms/3556e15084b367443caf1de09fbacf64/transformed/material-1.13.0/res/values-h550dp-port-v13/values-h550dp-port-v13.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "64",
+                        "endOffsets": "115"
+                    }
+                },
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-h550dp-port/dimens.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "76",
+                        "endOffsets": "127"
+                    },
+                    "to": {
+                        "startLines": "3",
+                        "startColumns": "4",
+                        "startOffsets": "120",
+                        "endColumns": "76",
+                        "endOffsets": "192"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,74 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-land/values-land.xml",
+            "map": [
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-land/integers.xml",
+                    "from": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,120",
+                        "endColumns": "64,66",
+                        "endOffsets": "115,182"
+                    },
+                    "to": {
+                        "startLines": "21,22",
+                        "startColumns": "4,4",
+                        "startOffsets": "1429,1494",
+                        "endColumns": "64,66",
+                        "endOffsets": "1489,1556"
+                    }
+                },
+                {
+                    "source": "/home/codespace/.gradle/caches/9.4.0/transforms/3556e15084b367443caf1de09fbacf64/transformed/material-1.13.0/res/values-land/values-land.xml",
+                    "from": {
+                        "startLines": "31",
+                        "startColumns": "4",
+                        "startOffsets": "1950",
+                        "endLines": "35",
+                        "endColumns": "10",
+                        "endOffsets": "2214"
+                    },
+                    "to": {
+                        "startLines": "36",
+                        "startColumns": "4",
+                        "startOffsets": "2346",
+                        "endLines": "40",
+                        "endColumns": "10",
+                        "endOffsets": "2610"
+                    }
+                },
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-land/dimens.xml",
+                    "from": {
+                        "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "55,125,196,264,339,413,486,556,621,688,758,830,899,968,1050,1140,1216,1284,1351",
+                        "endColumns": "69,70,67,74,73,72,69,64,66,69,71,68,68,81,89,75,67,66,77",
+                        "endOffsets": "120,191,259,334,408,481,551,616,683,753,825,894,963,1045,1135,1211,1279,1346,1424"
+                    }
+                },
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-land/styles.xml",
+                    "from": {
+                        "startLines": "2,6,15",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,235,840",
+                        "endLines": "5,14,17",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "230,835,1072"
+                    },
+                    "to": {
+                        "startLines": "23,27,41",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "1561,1741,2615",
+                        "endLines": "26,35,43",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "1736,2341,2847"
+                    }
+                }
+            ]
+        }
+    ]
+}

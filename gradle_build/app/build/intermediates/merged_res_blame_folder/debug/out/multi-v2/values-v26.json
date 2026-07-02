@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pramod.loopmidi.app-mergeDebugResources-36:/values-v26/values-v26.xml",
+            "map": [
+                {
+                    "source": "/workspaces/Pramod-New/gradle_build/app/src/main/res/values-v26/styles.xml",
+                    "from": {
+                        "startLines": "2,4,6,9,12,16,18",
+                        "startColumns": "4,4,4,4,4,4,4",
+                        "startOffsets": "55,149,255,417,591,837,949",
+                        "endLines": "3,5,8,11,15,17,23",
+                        "endColumns": "12,12,12,12,12,12,12",
+                        "endOffsets": "144,250,412,586,832,944,1329"
+                    }
+                }
+            ]
+        }
+    ]
+}
