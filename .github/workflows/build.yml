@@ -113,21 +113,36 @@ jobs:
               "project_id": "pramod-placeholder",
               "storage_bucket": "pramod-placeholder.appspot.com"
             },
-            "client": [{
-              "client_info": {
-                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
-                "android_client_info": { "package_name": "com.pramod.loopmidi" }
-              },
-              "oauth_client": [],
-              "api_key": [{ "current_key": "placeholder" }],
-              "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-            }],
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.pramod.loopmidi"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "placeholder" }],
+                "services": {
+                  "appinvite_service": { "other_platform_oauth_client": [] }
+                }
+              }
+            ],
             "configuration_version": "1"
           }
           EOF
 
-      - name: Remove .dex files
-        run: rm -f gradle_build/app/src/main/classes*.dex gradle_build/app/src/main/DebugProbesKt.bin
+      - name: Remove .dex and binary files
+        run: |
+          rm -f gradle_build/app/src/main/classes*.dex
+          rm -f gradle_build/app/src/main/DebugProbesKt.bin
+
+      - name: Remove system resource folders from decompilation
+        run: |
+          rm -rf gradle_build/app/src/main/res/values-v31
+          rm -rf gradle_build/app/src/main/res/color-v31
+          rm -rf gradle_build/app/src/main/res/values-anydpi
+          rm -rf gradle_build/app/src/main/res/values-anydpi-v24
 
       - name: Copy Java sources from decompiled
         run: |
