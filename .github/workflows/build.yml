@@ -288,12 +288,12 @@ jobs:
           sed -i '/\baudioEngine\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
           sed -i '/\bloopPads\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
 
-          # Fix 6: Delete truly phantom eN = eM; lines (both sides have digits = dead jadx artifact)
-          # These are lines where jadx tried to share a variable across catch blocks but
-          # the right-hand variable is out of scope. We delete them and re-declare properly below.
+          # Fix 6: Delete phantom eN = eM; lines (both sides have digits)
+          # These are jadx multi-catch artifacts where the right-hand variable
+          # is a catch parameter from a different (now out-of-scope) catch block.
           sed -i '/^\s*e[0-9]\+ = e[0-9]\+;$/d' $JAVA_DIR/*.java
 
-          # Fix 7: Replace nested outer-class reference chain with proper Java syntax
+          # Fix 7: Replace nested outer-class reference chain
           sed -i 's/this\.this\$1\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
           sed -i 's/this\.this\$1\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
 
@@ -308,48 +308,52 @@ jobs:
 
           # ---------------------------------------------------------------
           # LoopsActivity.java
-          # Problem: Fix 6b (previous build) turned 'e4 = e;' into
-          # 'Exception e4 = e;' which scoped e4 only inside one catch block.
-          # But e4 is used AFTER that catch block in other catches too.
-          # Solution: revert to assignment + hoist 'Exception e4 = null;'
-          # before the enclosing try block so e4 is visible everywhere.
+          # Problem: jadx uses 'eN' (with digit) as a shared collector variable
+          # across multiple catch blocks but never declares it. Pattern seen:
+          #   catch (IOException e) { e4 = e; ... }     <- line 1011
+          #   catch (Exception e5)  { e4.x(); ... }     <- lines 1066,1067
+          # Fix 6 (sed) already deleted phantom 'e4 = e5;' lines.
+          # Now 'e4' has no declaration anywhere.
+          # Solution: find every 'eN = e;' bare-assignment line
+          # (eN has digit(s), e has NO digit = it is the catch parameter),
+          # then hoist 'Exception eN = null;' before the nearest preceding
+          # 'try {' so eN is visible across all catch blocks and after.
           # ---------------------------------------------------------------
           loops_path = os.path.join(JAVA_DIR, 'LoopsActivity.java')
           with open(loops_path) as f:
               lines = f.readlines()
 
           result = []
-          fixed_loops = 0
+          already_hoisted = set()
           for line in lines:
-              m = re.match(r'^(\s+)Exception (e\d+) = e;', line)
+              m = re.match(r'^(\s+)(e\d+) = e;', line)
               if m:
                   indent, var = m.group(1), m.group(2)
-                  # Revert to plain assignment — e is the catch parameter in scope
-                  result.append(f'{indent}{var} = e;\n')
-                  # Hoist declaration before the nearest preceding try { line
-                  for j in range(len(result) - 1, -1, -1):
-                      if re.search(r'\btry\s*\{', result[j]):
-                          result.insert(j, f'{indent}Exception {var} = null;\n')
-                          break
-                  fixed_loops += 1
+                  result.append(line)  # keep assignment as-is
+                  if var not in already_hoisted:
+                      # find nearest preceding 'try {' in result and insert before it
+                      for j in range(len(result) - 1, -1, -1):
+                          if re.search(r'\btry\s*\{', result[j]):
+                              result.insert(j, f'{indent}Exception {var} = null;\n')
+                              break
+                      already_hoisted.add(var)
               else:
                   result.append(line)
 
           with open(loops_path, 'w') as f:
               f.writelines(result)
-          print(f'LoopsActivity.java: hoisted {fixed_loops} exception declaration(s) before try block')
+          print(f'LoopsActivity.java: hoisted declarations for: {already_hoisted or "none"}')
 
           # ---------------------------------------------------------------
           # MainActivity.java
-          # Problem A: jadx uses bare 'e' (no digit) as a shared collector
-          # variable across multiple catch blocks but never declares it.
-          # Pattern:  catch (IOException e2) { e = e2; ... }
-          #           catch (Exception e3)   { e = e3; ... }
-          # Fix: declare inline at first assignment in each catch block.
+          # Problem A: bare 'e' (no digit) used as shared collector, undeclared.
+          #   catch (IOException e2) { e = e2; ... }
+          #   catch (Exception e3)   { e = e3; ... }
+          # Fix: declare inline in each catch block: 'Exception e = eN;'
           #
-          # Problem B: 'eN.printStackTrace()' where eN is the catch parameter
-          # of an INNER catch block, used inside an OUTER catch — jadx artifact.
-          # Fix: comment out (stack traces are debug-only, not needed to run).
+          # Problem B: orphaned 'eN.printStackTrace();' where eN is the param
+          # of an inner catch, referenced in an outer catch (out of scope).
+          # Fix: comment out (debug-only, not needed for app to function).
           # ---------------------------------------------------------------
           main_path = os.path.join(JAVA_DIR, 'MainActivity.java')
           with open(main_path) as f:
@@ -359,18 +363,17 @@ jobs:
           fixed_decl = 0
           fixed_orphan = 0
           for line in lines:
-              # Pattern A: '    e = eN;'  →  '    Exception e = eN;'
+              # Pattern A: '    e = eN;'  ->  '    Exception e = eN;'
               m = re.match(r'^(\s+)e = (e\d+);', line)
               if m:
                   result.append(f'{m.group(1)}Exception e = {m.group(2)};\n')
                   fixed_decl += 1
                   continue
 
-              # Pattern B: '    eN.printStackTrace();' as a standalone statement
-              # These are orphaned references to inner-catch parameters
+              # Pattern B: standalone 'eN.printStackTrace();'
               m2 = re.match(r'^(\s+)(e\d+)\.printStackTrace\(\);\s*$', line)
               if m2:
-                  result.append(f'{m2.group(1)}// {line.strip()} // jadx-out-of-scope-removed\n')
+                  result.append(f'{m2.group(1)}// {line.strip()} // jadx-out-of-scope\n')
                   fixed_orphan += 1
                   continue
 
@@ -378,7 +381,7 @@ jobs:
 
           with open(main_path, 'w') as f:
               f.writelines(result)
-          print(f'MainActivity.java: declared {fixed_decl} bare-e variable(s), removed {fixed_orphan} orphaned printStackTrace()')
+          print(f'MainActivity.java: declared {fixed_decl} bare-e var(s), commented {fixed_orphan} orphaned printStackTrace()')
 
           print('All exception variable fixes applied.')
           PYEOF
@@ -396,6 +399,4 @@ jobs:
 
       - name: Show build errors
         if: always()
-        run: |
-          echo "====== ERRORS ======"
-          grep 
+ 
