@@ -193,20 +193,16 @@ jobs:
           rm -f gradle_build/app/src/main/classes*.dex
           rm -f gradle_build/app/src/main/DebugProbesKt.bin
 
-      - name: Nuclear cleanup - delete all library resources
+      - name: Cleanup library resources (keep app drawables)
         run: |
-          rm -rf gradle_build/app/src/main/res/color/
+          # Delete broken Material3 color-v31 (Purple_800 error)
           rm -rf gradle_build/app/src/main/res/color-v31/
           rm -rf gradle_build/app/src/main/res/color-night/
+
+          # Delete all values/* and values-*/ (library translations + broken values.xml)
           find gradle_build/app/src/main/res -maxdepth 1 -type d \( -name "values" -o -name "values-*" \) -exec rm -rf {} + 2>/dev/null || true
-          rm -rf gradle_build/app/src/main/res/drawable/
-          rm -rf gradle_build/app/src/main/res/drawable-anydpi/
-          rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-hdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-mdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xhdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxhdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
+
+          # Delete library-only resource types (no app content here)
           rm -rf gradle_build/app/src/main/res/anim/
           rm -rf gradle_build/app/src/main/res/animator/
           rm -rf gradle_build/app/src/main/res/interpolator/
@@ -214,6 +210,15 @@ jobs:
           rm -rf gradle_build/app/src/main/res/drawable-watch/
           rm -rf gradle_build/app/src/main/res/layout-watch/
           rm -rf gradle_build/app/src/main/res/layout-v26/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-hdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-mdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xhdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxhdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-anydpi/
+          rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
+
+          # Delete library layouts from layout/ - keep only 10 app-specific layouts
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
@@ -226,8 +231,8 @@ jobs:
             ! -name "notification_template_part_chronometer.xml" \
             ! -name "notification_template_part_time.xml" \
             -delete 2>/dev/null || true
-          find gradle_build/app/src/main/res/layout-land -type f \( -name "abc_*.xml" -o -name "material_*.xml" -o -name "mtrl_*.xml" -o -name "design_*.xml" \) -delete 2>/dev/null || true
-          find gradle_build/app/src/main/res/layout-sw600dp -type f \( -name "abc_*.xml" -o -name "material_*.xml" -o -name "mtrl_*.xml" -o -name "design_*.xml" \) -delete 2>/dev/null || true
+
+          # Create minimal strings.xml (replacing deleted values/)
           mkdir -p gradle_build/app/src/main/res/values
           printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">Pramod Octapad Loops</string>\n</resources>\n' > gradle_build/app/src/main/res/values/strings.xml
 
