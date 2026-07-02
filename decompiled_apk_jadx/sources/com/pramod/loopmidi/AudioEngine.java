@@ -197,22 +197,80 @@ public class AudioEngine {
         }
     }
 
-    /* JADX WARN: Code restructure failed: missing block: B:34:0x00bb, code lost:
-        android.util.Log.e(com.pramod.loopmidi.AudioEngine.TAG, "Invalid WAV fmt chunk size");
-     */
-    /* JADX WARN: Code restructure failed: missing block: B:35:0x00c0, code lost:
+    private short[] decodePcmFromWav(byte[] wavData) {
+        if (wavData == null || wavData.length < 44) {
+            Log.e(TAG, "WAV data too short or null");
+            return null;
+        }
+        if (wavData[0] != 'R' || wavData[1] != 'I' || wavData[2] != 'F' || wavData[3] != 'F') {
+            Log.e(TAG, "Not a RIFF file");
+            return null;
+        }
+        if (wavData[8] != 'W' || wavData[9] != 'A' || wavData[10] != 'V' || wavData[11] != 'E') {
+            Log.e(TAG, "Not a WAVE file");
+            return null;
+        }
+        int offset = 12;
+        int channels = 1;
+        int bitsPerSample = 16;
+        int dataOffset = -1;
+        int dataSize = -1;
+        while (offset + 8 <= wavData.length) {
+            int chunkSize = ((wavData[offset + 4] & 0xFF))
+                         | ((wavData[offset + 5] & 0xFF) << 8)
+                         | ((wavData[offset + 6] & 0xFF) << 16)
+                         | ((wavData[offset + 7] & 0xFF) << 24);
+            if (wavData[offset] == 'f' && wavData[offset + 1] == 'm'
+                    && wavData[offset + 2] == 't' && wavData[offset + 3] == ' ') {
+                if (offset + 24 <= wavData.length) {
+                    channels      = ((wavData[offset + 10] & 0xFF)) | ((wavData[offset + 11] & 0xFF) << 8);
+                    bitsPerSample = ((wavData[offset + 22] & 0xFF)) | ((wavData[offset + 23] & 0xFF) << 8);
+                }
+            } else if (wavData[offset] == 'd' && wavData[offset + 1] == 'a'
+                    && wavData[offset + 2] == 't' && wavData[offset + 3] == 'a') {
+                dataOffset = offset + 8;
+                dataSize   = chunkSize;
+                break;
+            }
+            offset += 8 + chunkSize + (chunkSize % 2);
+        }
+        if (dataOffset < 0 || dataSize <= 0 || dataOffset + dataSize > wavData.length) {
+            Log.e(TAG, "No valid data chunk found in WAV");
+            return null;
+        }
+        if (channels < 1) channels = 1;
+        if (bitsPerSample == 16) {
+            int bytesPerFrame = 2 * channels;
+            int frames = dataSize / bytesPerFrame;
+            short[] result = new short[frames];
+            for (int i = 0; i < frames; i++) {
+                int sum = 0;
+                for (int ch = 0; ch < channels; ch++) {
+                    int p = dataOffset + i * bytesPerFrame + ch * 2;
+                    if (p + 1 < wavData.length) {
+                        sum += (short)(((wavData[p] & 0xFF)) | ((wavData[p + 1] & 0xFF) << 8));
+                    }
+                }
+                result[i] = (short)(sum / channels);
+            }
+            return result;
+        } else if (bitsPerSample == 8) {
+            int frames = dataSize / channels;
+            short[] result = new short[frames];
+            for (int i = 0; i < frames; i++) {
+                int sum = 0;
+                for (int ch = 0; ch < channels; ch++) {
+                    int p = dataOffset + i * channels + ch;
+                    if (p < wavData.length) {
+                        sum += ((wavData[p] & 0xFF) - 128) * 256;
+                    }
+                }
+                result[i] = (short)(sum / channels);
+            }
+            return result;
+        }
+        Log.e(TAG, "Unsupported bits per sample: " + bitsPerSample);
         return null;
-     */
-    /*
-        Code decompiled incorrectly, please refer to instructions dump.
-        To view partially-correct add '--show-bad-code' argument
-    */
-    private short[] decodePcmFromWav(byte[] r18) {
-        /*
-            Method dump skipped, instructions count: 394
-            To view this dump add '--comments-level debug' option
-        */
-        throw new UnsupportedOperationException("Method not decompiled: com.pramod.loopmidi.AudioEngine.decodePcmFromWav(byte[]):short[]");
     }
 
     private byte[] readAssetFileDescriptor(AssetFileDescriptor afd) throws Exception {
@@ -222,4 +280,4 @@ public class AudioEngine {
         is.close();
         return data;
     }
-}
+                }
