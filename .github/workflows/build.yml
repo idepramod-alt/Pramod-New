@@ -193,7 +193,7 @@ jobs:
           rm -f gradle_build/app/src/main/classes*.dex
           rm -f gradle_build/app/src/main/DebugProbesKt.bin
 
-      - name: Remove system resource folders from decompilation
+      - name: Remove system resource folders
         run: |
           rm -rf gradle_build/app/src/main/res/values-v31
           rm -rf gradle_build/app/src/main/res/color-v31
@@ -216,6 +216,12 @@ jobs:
           mkdir -p gradle_build/app/src/main/java/com/pramod/loopmidi
           find decompiled_apk_jadx/sources/com/pramod/loopmidi -name "*.java" ! -name "R.java" \
             -exec cp {} gradle_build/app/src/main/java/com/pramod/loopmidi/ \;
+
+      - name: Fix UByte.MAX_VALUE - not valid Java, replace with 255
+        run: |
+          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
+          sed -i 's/import kotlin\.UByte;//g' $JAVA_DIR/*.java
+          sed -i 's/UByte\.MAX_VALUE/255/g' $JAVA_DIR/*.java
 
       - name: Setup Gradle 8.9 wrapper
         working-directory: gradle_build
