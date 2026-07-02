@@ -58,9 +58,14 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
+              sourceSets {
+                  main {
+                      jniLibs.srcDirs = ['src/main/jniLibs']
+                  }
+              }
               packagingOptions {
                   resources {
-                      excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/NOTICE','META-INF/*.kotlin_module']
+                      excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/NOTICE','META-INF/*.kotlin_module','META-INF/*.version','**/*.kotlin_builtins','**/*.kotlin_metadata']
                   }
               }
           }
@@ -143,6 +148,25 @@ jobs:
           rm -rf gradle_build/app/src/main/res/color-v31
           rm -rf gradle_build/app/src/main/res/values-anydpi
           rm -rf gradle_build/app/src/main/res/values-anydpi-v24
+
+      - name: Fix native libs folder (lib -> jniLibs)
+        run: |
+          mkdir -p gradle_build/app/src/main/jniLibs
+          cp -r gradle_build/app/src/main/lib/* gradle_build/app/src/main/jniLibs/ 2>/dev/null || true
+          rm -rf gradle_build/app/src/main/lib
+
+      - name: Remove binary kotlin metadata from src/main/kotlin
+        run: |
+          rm -rf gradle_build/app/src/main/kotlin
+
+      - name: Remove META-INF from src/main
+        run: |
+          rm -rf gradle_build/app/src/main/META-INF
+
+      - name: Fix AndroidManifest.xml
+        run: |
+          sed -i 's/package="com.pramod.loopmidi"[[:space:]]*//' gradle_build/app/src/main/AndroidManifest.xml
+          sed -i '/android:extractNativeLibs/d' gradle_build/app/src/main/AndroidManifest.xml
 
       - name: Copy Java sources from decompiled
         run: |
