@@ -193,12 +193,30 @@ jobs:
           rm -f gradle_build/app/src/main/classes*.dex
           rm -f gradle_build/app/src/main/DebugProbesKt.bin
 
-      - name: Remove system resource folders
+      - name: Delete all decompiled library values resources
         run: |
-          rm -rf gradle_build/app/src/main/res/values-v31
-          rm -rf gradle_build/app/src/main/res/color-v31
-          rm -rf gradle_build/app/src/main/res/values-anydpi
-          rm -rf gradle_build/app/src/main/res/values-anydpi-v24
+          find gradle_build/app/src/main/res -maxdepth 1 -type d -name "values-*" -exec rm -rf {} + 2>/dev/null || true
+          rm -rf gradle_build/app/src/main/res/values/
+          rm -rf gradle_build/app/src/main/res/anim/
+          rm -rf gradle_build/app/src/main/res/animator/
+          rm -rf gradle_build/app/src/main/res/interpolator/
+          rm -rf gradle_build/app/src/main/res/color-night/
+          rm -rf gradle_build/app/src/main/res/drawable-watch/
+          rm -rf gradle_build/app/src/main/res/layout-watch/
+          rm -rf gradle_build/app/src/main/res/layout-v26/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-hdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-mdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xhdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxhdpi/
+          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
+          rm -rf gradle_build/app/src/main/res/xml/
+          mkdir -p gradle_build/app/src/main/res/values
+          cat > gradle_build/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Pramod Octapad Loops</string>
+          </resources>
+          EOF
 
       - name: Move native libs to jniLibs
         run: |
@@ -249,19 +267,15 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
         continue-on-error: true
 
-      - name: Show Java compilation errors
+      - name: Show errors from build log
         if: always()
         run: |
-          echo "====== JAVA ERRORS ======"
-          grep -n "error:" /tmp/build.log | head -80 || echo "(no 'error:' found)"
-          echo "====== RESOURCE ERRORS ======"
-          grep -n "ERROR:" /tmp/build.log | head -30 || echo "(none)"
-          echo "====== FAILED TASKS ======"
-          grep -n "FAILED\|Exception\|Cannot" /tmp/build.log | grep -v "at org\|at java\|at com.google\|at com.android" | head -40
+          echo "====== ERRORS ======"
+          grep -n "error:\|ERROR:\|FAILED\|Exception\|Cannot find" /tmp/build.log \
+            | grep -v "at org\.\|at java\.\|at com\.google\|at com\.android" | head -60
 
       - name: Fail build if unsuccessful
-        run: |
-          grep -q "BUILD SUCCESSFUL" /tmp/build.log || exit 1
+        run: grep -q "BUILD SUCCESSFUL" /tmp/build.log || exit 1
 
       - name: Upload APK
         if: success()
