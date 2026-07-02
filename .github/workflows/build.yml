@@ -199,6 +199,9 @@ jobs:
           rm -rf gradle_build/app/src/main/res/color-v31/
           rm -rf gradle_build/app/src/main/res/color-night/
 
+          # Delete layout-land (contains broken Material library landscape layouts)
+          rm -rf gradle_build/app/src/main/res/layout-land/
+
           # Delete all values/* and values-*/ (library translations + broken values.xml)
           find gradle_build/app/src/main/res -maxdepth 1 -type d \( -name "values" -o -name "values-*" \) -exec rm -rf {} + 2>/dev/null || true
 
