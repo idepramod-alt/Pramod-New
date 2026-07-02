@@ -195,17 +195,10 @@ jobs:
 
       - name: Cleanup library resources (keep app drawables)
         run: |
-          # Delete broken Material3 color-v31 (Purple_800 error)
           rm -rf gradle_build/app/src/main/res/color-v31/
           rm -rf gradle_build/app/src/main/res/color-night/
-
-          # Delete layout-land (contains broken Material library landscape layouts)
           rm -rf gradle_build/app/src/main/res/layout-land/
-
-          # Delete all values/* and values-*/ (library translations + broken values.xml)
           find gradle_build/app/src/main/res -maxdepth 1 -type d \( -name "values" -o -name "values-*" \) -exec rm -rf {} + 2>/dev/null || true
-
-          # Delete library-only resource types (no app content here)
           rm -rf gradle_build/app/src/main/res/anim/
           rm -rf gradle_build/app/src/main/res/animator/
           rm -rf gradle_build/app/src/main/res/interpolator/
@@ -220,8 +213,6 @@ jobs:
           rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
-
-          # Delete library layouts from layout/ - keep only 10 app-specific layouts
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
@@ -234,8 +225,6 @@ jobs:
             ! -name "notification_template_part_chronometer.xml" \
             ! -name "notification_template_part_time.xml" \
             -delete 2>/dev/null || true
-
-          # Create minimal strings.xml (replacing deleted values/)
           mkdir -p gradle_build/app/src/main/res/values
           printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">Pramod Octapad Loops</string>\n</resources>\n' > gradle_build/app/src/main/res/values/strings.xml
 
@@ -277,31 +266,128 @@ jobs:
           sed -i 's/import kotlin\.UByte;//g' $JAVA_DIR/*.java
           sed -i 's/UByte\.MAX_VALUE/255/g' $JAVA_DIR/*.java
 
-      - name: Setup Gradle 8.9 wrapper
-        working-directory: gradle_build
-        run: gradle wrapper --gradle-version=8.9
-
-      - name: Build Debug APK (capture full log)
-        working-directory: gradle_build
+      - name: Fix AudioEngine - rewrite broken decodePcmFromWav method
         run: |
-          set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
-        continue-on-error: true
+          python3 << 'PYEOF'
+          import re
 
-      - name: Show errors from build log
-        if: always()
+          filepath = "gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
+          with open(filepath, "r") as f:
+              content = f.read()
+
+          # The working Java WAV decoder to replace the broken jadx stub
+          new_method = '''    private short[] decodePcmFromWav(byte[] wavData) {
+              if (wavData == null || wavData.length < 44) {
+                  android.util.Log.e(TAG, "WAV data too short or null");
+                  return null;
+              }
+              // Validate RIFF header
+              if (wavData[0] != 'R' || wavData[1] != 'I' || wavData[2] != 'F' || wavData[3] != 'F') {
+                  android.util.Log.e(TAG, "Not a RIFF file");
+                  return null;
+              }
+              if (wavData[8] != 'W' || wavData[9] != 'A' || wavData[10] != 'V' || wavData[11] != 'E') {
+                  android.util.Log.e(TAG, "Not a WAVE file");
+                  return null;
+              }
+              // Parse chunks to find fmt and data
+              int offset = 12;
+              int channels = 1;
+              int bitsPerSample = 16;
+              int dataOffset = -1;
+              int dataSize = -1;
+              while (offset + 8 <= wavData.length) {
+                  int chunkSize = ((wavData[offset + 4] & 0xFF))
+                               | ((wavData[offset + 5] & 0xFF) << 8)
+                               | ((wavData[offset + 6] & 0xFF) << 16)
+                               | ((wavData[offset + 7] & 0xFF) << 24);
+                  if (wavData[offset] == 'f' && wavData[offset+1] == 'm'
+                          && wavData[offset+2] == 't' && wavData[offset+3] == ' ') {
+                      if (offset + 24 <= wavData.length) {
+                          channels      = ((wavData[offset + 10] & 0xFF)) | ((wavData[offset + 11] & 0xFF) << 8);
+                          bitsPerSample = ((wavData[offset + 22] & 0xFF)) | ((wavData[offset + 23] & 0xFF) << 8);
+                      }
+                  } else if (wavData[offset] == 'd' && wavData[offset+1] == 'a'
+                          && wavData[offset+2] == 't' && wavData[offset+3] == 'a') {
+                      dataOffset = offset + 8;
+                      dataSize   = chunkSize;
+                      break;
+                  }
+                  offset += 8 + chunkSize + (chunkSize % 2); // word-align
+              }
+              if (dataOffset < 0 || dataSize <= 0 || dataOffset + dataSize > wavData.length) {
+                  android.util.Log.e(TAG, "No valid data chunk found in WAV");
+                  return null;
+              }
+              if (channels < 1) channels = 1;
+              // Convert raw bytes to 16-bit PCM short[], mixing to mono
+              if (bitsPerSample == 16) {
+                  int bytesPerFrame = 2 * channels;
+                  int frames = dataSize / bytesPerFrame;
+                  short[] result = new short[frames];
+                  for (int i = 0; i < frames; i++) {
+                      int sum = 0;
+                      for (int ch = 0; ch < channels; ch++) {
+                          int p = dataOffset + i * bytesPerFrame + ch * 2;
+                          if (p + 1 < wavData.length) {
+                              sum += (short)(((wavData[p] & 0xFF)) | ((wavData[p + 1] & 0xFF) << 8));
+                          }
+                      }
+                      result[i] = (short)(sum / channels);
+                  }
+                  return result;
+              } else if (bitsPerSample == 8) {
+                  int frames = dataSize / channels;
+                  short[] result = new short[frames];
+                  for (int i = 0; i < frames; i++) {
+                      int sum = 0;
+                      for (int ch = 0; ch < channels; ch++) {
+                          int p = dataOffset + i * channels + ch;
+                          if (p < wavData.length) {
+                              sum += ((wavData[p] & 0xFF) - 128) * 256;
+                          }
+                      }
+                      result[i] = (short)(sum / channels);
+                  }
+                  return result;
+              }
+              android.util.Log.e(TAG, "Unsupported bits per sample: " + bitsPerSample);
+              return null;
+          }'''
+
+          # Replace the broken method (from its JADX WARN comment through the closing brace)
+          broken_pattern = re.compile(
+              r'/\* JADX WARN: Code restructure failed.*?throw new UnsupportedOperationException\("Method not decompiled.*?"\);\s*\}',
+              re.DOTALL
+          )
+
+          if broken_pattern.search(content):
+              content = broken_pattern.sub(new_method, content)
+              with open(filepath, "w") as f:
+                  f.write(content)
+              print("SUCCESS: decodePcmFromWav replaced with working WAV decoder")
+          else:
+              print("WARNING: broken pattern not found - check file manually")
+          PYEOF
+
+      - name: Fix jadx Java decompilation artifacts
         run: |
-          echo "====== ERRORS ======"
-          grep -n "error:\|ERROR:\|FAILED\|Cannot find" /tmp/build.log \
-            | grep -v "at org\.\|at java\.\|at com\.google\|at com\.android" | head -80
+          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
 
-      - name: Fail build if unsuccessful
-        run: grep -q "BUILD SUCCESSFUL" /tmp/build.log || exit 1
+          # Fix 1: Remove (this) argument from anonymous class/interface instantiations
+          sed -i 's/\(new [A-Za-z$.]*\)(this) {\( *\/\/ from class:\)/\1() {\2/g' $JAVA_DIR/*.java
 
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pramod-Octapad-Loops-Debug
-          path: gradle_build/app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          # Fix 2: Remove invalid outer-class self-assignment
+          sed -i '/this\.this\$0 = this;/d' $JAVA_DIR/*.java
+          sed -i '/this\.this\$1 = this;/d' $JAVA_DIR/*.java
+
+          # Fix 3: Remove synthetic AnonymousClassXX field declarations
+          sed -i '/final \/\* synthetic \*\/ AnonymousClass[0-9]* this\$[0-9]*;/d' $JAVA_DIR/*.java
+
+          # Fix 4: ConstraintLayout.LayoutParams.Table private access
+          # jadx puts the int value in the comment - use it directly
+          sed -i 's/ConstraintLayout\.LayoutParams\.Table\.[A-Z_]* \/\* \([0-9]*\) \*\//\1/g' $JAVA_DIR/*.java
+
+          # Fix 5: Private field access in LoopsActivity used from MainActivity
+          # In original APK these were package-private; jadx wrongly added 'private'
+     
