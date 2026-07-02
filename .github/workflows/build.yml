@@ -217,7 +217,22 @@ jobs:
           find decompiled_apk_jadx/sources/com/pramod/loopmidi -name "*.java" ! -name "R.java" \
             -exec cp {} gradle_build/app/src/main/java/com/pramod/loopmidi/ \;
 
-      - name: Fix UByte.MAX_VALUE - not valid Java, replace with 255
+      - name: Create ActivationActivity stub
+        run: |
+          cat > gradle_build/app/src/main/java/com/pramod/loopmidi/ActivationActivity.java << 'EOF'
+          package com.pramod.loopmidi;
+          import android.app.Activity;
+          import android.os.Bundle;
+          public class ActivationActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  finish();
+              }
+          }
+          EOF
+
+      - name: Fix UByte.MAX_VALUE
         run: |
           JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
           sed -i 's/import kotlin\.UByte;//g' $JAVA_DIR/*.java
@@ -227,11 +242,29 @@ jobs:
         working-directory: gradle_build
         run: gradle wrapper --gradle-version=8.9
 
-      - name: Build Debug APK
+      - name: Build Debug APK (capture full log)
         working-directory: gradle_build
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+        continue-on-error: true
+
+      - name: Show Java compilation errors
+        if: always()
+        run: |
+          echo "====== JAVA ERRORS ======"
+          grep -n "error:" /tmp/build.log | head -80 || echo "(no 'error:' found)"
+          echo "====== RESOURCE ERRORS ======"
+          grep -n "ERROR:" /tmp/build.log | head -30 || echo "(none)"
+          echo "====== FAILED TASKS ======"
+          grep -n "FAILED\|Exception\|Cannot" /tmp/build.log | grep -v "at org\|at java\|at com.google\|at com.android" | head -40
+
+      - name: Fail build if unsuccessful
+        run: |
+          grep -q "BUILD SUCCESSFUL" /tmp/build.log || exit 1
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Pramod-Octapad-Loops-Debug
