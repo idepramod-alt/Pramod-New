@@ -100,6 +100,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private AudioEngine audioEngine;
     private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
     private boolean[] loopPlaying = new boolean[8];
+    // Load-generation token: incremented on every kit/channel change.
+    // Background threads capture the value at start and discard results if it changed.
+    private volatile int loadGeneration = 0;
+    // Per-pad flag: true while a background decode is in progress for that pad.
+    // Prevents duplicate decode threads when user taps a not-yet-loaded pad rapidly.
+    private boolean[] padLoadingInFlight = new boolean[8];
 
     public static void callKitChange(LoopsActivity loopsActivity, int i) {
         loopsActivity.handleProgramChange(i);
@@ -130,13 +136,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         AudioEngine.SampleData sampleData = this.loopSamples[index];
         if (sampleData == null || !sampleData.loaded) {
-            // Sample not yet decoded — load in background so the UI thread is never blocked.
+            // Prevent duplicate decode threads: if a load is already in progress for this
+            // pad, ignore the tap — the completion handler will replay it.
+            if (this.padLoadingInFlight[index]) return;
+            this.padLoadingInFlight[index] = true;
             // Show status immediately so the user knows something is happening.
             this.txtLoopStatus.setText("LOADING LOOP " + (index + 1) + "...");
-            final boolean wantsLoop = !this.isOneShotMode;
+            // Snapshot engine — safe against onDestroy races
+            final AudioEngine engine = this.audioEngine;
+            if (engine == null) { this.padLoadingInFlight[index] = false; return; }
             new Thread(() -> {
                 final boolean ok = prepareLoopSample(index);
                 new Handler(Looper.getMainLooper()).post(() -> {
+                    this.padLoadingInFlight[index] = false;
                     if (!ok) {
                         this.txtLoopStatus.setText("ERROR LOADING LOOP " + (index + 1));
                         return;
@@ -262,6 +274,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void loadPresetFromAssets(final int i) {
+        // Bump load generation — any in-flight background thread from a prior kit
+        // change will see a different token and discard its stale results.
+        final int myGeneration = ++this.loadGeneration;
         // Stop currently playing loops on UI thread immediately (zero-latency feedback)
         for (int i2 = 0; i2 < 8; i2++) {
             if (this.loopPlaying[i2]) {
@@ -271,6 +286,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.loopSamples[i2] = null;
             this.loopUris[i2] = null;
         }
+        // Snapshot engine reference — engine can become null in onDestroy
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
         // Decode audio on a background thread — MediaCodec decoding on the UI thread
         // adds 100-500 ms of jank before the first tap can play. Moving it off-thread
         // means pads are ready for playback as soon as loading finishes, with zero UI freeze.
@@ -279,12 +297,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             for (int i2 = 0; i2 < 8; i2++) {
                 try {
                     String assetPath = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
-                    loaded[i2] = this.audioEngine.loadWavFromAsset(i2, assetPath);
+                    loaded[i2] = engine.loadWavFromAsset(i2, assetPath);
                 } catch (Exception e) {
                     loaded[i2] = null;
                 }
             }
             new Handler(Looper.getMainLooper()).post(() -> {
+                // Discard if user switched kit/channel while we were loading
+                if (myGeneration != this.loadGeneration) return;
                 for (int i2 = 0; i2 < 8; i2++) {
                     this.loopSamples[i2] = loaded[i2];
                 }
@@ -1185,6 +1205,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (textView != null) {
             textView.setText("TAP A PAD TO PLAY/STOP LOOP");
         }
+        // Bump generation — stale background threads will discard their results
+        final int myGeneration = ++this.loadGeneration;
         // Resolve URIs on the UI thread (cheap string parsing only)
         final Uri[] urisToLoad = new Uri[8];
         for (int i2 = 0; i2 < 8; i2++) {
@@ -1194,6 +1216,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 urisToLoad[i2]    = this.loopUris[i2];
             }
         }
+        // Snapshot engine reference — safe against onDestroy races
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
         // Decode audio on a background thread — avoids blocking the UI thread for
         // potentially hundreds of milliseconds while MediaCodec decodes each file.
         new Thread(() -> {
@@ -1201,7 +1226,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             for (int i2 = 0; i2 < 8; i2++) {
                 if (urisToLoad[i2] != null) {
                     try {
-                        loaded[i2] = this.audioEngine.loadWavFromUri(i2, urisToLoad[i2]);
+                        loaded[i2] = engine.loadWavFromUri(i2, urisToLoad[i2]);
                     } catch (Exception e) {
                         e.printStackTrace();
                         loaded[i2] = null;
@@ -1209,6 +1234,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             }
             new Handler(Looper.getMainLooper()).post(() -> {
+                // Discard if user switched loop channel while we were decoding
+                if (myGeneration != this.loadGeneration) return;
                 for (int i2 = 0; i2 < 8; i2++) {
                     this.loopSamples[i2] = loaded[i2];
                     if (loaded[i2] != null && loaded[i2].loaded) {
