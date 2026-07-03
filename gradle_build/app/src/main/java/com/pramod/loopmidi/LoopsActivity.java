@@ -130,11 +130,22 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         AudioEngine.SampleData sampleData = this.loopSamples[index];
         if (sampleData == null || !sampleData.loaded) {
-            if (!prepareLoopSample(index)) {
-                this.txtLoopStatus.setText("ERROR LOADING LOOP " + (index + 1));
-                return;
-            }
-            sampleData = this.loopSamples[index];
+            // Sample not yet decoded — load in background so the UI thread is never blocked.
+            // Show status immediately so the user knows something is happening.
+            this.txtLoopStatus.setText("LOADING LOOP " + (index + 1) + "...");
+            final boolean wantsLoop = !this.isOneShotMode;
+            new Thread(() -> {
+                final boolean ok = prepareLoopSample(index);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (!ok) {
+                        this.txtLoopStatus.setText("ERROR LOADING LOOP " + (index + 1));
+                        return;
+                    }
+                    // Replay the tap now that the sample is ready
+                    toggleLoop(index);
+                });
+            }).start();
+            return;
         }
         if (this.isOneShotMode) {
             // ONE-SHOT FIX: Always play fresh on each tap. Never set loopPlaying=true for one-shot.
@@ -250,21 +261,35 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
-    public void loadPresetFromAssets(int i) {
+    public void loadPresetFromAssets(final int i) {
+        // Stop currently playing loops on UI thread immediately (zero-latency feedback)
         for (int i2 = 0; i2 < 8; i2++) {
             if (this.loopPlaying[i2]) {
                 this.audioEngine.stopPad(i2);
                 this.loopPlaying[i2] = false;
             }
             this.loopSamples[i2] = null;
-            try {
-                String assetPath = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
-                AudioEngine.SampleData sampleData = this.audioEngine.loadWavFromAsset(i2, assetPath);
-                this.loopSamples[i2] = sampleData;
-                this.loopUris[i2] = null;
-            } catch (Exception e) {
-            }
+            this.loopUris[i2] = null;
         }
+        // Decode audio on a background thread — MediaCodec decoding on the UI thread
+        // adds 100-500 ms of jank before the first tap can play. Moving it off-thread
+        // means pads are ready for playback as soon as loading finishes, with zero UI freeze.
+        new Thread(() -> {
+            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[8];
+            for (int i2 = 0; i2 < 8; i2++) {
+                try {
+                    String assetPath = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
+                    loaded[i2] = this.audioEngine.loadWavFromAsset(i2, assetPath);
+                } catch (Exception e) {
+                    loaded[i2] = null;
+                }
+            }
+            new Handler(Looper.getMainLooper()).post(() -> {
+                for (int i2 = 0; i2 < 8; i2++) {
+                    this.loopSamples[i2] = loaded[i2];
+                }
+            });
+        }).start();
     }
 
     @Override // android.app.Activity
@@ -1160,22 +1185,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (textView != null) {
             textView.setText("TAP A PAD TO PLAY/STOP LOOP");
         }
+        // Resolve URIs on the UI thread (cheap string parsing only)
+        final Uri[] urisToLoad = new Uri[8];
         for (int i2 = 0; i2 < 8; i2++) {
             String uriStr = this.prefs.getString("loop_uri_ch_" + this.loopChannelIndex + "_" + i2, null);
             if (uriStr != null) {
                 this.loopUris[i2] = Uri.parse(uriStr);
-                try {
-                    this.loopSamples[i2] = this.audioEngine.loadWavFromUri(i2, this.loopUris[i2]);
-                    if (this.loopSamples[i2] != null && this.loopSamples[i2].loaded) {
-                        preloadLoop(i2);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    this.loopUris[i2] = null;
-                    this.loopSamples[i2] = null;
-                }
+                urisToLoad[i2]    = this.loopUris[i2];
             }
         }
+        // Decode audio on a background thread — avoids blocking the UI thread for
+        // potentially hundreds of milliseconds while MediaCodec decodes each file.
+        new Thread(() -> {
+            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[8];
+            for (int i2 = 0; i2 < 8; i2++) {
+                if (urisToLoad[i2] != null) {
+                    try {
+                        loaded[i2] = this.audioEngine.loadWavFromUri(i2, urisToLoad[i2]);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        loaded[i2] = null;
+                    }
+                }
+            }
+            new Handler(Looper.getMainLooper()).post(() -> {
+                for (int i2 = 0; i2 < 8; i2++) {
+                    this.loopSamples[i2] = loaded[i2];
+                    if (loaded[i2] != null && loaded[i2].loaded) {
+                        preloadLoop(i2);
+                    }
+                }
+            });
+        }).start();
     }
 
     @Override // android.app.Activity, android.view.Window.Callback
