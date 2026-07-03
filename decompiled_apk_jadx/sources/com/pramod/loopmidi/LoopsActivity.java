@@ -1003,7 +1003,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
-    public void loadLoopFromFolder(Uri folderUri) throws IOException {
+    public void loadLoopFromFolder(Uri folderUri) {
         DocumentFile loopFolder = null;
         try {
             loopFolder = DocumentFile.fromTreeUri(this, folderUri);
@@ -1076,26 +1076,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     e5.printStackTrace();
                     return;
                 }
-                if (jsonData.has("speed")) {
-                    try {
+                try {
+                    if (jsonData.has("speed")) {
                         this.currentSpeed = (float) jsonData.getDouble("speed");
-                    } catch (Exception e6) {
                     }
-                }
-                if (jsonData.has("pitch")) {
-                    this.currentPitch = (float) jsonData.getDouble("pitch");
-                }
-                if (jsonData.has("masterVolume")) {
-                    this.masterVolume = (float) jsonData.getDouble("masterVolume");
-                }
-                if (jsonData.has("reverbLevel")) {
-                    this.reverbLevel = jsonData.getInt("reverbLevel");
-                }
-                if (jsonData.has("isMultiMode")) {
-                    this.isMultiMode = jsonData.getBoolean("isMultiMode");
-                }
-                if (jsonData.has("isOneShotMode")) {
-                    this.isOneShotMode = jsonData.getBoolean("isOneShotMode");
+                    if (jsonData.has("pitch")) {
+                        this.currentPitch = (float) jsonData.getDouble("pitch");
+                    }
+                    if (jsonData.has("masterVolume")) {
+                        this.masterVolume = (float) jsonData.getDouble("masterVolume");
+                    }
+                    if (jsonData.has("reverbLevel")) {
+                        this.reverbLevel = jsonData.getInt("reverbLevel");
+                    }
+                    if (jsonData.has("isMultiMode")) {
+                        this.isMultiMode = jsonData.getBoolean("isMultiMode");
+                    }
+                    if (jsonData.has("isOneShotMode")) {
+                        this.isOneShotMode = jsonData.getBoolean("isOneShotMode");
+                    }
+                } catch (Exception e6) {
+                    e6.printStackTrace();
                 }
             }
         }
