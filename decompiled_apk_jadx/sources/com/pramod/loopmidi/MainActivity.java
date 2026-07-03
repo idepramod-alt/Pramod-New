@@ -911,23 +911,18 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
             }
         } else {
+            int i = iArr[toPad];
             try {
-                int i = iArr[toPad];
-                try {
-                    if (i == 0) {
-                        this.samples[toPad] = null;
-                    } else {
-                        this.samples[toPad] = this.audioEngine.loadRawSound(toPad, i);
-                    }
-                } catch (IOException e2) {
-                    e = e2;
-                    Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
+                if (i == 0) {
                     this.samples[toPad] = null;
-                    saveKitToMemory(this.kitIndex);
-                    Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
+                } else {
+                    this.samples[toPad] = this.audioEngine.loadRawSound(toPad, i);
                 }
-            } catch (IOException e3) {
-                e = e3;
+            } catch (IOException e2) {
+                Toast.makeText(this, "Error copying sound: " + e2.getMessage(), 0).show();
+                this.samples[toPad] = null;
+                saveKitToMemory(this.kitIndex);
+                Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
             }
         }
         saveKitToMemory(this.kitIndex);
@@ -983,11 +978,7 @@ public class MainActivity extends Activity {
         int tempChoke = fArr7[padA];
         fArr7[padA] = fArr7[padB];
         fArr7[padB] = tempChoke;
-        try {
-            uri = uriArr[padA];
-        } catch (IOException e) {
-            e = e;
-        }
+        uri = uriArr[padA];
         try {
             if (uri != null) {
                 this.samples[padA] = this.audioEngine.loadWavFromUri(padA, uri);
@@ -1201,10 +1192,15 @@ public class MainActivity extends Activity {
             } else if (rawResId != 0) {
                 this.selectedWavUris[i] = null;
                 this.selectedRawResIds[i] = rawResId;
-                this.samples[i] = this.audioEngine.loadRawSound(i, rawResId);
-                AudioEngine.SampleData sampleData2 = this.samples[i];
-                if (sampleData2 != null) {
-                    this.audioEngine.preloadSample(sampleData2);
+                try {
+                    this.samples[i] = this.audioEngine.loadRawSound(i, rawResId);
+                    AudioEngine.SampleData sampleData2 = this.samples[i];
+                    if (sampleData2 != null) {
+                        this.audioEngine.preloadSample(sampleData2);
+                    }
+                } catch (IOException e2) {
+                    this.samples[i] = null;
+                    e2.printStackTrace();
                 }
             } else {
                 this.selectedWavUris[i] = null;
@@ -1213,10 +1209,15 @@ public class MainActivity extends Activity {
                 } else {
                     this.selectedRawResIds[i] = this.presetKits[0][i];
                 }
-                this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
-                AudioEngine.SampleData sampleData3 = this.samples[i];
-                if (sampleData3 != null) {
-                    this.audioEngine.preloadSample(sampleData3);
+                try {
+                    this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
+                    AudioEngine.SampleData sampleData3 = this.samples[i];
+                    if (sampleData3 != null) {
+                        this.audioEngine.preloadSample(sampleData3);
+                    }
+                } catch (IOException e3) {
+                    this.samples[i] = null;
+                    e3.printStackTrace();
                 }
             }
         }
@@ -1230,27 +1231,15 @@ public class MainActivity extends Activity {
         this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));
     }
 
-    public void loadKitFromFolder(Uri folderUri) throws IOException {
-        int i;
-        String folderName;
-        DocumentFile dataFile;
-        DocumentFile kitFolder;
-        JSONArray dlyLArray;
-        JSONArray eqHArray;
-        DocumentFile kitFolder2;
+    public void loadKitFromFolder(Uri folderUri) {
         try {
-            DocumentFile kitFolder3 = DocumentFile.fromTreeUri(this, folderUri);
-            if (kitFolder3 == null) {
+            DocumentFile kitFolder = DocumentFile.fromTreeUri(this, folderUri);
+            if (kitFolder == null) {
                 Toast.makeText(this, "Folder not found!", 0).show();
                 return;
             }
-            int i2 = 0;
-            while (true) {
-                i = 8;
-                if (i2 >= 8) {
-                    break;
-                }
-                DocumentFile wav = kitFolder3.findFile(KitManager.DEFAULT_WAV_NAMES[i2]);
+            for (int i2 = 0; i2 < 8; i2++) {
+                DocumentFile wav = kitFolder.findFile(KitManager.DEFAULT_WAV_NAMES[i2]);
                 if (wav != null) {
                     this.selectedWavUris[i2] = wav.getUri();
                     this.selectedRawResIds[i2] = 0;
@@ -1270,156 +1259,110 @@ public class MainActivity extends Activity {
                         this.audioEngine.preloadSample(sampleData2);
                     }
                 }
-                i2++;
             }
-            String folderName2 = kitFolder3.getName();
-            if (folderName2 != null) {
-                String strReplace = folderName2.replace(".mcn", "");
+            String folderName = kitFolder.getName();
+            if (folderName != null) {
+                String strReplace = folderName.replace(".mcn", "");
                 this.currentKitName = strReplace;
                 this.txtKitName.setText(strReplace);
             }
-            DocumentFile dataFile2 = kitFolder3.findFile("kit_data.json");
-            if (dataFile2 != null) {
-                Exception lastException = null;
+            DocumentFile dataFile = kitFolder.findFile("kit_data.json");
+            if (dataFile != null) {
                 InputStream is = null;
+                Exception lastException = null;
                 try {
-                    is = getContentResolver().openInputStream(dataFile2.getUri());
+                    is = getContentResolver().openInputStream(dataFile.getUri());
                 } catch (Exception e) {
                     lastException = e;
                 }
                 if (is != null) {
-                    BufferedReader reader2 = new BufferedReader(new InputStreamReader(is));
                     StringBuilder sb2 = new StringBuilder();
-                    while (true) {
-                        String line = reader2.readLine();
-                        if (line == null) {
-                            break;
-                        }
-                        DocumentFile kitFolder4 = kitFolder3;
-                        String folderName3 = folderName2;
-                        DocumentFile dataFile3 = dataFile2;
-                        try {
-                            sb2.append(line);
-                        } catch (Exception e2) {
-                            lastException = e2;
-                        }
-                        if (lastException != null) {
-                            lastException.printStackTrace();
-                        }
-                        dataFile2 = dataFile3;
-                        kitFolder3 = kitFolder4;
-                        folderName2 = folderName3;
-                        i = 8;
-                    }
-                    is.close();
-                    JSONObject jsonData = new JSONObject(sb2.toString());
-                    JSONArray volArray = jsonData.optJSONArray("volume");
-                    JSONArray pitchArray = jsonData.optJSONArray("pitch");
-                    JSONArray dlyOnArray = jsonData.optJSONArray("delayOn");
-                    JSONArray dlyTArray = jsonData.optJSONArray("delayTime");
-                    JSONArray dlyLArray2 = jsonData.optJSONArray("delayLevel");
-                    JSONArray dlyLArray3 = jsonData.optJSONArray("eqHigh");
-                    JSONArray eqHArray2 = jsonData.optJSONArray("eqMid");
-                    JSONArray eqLArray = jsonData.optJSONArray("eqLow");
                     try {
-                        JSONArray chokeArray = jsonData.optJSONArray("chokeGroup");
-                        int i3 = 0;
-                        while (i3 < i) {
-                            if (volArray != null) {
-                                try {
-                                    folderName = folderName2;
+                        BufferedReader reader2 = new BufferedReader(new InputStreamReader(is));
+                        String line;
+                        while ((line = reader2.readLine()) != null) {
+                            sb2.append(line);
+                        }
+                    } catch (Exception e2) {
+                        lastException = e2;
+                    }
+                    try {
+                        is.close();
+                    } catch (Exception ignoredClose) {
+                    }
+                    if (lastException != null) {
+                        lastException.printStackTrace();
+                    } else {
+                        try {
+                            JSONObject jsonData = new JSONObject(sb2.toString());
+                            JSONArray volArray = jsonData.optJSONArray("volume");
+                            JSONArray pitchArray = jsonData.optJSONArray("pitch");
+                            JSONArray dlyOnArray = jsonData.optJSONArray("delayOn");
+                            JSONArray dlyTArray = jsonData.optJSONArray("delayTime");
+                            JSONArray dlyLArray = jsonData.optJSONArray("delayLevel");
+                            JSONArray eqHArray = jsonData.optJSONArray("eqHigh");
+                            JSONArray eqMArray = jsonData.optJSONArray("eqMid");
+                            JSONArray eqLArray = jsonData.optJSONArray("eqLow");
+                            JSONArray chokeArray = jsonData.optJSONArray("chokeGroup");
+                            for (int i3 = 0; i3 < 8; i3++) {
+                                if (volArray != null) {
                                     try {
                                         this.padVolume[i3] = (float) volArray.getDouble(i3);
                                     } catch (Exception e3) {
                                     }
-                                } catch (Exception e4) {
-                                    folderName = folderName2;
                                 }
-                            } else {
-                                folderName = folderName2;
-                            }
-                            if (pitchArray != null) {
-                                try {
-                                    this.padPitch[i3] = (float) pitchArray.getDouble(i3);
-                                } catch (Exception e5) {
-                                }
-                            }
-                            if (dlyOnArray != null) {
-                                this.padDelayOn[i3] = dlyOnArray.getBoolean(i3);
-                            }
-                            if (dlyTArray != null) {
-                                this.padDelayTime[i3] = (float) dlyTArray.getDouble(i3);
-                            }
-                            JSONArray dlyLArray4 = dlyLArray2;
-                            if (dlyLArray4 != null) {
-                                try {
-                                    dataFile = dataFile2;
+                                if (pitchArray != null) {
                                     try {
-                                        this.padDelayLevel[i3] = (float) dlyLArray4.getDouble(i3);
+                                        this.padPitch[i3] = (float) pitchArray.getDouble(i3);
+                                    } catch (Exception e4) {
+                                    }
+                                }
+                                if (dlyOnArray != null) {
+                                    try {
+                                        this.padDelayOn[i3] = dlyOnArray.getBoolean(i3);
+                                    } catch (Exception e5) {
+                                    }
+                                }
+                                if (dlyTArray != null) {
+                                    try {
+                                        this.padDelayTime[i3] = (float) dlyTArray.getDouble(i3);
                                     } catch (Exception e6) {
                                     }
-                                } catch (Exception e7) {
                                 }
-                            } else {
-                                dataFile = dataFile2;
-                            }
-                            JSONArray eqHArray3 = dlyLArray3;
-                            if (eqHArray3 != null) {
-                                try {
-                                    kitFolder = kitFolder3;
-                                    dlyLArray = dlyLArray4;
+                                if (dlyLArray != null) {
                                     try {
-                                        this.padEqHigh[i3] = (float) eqHArray3.getDouble(i3);
+                                        this.padDelayLevel[i3] = (float) dlyLArray.getDouble(i3);
+                                    } catch (Exception e7) {
+                                    }
+                                }
+                                if (eqHArray != null) {
+                                    try {
+                                        this.padEqHigh[i3] = (float) eqHArray.getDouble(i3);
                                     } catch (Exception e8) {
                                     }
-                                } catch (Exception e9) {
                                 }
-                            } else {
-                                kitFolder = kitFolder3;
-                                dlyLArray = dlyLArray4;
-                            }
-                            JSONArray eqMArray = eqHArray2;
-                            if (eqMArray != null) {
-                                try {
-                                    eqHArray = eqHArray3;
+                                if (eqMArray != null) {
                                     try {
                                         this.padEqMid[i3] = (float) eqMArray.getDouble(i3);
+                                    } catch (Exception e9) {
+                                    }
+                                }
+                                if (eqLArray != null) {
+                                    try {
+                                        this.padEqLow[i3] = (float) eqLArray.getDouble(i3);
                                     } catch (Exception e10) {
                                     }
-                                } catch (Exception e11) {
                                 }
-                            } else {
-                                eqHArray = eqHArray3;
-                            }
-                            JSONArray eqLArray2 = eqLArray;
-                            if (eqLArray2 != null) {
-                                try {
-                                    kitFolder2 = kitFolder;
+                                if (chokeArray != null) {
                                     try {
-                                        this.padEqLow[i3] = (float) eqLArray2.getDouble(i3);
-                                    } catch (Exception e12) {
+                                        this.padChokeGroup[i3] = chokeArray.getInt(i3);
+                                    } catch (Exception e11) {
                                     }
-                                } catch (Exception e13) {
                                 }
-                            } else {
-                                kitFolder2 = kitFolder;
                             }
-                            JSONArray chokeArray2 = chokeArray;
-                            if (chokeArray2 != null) {
-                                this.padChokeGroup[i3] = chokeArray2.getInt(i3);
-                            }
-                            i3++;
-                            chokeArray = chokeArray2;
-                            dataFile2 = dataFile;
-                            dlyLArray2 = dlyLArray;
-                            dlyLArray3 = eqHArray;
-                            folderName2 = folderName;
-                            eqHArray2 = eqMArray;
-                            kitFolder3 = kitFolder2;
-                            eqLArray = eqLArray2;
-                            i = 8;
+                        } catch (Exception e12) {
+                            e12.printStackTrace();
                         }
-                    } catch (Exception e14) {
                     }
                 }
             }
@@ -1433,57 +1376,47 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void saveKitToFolder(Uri folderUri) throws JSONException, IOException {
-        DocumentFile root;
-        DocumentFile dataFile;
-        JSONArray eqMArray;
-        JSONArray chokeArray;
-        int i2;
-        JSONArray eqLArray;
-        DocumentFile root2;
+    private void saveKitToFolder(Uri folderUri) {
         try {
-            DocumentFile root3 = DocumentFile.fromTreeUri(this, folderUri);
-            if (root3 == null) {
+            DocumentFile root = DocumentFile.fromTreeUri(this, folderUri);
+            if (root == null) {
                 Toast.makeText(this, "Folder access error!", 0).show();
                 return;
             }
-            DocumentFile kitFolder = root3.findFile(this.currentKitName + ".mcn");
+            DocumentFile kitFolder = root.findFile(this.currentKitName + ".mcn");
             if (kitFolder == null) {
-                kitFolder = root3.createDirectory(this.currentKitName + ".mcn");
+                kitFolder = root.createDirectory(this.currentKitName + ".mcn");
             }
             if (kitFolder == null) {
                 Toast.makeText(this, "Cannot create kit folder!", 0).show();
                 return;
             }
-            int i22 = 0;
-            while (i22 < 8) {
-                int i23 = i22;
-                if (this.selectedWavUris[i23] != null || this.selectedRawResIds[i23] != 0) {
-                    DocumentFile old = kitFolder.findFile(KitManager.DEFAULT_WAV_NAMES[i23]);
+            for (int i22 = 0; i22 < 8; i22++) {
+                if (this.selectedWavUris[i22] != null || this.selectedRawResIds[i22] != 0) {
+                    DocumentFile old = kitFolder.findFile(KitManager.DEFAULT_WAV_NAMES[i22]);
                     if (old != null) {
                         old.delete();
                     }
-                    DocumentFile dest = kitFolder.createFile("audio/wav", KitManager.DEFAULT_WAV_NAMES[i23]);
+                    DocumentFile dest = kitFolder.createFile("audio/wav", KitManager.DEFAULT_WAV_NAMES[i22]);
                     if (dest != null) {
-                        Uri uri = this.selectedWavUris[i23];
+                        Uri uri = this.selectedWavUris[i22];
                         if (uri != null) {
                             FileUtil.copyUriToUri(this, uri, dest.getUri());
                         } else {
-                            int i3 = this.selectedRawResIds[i23];
+                            int i3 = this.selectedRawResIds[i22];
                             if (i3 != 0) {
                                 FileUtil.copyRawToUri(this, i3, dest.getUri());
                             }
                         }
                     }
                 }
-                i22 = i23 + 1;
             }
-            DocumentFile dataFile2 = kitFolder.findFile("kit_data.json");
+            DocumentFile dataFile = kitFolder.findFile("kit_data.json");
+            if (dataFile != null) {
+                dataFile.delete();
+            }
+            DocumentFile dataFile2 = kitFolder.createFile("application/json", "kit_data.json");
             if (dataFile2 != null) {
-                dataFile2.delete();
-            }
-            DocumentFile dataFile22 = kitFolder.createFile("application/json", "kit_data.json");
-            if (dataFile22 != null) {
                 try {
                     JSONObject jsonData = new JSONObject();
                     JSONArray volArray = new JSONArray();
@@ -1492,115 +1425,44 @@ public class MainActivity extends Activity {
                     JSONArray dlyTArray = new JSONArray();
                     JSONArray dlyLArray = new JSONArray();
                     JSONArray eqHArray = new JSONArray();
-                    JSONArray eqMArray2 = new JSONArray();
-                    JSONArray eqLArray2 = new JSONArray();
-                    JSONArray chokeArray2 = new JSONArray();
-                    int i = 8;
-                    DocumentFile kitFolder2 = kitFolder;
-                    DocumentFile kitFolder3 = root3;
-                    int i4 = 0;
-                    while (i4 < i) {
-                        DocumentFile root22 = kitFolder3;
-                        DocumentFile kitFolder22 = kitFolder2;
-                        try {
-                            root = kitFolder3;
-                            dataFile = dataFile2;
-                            try {
-                                volArray.put(this.padVolume[i4]);
-                                pitchArray.put(this.padPitch[i4]);
-                                dlyOnArray.put(this.padDelayOn[i4]);
-                                dlyTArray.put(this.padDelayTime[i4]);
-                                dlyLArray.put(this.padDelayLevel[i4]);
-                                eqHArray.put(this.padEqHigh[i4]);
-                                eqMArray = eqMArray2;
-                                try {
-                                    eqMArray.put(this.padEqMid[i4]);
-                                    i2 = i22;
-                                    eqLArray = eqLArray2;
-                                    try {
-                                        eqLArray.put(this.padEqLow[i4]);
-                                        chokeArray = chokeArray2;
-                                    } catch (Exception e) {
-                                        e = e;
-                                        chokeArray = chokeArray2;
-                                    }
-                                } catch (Exception e2) {
-                                    e = e2;
-                                    i2 = i22;
-                                    eqLArray = eqLArray2;
-                                    chokeArray = chokeArray2;
-                                }
-                                try {
-                                    chokeArray.put(this.padChokeGroup[i4]);
-                                    i4++;
-                                    root2 = root22;
-                                    kitFolder2 = kitFolder22;
-                                } catch (Exception e3) {
-                                    e = e3;
-                                    try {
-                                        e.printStackTrace();
-                                        Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
-                                        root2 = root;
-                                        eqLArray2 = eqLArray;
-                                        chokeArray2 = chokeArray;
-                                        i22 = i2;
-                                        kitFolder3 = root2;
-                                        eqMArray2 = eqMArray;
-                                        i = 8;
-                                        dataFile2 = dataFile;
-                                    } catch (Exception e4) {
-                                        e2 = e4;
-                                        e2.printStackTrace();
-                                        Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
-                                    }
-                                }
-                            } catch (Exception e5) {
-                                e = e5;
-                                eqMArray = eqMArray2;
-                                chokeArray = chokeArray2;
-                                i2 = i22;
-                                eqLArray = eqLArray2;
-                            }
-                        } catch (Exception e6) {
-                            e = e6;
-                            root = kitFolder3;
-                            dataFile = dataFile2;
-                            eqMArray = eqMArray2;
-                            chokeArray = chokeArray2;
-                            i2 = i22;
-                            eqLArray = eqLArray2;
-                        }
-                        eqLArray2 = eqLArray;
-                        chokeArray2 = chokeArray;
-                        i22 = i2;
-                        kitFolder3 = root2;
-                        eqMArray2 = eqMArray;
-                        i = 8;
-                        dataFile2 = dataFile;
+                    JSONArray eqMArray = new JSONArray();
+                    JSONArray eqLArray = new JSONArray();
+                    JSONArray chokeArray = new JSONArray();
+                    for (int i4 = 0; i4 < 8; i4++) {
+                        volArray.put(this.padVolume[i4]);
+                        pitchArray.put(this.padPitch[i4]);
+                        dlyOnArray.put(this.padDelayOn[i4]);
+                        dlyTArray.put(this.padDelayTime[i4]);
+                        dlyLArray.put(this.padDelayLevel[i4]);
+                        eqHArray.put(this.padEqHigh[i4]);
+                        eqMArray.put(this.padEqMid[i4]);
+                        eqLArray.put(this.padEqLow[i4]);
+                        chokeArray.put(this.padChokeGroup[i4]);
                     }
-                    root = kitFolder3;
                     jsonData.put("volume", volArray);
                     jsonData.put("pitch", pitchArray);
                     jsonData.put("delayOn", dlyOnArray);
                     jsonData.put("delayTime", dlyTArray);
                     jsonData.put("delayLevel", dlyLArray);
                     jsonData.put("eqHigh", eqHArray);
-                    jsonData.put("eqMid", eqMArray2);
-                    jsonData.put("eqLow", eqLArray2);
-                    jsonData.put("chokeGroup", chokeArray2);
-                    OutputStream out = getContentResolver().openOutputStream(dataFile22.getUri());
+                    jsonData.put("eqMid", eqMArray);
+                    jsonData.put("eqLow", eqLArray);
+                    jsonData.put("chokeGroup", chokeArray);
+                    OutputStream out = getContentResolver().openOutputStream(dataFile2.getUri());
                     if (out != null) {
                         out.write(jsonData.toString().getBytes());
                         out.close();
                     }
-                } catch (Exception e7) {
-                    e2 = e7;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Toast.makeText(this, "Save Error: " + e.getMessage(), 0).show();
+                    return;
                 }
             }
             Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
-        } catch (Exception e32) {
-            e32.printStackTrace();
-            Toast.makeText(this, "Save Error: " + e32.getMessage(), 0).show();
+        } catch (Exception e2) {
+            e2.printStackTrace();
+            Toast.makeText(this, "Save Error: " + e2.getMessage(), 0).show();
         }
     }
 
