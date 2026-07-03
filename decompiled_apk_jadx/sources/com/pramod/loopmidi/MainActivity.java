@@ -1516,12 +1516,7 @@ public class MainActivity extends Activity {
                 @Override // android.content.DialogInterface.OnClickListener
                 public void onClick(DialogInterface dialog, int which) {
                     DocumentFile selectedKitFolder = (DocumentFile) kitFolders.get(which);
-                    try {
-                        this.this$0.loadKitFromFolder(selectedKitFolder.getUri());
-                    } catch (IOException e) {
-                        Toast.makeText(this.this$0, "Error loading kit: " + e.getMessage(), 0).show();
-                        e.printStackTrace();
-                    }
+                    this.this$0.loadKitFromFolder(selectedKitFolder.getUri());
                     MainActivity mainActivity = this.this$0;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
