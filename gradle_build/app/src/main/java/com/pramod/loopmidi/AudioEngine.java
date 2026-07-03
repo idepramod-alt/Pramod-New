@@ -53,14 +53,16 @@ public class AudioEngine {
                                          boolean delayOn, float delayMs, float delayLevel,
                                          float eqLow, float eqMid, float eqHigh,
                                          int chokeGroup, float attackMs, float releaseMs);
-    private native void nativePlayLoop(int padIndex, float volume, float pitch);
-    private native void nativeUpdateLoopPitch(int padIndex, float volume, float pitch);
+    // speed = time-stretch factor (1.0=normal, 2.0=2x faster, pitch unchanged)
+    // pitch = pitch-shift factor  (1.0=normal, 2.0=octave up, speed unchanged)
+    private native void nativePlayLoop(int padIndex, float volume, float speed, float pitch);
+    private native void nativeUpdateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch);
     private native void nativeStopAll();
     private native void nativeStopPad(int padIndex);
 
     // Whether each optional JNI symbol is actually present in the .so
-    private boolean hasNativePlayLoop        = false;
-    private boolean hasNativeUpdateLoopPitch = false;
+    private boolean hasNativePlayLoop             = false;
+    private boolean hasNativeUpdateLoopSpeedPitch = false;
 
     static {
         try {
@@ -96,13 +98,13 @@ public class AudioEngine {
 
         // Probe optional JNI symbols
         if (nativeAvailable) {
-            try { nativePlayLoop(0, 0f, 1f); hasNativePlayLoop = true; }
+            try { nativePlayLoop(0, 0f, 1f, 1f); hasNativePlayLoop = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativePlayLoop not in .so"); }
             catch (Exception ignored) { hasNativePlayLoop = true; } // symbol exists
 
-            try { nativeUpdateLoopPitch(0, 0f, 1f); hasNativeUpdateLoopPitch = true; }
-            catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativeUpdateLoopPitch not in .so"); }
-            catch (Exception ignored) { hasNativeUpdateLoopPitch = true; }
+            try { nativeUpdateLoopSpeedPitch(0, 0f, 1f, 1f); hasNativeUpdateLoopSpeedPitch = true; }
+            catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativeUpdateLoopSpeedPitch not in .so"); }
+            catch (Exception ignored) { hasNativeUpdateLoopSpeedPitch = true; }
         }
     }
 
@@ -202,17 +204,25 @@ public class AudioEngine {
 
     // ── Playback ──────────────────────────────────────────────────────────────
 
+    /**
+     * Play a sample with independent speed and pitch control.
+     *
+     * @param speed  Playback speed multiplier (1.0 = normal, 2.0 = 2× faster, pitch unchanged).
+     *               Only applied to loop voices (loopMode == 1); drums use pitch for resampling.
+     * @param pitch  Pitch shift multiplier (1.0 = normal, 2.0 = one octave up, speed unchanged).
+     */
     public void playSample(int padIndex, SampleData sample,
-                           float volume, float pitch, int loopMode,
+                           float volume, float speed, float pitch, int loopMode,
                            boolean delayOn, float delayMs, float delayLevel,
                            float eqLow, float eqMid, float eqHigh,
                            int chokeGroup, float attackMs, float releaseMs) {
         try {
             if (!nativeAvailable || sample == null || !sample.loaded) return;
             float vol  = Math.max(0f, Math.min(1f, volume));
-            float rate = Math.max(0.5f, Math.min(2f, pitch));
+            float spd  = Math.max(0.1f, Math.min(4f, speed));
+            float rate = Math.max(0.1f, Math.min(8f, pitch));
             if (loopMode == 1 && hasNativePlayLoop) {
-                nativePlayLoop(padIndex, vol, rate);
+                nativePlayLoop(padIndex, vol, spd, rate);
             } else {
                 nativePlaySample(padIndex, vol, rate,
                         delayOn, delayMs, delayLevel,
@@ -226,9 +236,32 @@ public class AudioEngine {
         }
     }
 
+    /** Convenience overload: speed + pitch, no delay/EQ params. */
+    public void playSample(int padIndex, SampleData sample,
+                           float volume, float speed, float pitch, int loopMode) {
+        playSample(padIndex, sample, volume, speed, pitch, loopMode,
+                false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f);
+    }
+
+    /**
+     * Legacy overload for backward compatibility (no separate speed param).
+     * Speed defaults to 1.0 (no time-stretching).
+     */
+    public void playSample(int padIndex, SampleData sample,
+                           float volume, float pitch, int loopMode,
+                           boolean delayOn, float delayMs, float delayLevel,
+                           float eqLow, float eqMid, float eqHigh,
+                           int chokeGroup, float attackMs, float releaseMs) {
+        playSample(padIndex, sample, volume, 1.0f, pitch, loopMode,
+                delayOn, delayMs, delayLevel,
+                eqLow, eqMid, eqHigh,
+                chokeGroup, attackMs, releaseMs);
+    }
+
+    /** Legacy overload: pitch only, speed defaults to 1.0. */
     public void playSample(int padIndex, SampleData sample,
                            float volume, float pitch, int loopMode) {
-        playSample(padIndex, sample, volume, pitch, loopMode,
+        playSample(padIndex, sample, volume, 1.0f, pitch, loopMode,
                 false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f);
     }
 
