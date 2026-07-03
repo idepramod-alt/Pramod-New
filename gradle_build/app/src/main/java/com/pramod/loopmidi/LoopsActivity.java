@@ -136,20 +136,32 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             sampleData = this.loopSamples[index];
         }
-        if (this.loopPlaying[index]) {
-            if (this.isOneShotMode) {
-                this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
-                this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
-                return;
+        if (this.isOneShotMode) {
+            // ONE-SHOT FIX: Always play fresh on each tap. Never set loopPlaying=true for one-shot.
+            // Bug: loopPlaying[index] was getting permanently stuck as true after the native sample
+            // finished (no Java-side completion callback exists), causing the pad to stay blue and
+            // second taps to re-enter the wrong branch instead of re-triggering cleanly.
+            this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+            this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
+            if (!this.isMultiMode) {
+                for (int i = 0; i < 8; i++) {
+                    if (i != index && this.loopPlaying[i]) {
+                        this.audioEngine.stopPad(i);
+                        this.loopPlaying[i] = false;
+                        this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                    }
+                }
             }
+            return;
+        }
+        if (this.loopPlaying[index]) {
             this.audioEngine.stopPad(index);
             this.loopPlaying[index] = false;
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
             this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
             return;
         }
-        int loopMode = this.isOneShotMode ? 0 : 1;
-        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, loopMode, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
