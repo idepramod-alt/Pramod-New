@@ -295,6 +295,13 @@ jobs:
           sed -i 's/this\.this\$1\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
           sed -i 's/this\.this\$1\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
 
+          # Fix 8: Replace single-level outer-class reference usage with OuterClass.this.
+          sed -i 's/this\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
+          sed -i 's/this\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
+
+          # Fix 9: Remove now-unused synthetic this$0 field declarations (any outer class name)
+          sed -i '/final \/\* synthetic \*\/ [A-Za-z0-9_]* this\$0;/d' $JAVA_DIR/*.java
+
           echo "=== Sed fixes done ==="
 
       - name: Fix jadx exception variable scoping (Python)
