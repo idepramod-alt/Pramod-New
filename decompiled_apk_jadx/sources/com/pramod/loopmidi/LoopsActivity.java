@@ -1209,11 +1209,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             @Override // android.media.midi.MidiManager.DeviceCallback
             public void onDeviceRemoved(MidiDeviceInfo device) {
                 if (LoopsActivity.this.openedMidiDevice != null && LoopsActivity.this.openedMidiDevice.getInfo().getId() == device.getId()) {
-                    try {
-                        LoopsActivity.this.closeMidiDevice();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
+                    LoopsActivity.this.closeMidiDevice();
                     if (LoopsActivity.this.txtMidiStatus != null) {
                         LoopsActivity.this.txtMidiStatus.setText("MIDI disconnected");
                     }
@@ -1273,7 +1269,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
-    public void closeMidiDevice() throws IOException {
+    public void closeMidiDevice() {
         try {
             MidiOutputPort midiOutputPort = this.midiOutputPort;
             if (midiOutputPort != null) {
