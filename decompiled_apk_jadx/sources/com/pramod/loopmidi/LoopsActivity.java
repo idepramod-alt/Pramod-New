@@ -58,7 +58,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnRenameLoop;
     private Button btnSaveLoop;
     private Button btnSetBpm;
-    private Button btnTapTempo;
     private Button btnTempoMinus;
     private Button btnTempoPlus;
     private CheckBox chkMultiMode;
@@ -473,7 +472,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
-        this.btnTapTempo = (Button) findViewById(R.id.btnTapTempo);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
@@ -527,15 +525,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         LoopsActivity.this.advancedControlPanel.setVisibility(0);
                         LoopsActivity.this.btnAdvancedLoops.setBackgroundResource(R.drawable.btn_3d_orange);
                     }
-                }
-            });
-        }
-        Button button2 = this.btnTapTempo;
-        if (button2 != null) {
-            button2.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.4
-                @Override // android.view.View.OnClickListener
-                public void onClick(View v) {
-                    LoopsActivity.this.handleTapTempo();
                 }
             });
         }
