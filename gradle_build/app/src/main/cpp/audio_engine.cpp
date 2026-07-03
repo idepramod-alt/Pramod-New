@@ -74,16 +74,16 @@ public:
     bool init() {
         if (stream) { stream->stop(); stream->close(); stream.reset(); }
 
+        // Oboe 1.6+: builder methods return AudioStreamBuilder* — use -> chaining
         oboe::AudioStreamBuilder b;
-        b.setDirection(oboe::Direction::Output)
-         .setPerformanceMode(oboe::PerformanceMode::LowLatency)   // key for low latency
-         .setSharingMode(oboe::SharingMode::Exclusive)             // direct hardware access
-         .setFormat(oboe::AudioFormat::Float)
-         .setChannelCount(1)
-         .setSampleRate(44100)
-         .setCallback(this);
-
-        oboe::Result r = b.openStream(stream);
+        oboe::Result r = b.setDirection(oboe::Direction::Output)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setSharingMode(oboe::SharingMode::Exclusive)
+            ->setFormat(oboe::AudioFormat::Float)
+            ->setChannelCount(1)
+            ->setSampleRate(44100)
+            ->setDataCallback(this)
+            ->openStream(stream);
         if (r != oboe::Result::OK) {
             LOGE("openStream failed: %s", oboe::convertToText(r));
             return false;
