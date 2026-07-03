@@ -400,3 +400,9 @@ jobs:
       - name: Show build errors
         if: always()
  
+if [ -f /tmp/build.log ]; then
+            echo "===== Last 200 lines of build log ====="
+            tail -n 200 /tmp/build.log
+          else
+            echo "No build log found."
+          fi
