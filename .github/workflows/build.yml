@@ -289,8 +289,6 @@ jobs:
           sed -i '/\bloopPads\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
 
           # Fix 6: Delete phantom eN = eM; lines (both sides have digits)
-          # These are jadx multi-catch artifacts where the right-hand variable
-          # is a catch parameter from a different (now out-of-scope) catch block.
           sed -i '/^\s*e[0-9]\+ = e[0-9]\+;$/d' $JAVA_DIR/*.java
 
           # Fix 7: Replace nested outer-class reference chain
@@ -306,19 +304,6 @@ jobs:
 
           JAVA_DIR = 'gradle_build/app/src/main/java/com/pramod/loopmidi'
 
-          # ---------------------------------------------------------------
-          # LoopsActivity.java
-          # Problem: jadx uses 'eN' (with digit) as a shared collector variable
-          # across multiple catch blocks but never declares it. Pattern seen:
-          #   catch (IOException e) { e4 = e; ... }     <- line 1011
-          #   catch (Exception e5)  { e4.x(); ... }     <- lines 1066,1067
-          # Fix 6 (sed) already deleted phantom 'e4 = e5;' lines.
-          # Now 'e4' has no declaration anywhere.
-          # Solution: find every 'eN = e;' bare-assignment line
-          # (eN has digit(s), e has NO digit = it is the catch parameter),
-          # then hoist 'Exception eN = null;' before the nearest preceding
-          # 'try {' so eN is visible across all catch blocks and after.
-          # ---------------------------------------------------------------
           loops_path = os.path.join(JAVA_DIR, 'LoopsActivity.java')
           with open(loops_path) as f:
               lines = f.readlines()
@@ -329,9 +314,8 @@ jobs:
               m = re.match(r'^(\s+)(e\d+) = e;', line)
               if m:
                   indent, var = m.group(1), m.group(2)
-                  result.append(line)  # keep assignment as-is
+                  result.append(line)
                   if var not in already_hoisted:
-                      # find nearest preceding 'try {' in result and insert before it
                       for j in range(len(result) - 1, -1, -1):
                           if re.search(r'\btry\s*\{', result[j]):
                               result.insert(j, f'{indent}Exception {var} = null;\n')
@@ -344,17 +328,6 @@ jobs:
               f.writelines(result)
           print(f'LoopsActivity.java: hoisted declarations for: {already_hoisted or "none"}')
 
-          # ---------------------------------------------------------------
-          # MainActivity.java
-          # Problem A: bare 'e' (no digit) used as shared collector, undeclared.
-          #   catch (IOException e2) { e = e2; ... }
-          #   catch (Exception e3)   { e = e3; ... }
-          # Fix: declare inline in each catch block: 'Exception e = eN;'
-          #
-          # Problem B: orphaned 'eN.printStackTrace();' where eN is the param
-          # of an inner catch, referenced in an outer catch (out of scope).
-          # Fix: comment out (debug-only, not needed for app to function).
-          # ---------------------------------------------------------------
           main_path = os.path.join(JAVA_DIR, 'MainActivity.java')
           with open(main_path) as f:
               lines = f.readlines()
@@ -363,14 +336,12 @@ jobs:
           fixed_decl = 0
           fixed_orphan = 0
           for line in lines:
-              # Pattern A: '    e = eN;'  ->  '    Exception e = eN;'
               m = re.match(r'^(\s+)e = (e\d+);', line)
               if m:
                   result.append(f'{m.group(1)}Exception e = {m.group(2)};\n')
                   fixed_decl += 1
                   continue
 
-              # Pattern B: standalone 'eN.printStackTrace();'
               m2 = re.match(r'^(\s+)(e\d+)\.printStackTrace\(\);\s*$', line)
               if m2:
                   result.append(f'{m2.group(1)}// {line.strip()} // jadx-out-of-scope\n')
@@ -399,8 +370,8 @@ jobs:
 
       - name: Show build errors
         if: always()
- 
-if [ -f /tmp/build.log ]; then ()
+        run: |
+          if [ -f /tmp/build.log ]; then
             echo "===== Last 200 lines of build log ====="
             tail -n 200 /tmp/build.log
           else
