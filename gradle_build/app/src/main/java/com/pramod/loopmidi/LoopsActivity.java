@@ -138,11 +138,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         if (this.isOneShotMode) {
             // ONE-SHOT FIX: Always play fresh on each tap. Never set loopPlaying=true for one-shot.
-            // Bug: loopPlaying[index] was getting permanently stuck as true after the native sample
-            // finished (no Java-side completion callback exists), causing the pad to stay blue and
-            // second taps to re-enter the wrong branch instead of re-triggering cleanly.
+            // Bug: loopPlaying[index] was permanently stuck true after sample finished (no native
+            // completion callback), causing pad to stay blue and subsequent taps to break.
+            // Also clears stale loop state on the same pad in case user switched modes mid-play.
+            if (this.loopPlaying[index]) {
+                this.loopPlaying[index] = false;
+                this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
+            }
             this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
             this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
+            // Stop other looping pads if not in multi-mode
             if (!this.isMultiMode) {
                 for (int i = 0; i < 8; i++) {
                     if (i != index && this.loopPlaying[i]) {
@@ -781,6 +786,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 } else if (buttonView.getId() == R.id.chkOneShotMode) {
                     LoopsActivity.this.isOneShotMode = isChecked;
                     LoopsActivity.this.prefs.edit().putBoolean("loop_one_shot_mode", LoopsActivity.this.isOneShotMode).apply();
+                    // When switching to one-shot mode, stop all active loops and clear stale state
+                    // to avoid overlapping loop+oneshot playback and stuck-blue pads.
+                    if (isChecked) {
+                        for (int i = 0; i < 8; i++) {
+                            if (LoopsActivity.this.loopPlaying[i]) {
+                                LoopsActivity.this.audioEngine.stopPad(i);
+                                LoopsActivity.this.loopPlaying[i] = false;
+                                LoopsActivity.this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                            }
+                        }
+                    }
                 }
             }
         };
