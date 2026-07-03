@@ -194,6 +194,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // loopMode=1 → auto-repeat until explicitly stopped
         this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        this.audioEngine.playLoopSP(index, this.masterVolume, this.currentSpeed, this.currentPitch);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -865,6 +866,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
                 this.audioEngine.stopPad(i);
                 this.audioEngine.playSample(i, this.loopSamples[i], this.masterVolume, this.currentSpeed, this.currentPitch, this.isOneShotMode ? 0 : 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+                this.audioEngine.updateLoopSpeedPitch(i, this.masterVolume, this.currentSpeed, this.currentPitch);
             }
         }
     }
