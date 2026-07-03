@@ -139,7 +139,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         if (this.loopPlaying[index]) {
             if (this.isOneShotMode) {
-                this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+                this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
                 this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
                 return;
             }
@@ -150,7 +150,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
         int loopMode = this.isOneShotMode ? 0 : 1;
-        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentPitch, loopMode, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch, loopMode, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -479,6 +479,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.reverbLevel = this.prefs.getInt("loop_reverb_level", 0);
         this.isMultiMode = this.prefs.getBoolean("loop_multi_mode", false);
         this.isOneShotMode = this.prefs.getBoolean("loop_one_shot_mode", false);
+        if (this.seekTempo != null) {
+            this.seekTempo.setMax(200);
+            int initTempoProgress = (int) (((this.currentSpeed - 0.25f) / 1.75f) * 200.0f);
+            this.seekTempo.setProgress(Math.max(0, Math.min(200, initTempoProgress)));
+        }
+        if (this.seekPitch != null) {
+            this.seekPitch.setMax(200);
+            int initPitchProgress = (int) (((this.currentPitch - 0.25f) / 1.75f) * 200.0f);
+            this.seekPitch.setProgress(Math.max(0, Math.min(200, initPitchProgress)));
+        }
         SeekBar seekBar = this.seekMasterVolume;
         if (seekBar != null) {
             seekBar.setProgress((int) (this.masterVolume * 100.0f));
@@ -616,10 +626,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     if (!bpmText.isEmpty()) {
                         try {
                             float bpm = Float.parseFloat(bpmText);
+                            if (bpm < 30) bpm = 30;
+                            if (bpm > 240) bpm = 240;
                             float speed = bpm / 120.0f;
-                            float speed2 = Math.max(0.1f, Math.min(2.0f, speed));
+                            // Reverse map speed (0.25-2.0) to seekbar progress (0-200)
+                            int progress2 = (int) (((speed - 0.25f) / 1.75f) * 200.0f);
+                            progress2 = Math.max(0, Math.min(200, progress2));
                             if (LoopsActivity.this.seekTempo != null) {
-                                LoopsActivity.this.seekTempo.setProgress((int) (100.0f * speed2));
+                                LoopsActivity.this.seekTempo.setMax(200);
+                                LoopsActivity.this.seekTempo.setProgress(progress2);
                             }
                         } catch (NumberFormatException e) {
                             Toast.makeText(LoopsActivity.this, "Invalid BPM", 0).show();
@@ -660,7 +675,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             float speed2 = Math.max(0.1f, Math.min(2.0f, speed));
             SeekBar seekBar = this.seekTempo;
             if (seekBar != null) {
-                seekBar.setProgress((int) (100.0f * speed2));
+                int tapProgress = (int) (((speed2 - 0.25f) / 1.75f) * 200.0f);
+                tapProgress = Math.max(0, Math.min(200, tapProgress));
+                seekBar.setMax(200);
+                seekBar.setProgress(tapProgress);
             }
         }
     }
@@ -708,17 +726,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.LoopsActivity.13
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) throws IllegalStateException, UnsupportedOperationException, IllegalArgumentException {
-                float value = Math.max(0.1f, progress / 100.0f);
                 if (seekBar.getId() == R.id.seekTempo) {
-                    LoopsActivity.this.currentSpeed = value;
+                    // Map 0-200 → 0.25x-2.0x (BPM 30-240)
+                    LoopsActivity.this.currentSpeed = 0.25f + (progress / 200.0f) * 1.75f;
+                    int bpmDisplay = Math.round(LoopsActivity.this.currentSpeed * 120);
                     if (LoopsActivity.this.txtTempoVal != null) {
-                        LoopsActivity.this.txtTempoVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentSpeed)));
+                        LoopsActivity.this.txtTempoVal.setText(bpmDisplay + " BPM");
                     }
                     LoopsActivity.this.updateAllActiveLoops();
                 } else if (seekBar.getId() == R.id.seekPitch) {
+                    // Map 0-200 → 0.25x-2.0x pitch
+                    float value = 0.25f + (progress / 200.0f) * 1.75f;
                     LoopsActivity.this.currentPitch = value;
                     if (LoopsActivity.this.txtPitchVal != null) {
-                        LoopsActivity.this.txtPitchVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentPitch)));
+                        LoopsActivity.this.txtPitchVal.setText(String.format("%.2fx", LoopsActivity.this.currentPitch));
                     }
                     LoopsActivity.this.updateAllActiveLoops();
                 } else if (seekBar.getId() == R.id.seekMasterVolume) {
@@ -777,7 +798,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
                 this.audioEngine.stopPad(i);
-                this.audioEngine.playSample(i, this.loopSamples[i], this.masterVolume, this.currentPitch, this.isOneShotMode ? 0 : 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+                this.audioEngine.playSample(i, this.loopSamples[i], this.masterVolume, this.currentSpeed * this.currentPitch, this.isOneShotMode ? 0 : 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
             }
         }
     }
