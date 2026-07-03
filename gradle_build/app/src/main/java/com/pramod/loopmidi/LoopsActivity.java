@@ -72,7 +72,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
     private SharedPreferences prefs;
-    private SeekBar seekLoopReverb;
     private SeekBar seekMasterVolume;
     private SeekBar seekPitch;
     private SeekBar seekTempo;
@@ -470,7 +469,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.editCustomBpm = (EditText) findViewById(R.id.editCustomBpm);
         this.btnSetBpm = (Button) findViewById(R.id.btnSetBpm);
         this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
-        this.seekLoopReverb = (SeekBar) findViewById(R.id.seekLoopReverb);
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
         this.txtLoopReverbVal = (TextView) findViewById(R.id.txtLoopReverbVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
@@ -486,10 +484,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         SeekBar seekBar = this.seekMasterVolume;
         if (seekBar != null) {
             seekBar.setProgress((int) (this.masterVolume * 100.0f));
-        }
-        SeekBar seekBar2 = this.seekLoopReverb;
-        if (seekBar2 != null) {
-            seekBar2.setProgress(this.reverbLevel);
         }
         CheckBox checkBox = this.chkMultiMode;
         if (checkBox != null) {
@@ -753,11 +747,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                     LoopsActivity.this.prefs.edit().putFloat("loop_master_volume", LoopsActivity.this.masterVolume).apply();
                     LoopsActivity.this.updateAllActiveLoops();
-                } else if (seekBar.getId() == R.id.seekLoopReverb) {
-                    LoopsActivity.this.reverbLevel = progress;
-                    LoopsActivity.this.prefs.edit().putInt("loop_reverb_level", LoopsActivity.this.reverbLevel).apply();
-                    LoopsActivity loopsActivity = LoopsActivity.this;
-                    loopsActivity.updateReverbLevel(loopsActivity.reverbLevel);
                 }
             }
 
@@ -780,10 +769,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         SeekBar seekBar3 = this.seekMasterVolume;
         if (seekBar3 != null) {
             seekBar3.setOnSeekBarChangeListener(listener);
-        }
-        SeekBar seekBar4 = this.seekLoopReverb;
-        if (seekBar4 != null) {
-            seekBar4.setOnSeekBarChangeListener(listener);
         }
         CompoundButton.OnCheckedChangeListener checkListener = new CompoundButton.OnCheckedChangeListener() { // from class: com.pramod.loopmidi.LoopsActivity.14
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
@@ -1113,10 +1098,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         SeekBar seekBar3 = this.seekMasterVolume;
         if (seekBar3 != null) {
             seekBar3.setProgress((int) (this.masterVolume * 100.0f));
-        }
-        SeekBar seekBar4 = this.seekLoopReverb;
-        if (seekBar4 != null) {
-            seekBar4.setProgress(this.reverbLevel);
         }
         CheckBox checkBox = this.chkMultiMode;
         if (checkBox != null) {
