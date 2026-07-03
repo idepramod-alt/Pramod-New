@@ -63,12 +63,14 @@ public class AudioEngine {
     // pitch = pitch-shift factor  (1.0=normal, 2.0=octave up, speed unchanged)
     private native void nativePlayLoop(int padIndex, float volume, float speed, float pitch);
     private native void nativeUpdateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch);
+    private native void nativePlayLoopSP(int padIndex, float volume, float speed, float pitch);
     private native void nativeStopAll();
     private native void nativeStopPad(int padIndex);
 
     // Whether each optional JNI symbol is actually present in the .so
     private boolean hasNativePlayLoop             = false;
     private boolean hasNativeUpdateLoopSpeedPitch = false;
+    private boolean hasNativePlayLoopSP         = false;
 
     static {
         try {
@@ -146,7 +148,33 @@ public class AudioEngine {
 
     public void start() {}
 
-    public void stop() {
+    /** Live-update speed+pitch for a playing loop without restarting it. */
+      public void updateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch) {
+          try {
+              if (!nativeAvailable) return;
+              nativeUpdateLoopSpeedPitch(padIndex,
+                  Math.max(0f, Math.min(1f, volume)),
+                  Math.max(0.1f, Math.min(4f, speed)),
+                  Math.max(0.1f, Math.min(8f, pitch)));
+          } catch (UnsatisfiedLinkError e) {
+              Log.e(TAG, "nativeUpdateLoopSpeedPitch unavailable", e);
+          }
+      }
+
+      /** Start a loop with independent speed and pitch. */
+      public void playLoopSP(int padIndex, float volume, float speed, float pitch) {
+          try {
+              if (!nativeAvailable) return;
+              nativePlayLoopSP(padIndex,
+                  Math.max(0f, Math.min(1f, volume)),
+                  Math.max(0.1f, Math.min(4f, speed)),
+                  Math.max(0.1f, Math.min(8f, pitch)));
+          } catch (UnsatisfiedLinkError e) {
+              Log.e(TAG, "nativePlayLoopSP unavailable", e);
+          }
+      }
+
+          public void stop() {
         if (nativeAvailable && nativeHandle != 0) {
             try { nativeDestroyAudioEngine(); }
             catch (UnsatisfiedLinkError e) { Log.e(TAG, "destroy failed", e); }
