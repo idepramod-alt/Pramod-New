@@ -366,7 +366,6 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
-        continue-on-error: true
 
       - name: Show build errors
         if: always()
@@ -377,3 +376,11 @@ jobs:
           else
             echo "No build log found."
           fi
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: gradle_build/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
