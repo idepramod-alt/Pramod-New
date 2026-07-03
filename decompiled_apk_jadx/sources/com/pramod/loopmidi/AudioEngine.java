@@ -22,18 +22,32 @@ public class AudioEngine {
         public boolean loaded = false;
     }
 
-    // Native methods replaced with stubs — .so ELF was corrupted during jadx extraction
-    private long nativeCreateAudioEngine() { return 1L; }
-    private void nativeDestroyAudioEngine() {}
-    private void nativeLoadSample(int i, short[] sArr, int i2) {}
-    private void nativePlaySample(int i, float f, float f2, boolean z, float f3, float f4, float f5, float f6, float f7, int i2, float f8, float f9) {}
-    private void nativeStopAll() {}
-    private void nativeStopPad(int i) {}
+    private native long nativeCreateAudioEngine();
+    private native void nativeDestroyAudioEngine();
+    private native void nativeLoadSample(int i, short[] sArr, int i2);
+    private native void nativePlaySample(int i, float f, float f2, boolean z, float f3, float f4, float f5, float f6, float f7, int i2, float f8, float f9);
+    private native void nativeStopAll();
+    private native void nativeStopPad(int i);
+
+    static {
+        try {
+            System.loadLibrary("oboe_audio_engine");
+            Log.i(TAG, "Oboe audio engine library loaded");
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "Failed to load Oboe audio engine library", e);
+        }
+    }
 
     public AudioEngine(Context ctx) {
-        this.nativeHandle = 1L;
+        this.nativeHandle = 0L;
         this.context = ctx;
-        Log.i(TAG, "AudioEngine initialized (stub mode — native .so unavailable)");
+        long handle = nativeCreateAudioEngine();
+        this.nativeHandle = handle;
+        if (handle != 0) {
+            Log.i(TAG, "Audio engine initialized with native Oboe");
+        } else {
+            Log.e(TAG, "Failed to initialize audio engine");
+        }
     }
 
     public void start() {
