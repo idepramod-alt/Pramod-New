@@ -570,7 +570,8 @@ jobs:
               '                    v.position += 1 + extra;\n'
               '                    if (v.position >= pcmSize) { v.active.store(false, std::memory_order_relaxed); break; }\n'
               '                }\n'
-              '            }'
+              '            }\n'
+              '        }'
           )
           src = must_replace(OLD_RENDER, NEW_RENDER, 'audio callback OLA split', src)
 
