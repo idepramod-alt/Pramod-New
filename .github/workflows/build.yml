@@ -291,13 +291,13 @@ jobs:
           # Fix 6: Delete phantom eN = eM; lines (both sides have digits)
           sed -i '/^\s*e[0-9]\+ = e[0-9]\+;$/d' $JAVA_DIR/*.java
 
-          # Fix 7: Replace nested outer-class reference chain
-          sed -i 's/this\.this\$1\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
-          sed -i 's/this\.this\$1\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
+          # Fix 7: Replace nested outer-class reference chain (dotted or bare usage)
+          sed -i 's/this\.this\$1\.this\$0\b/LoopsActivity.this/g' $JAVA_DIR/LoopsActivity.java
+          sed -i 's/this\.this\$1\.this\$0\b/MainActivity.this/g' $JAVA_DIR/MainActivity.java
 
-          # Fix 8: Replace single-level outer-class reference usage with OuterClass.this.
-          sed -i 's/this\.this\$0\./LoopsActivity.this./g' $JAVA_DIR/LoopsActivity.java
-          sed -i 's/this\.this\$0\./MainActivity.this./g' $JAVA_DIR/MainActivity.java
+          # Fix 8: Replace single-level outer-class reference usage with OuterClass.this (dotted or bare usage)
+          sed -i 's/this\.this\$0\b/LoopsActivity.this/g' $JAVA_DIR/LoopsActivity.java
+          sed -i 's/this\.this\$0\b/MainActivity.this/g' $JAVA_DIR/MainActivity.java
 
           # Fix 9: Remove now-unused synthetic this$0 field declarations (any outer class name)
           sed -i '/final \/\* synthetic \*\/ [A-Za-z0-9_]* this\$0;/d' $JAVA_DIR/*.java
