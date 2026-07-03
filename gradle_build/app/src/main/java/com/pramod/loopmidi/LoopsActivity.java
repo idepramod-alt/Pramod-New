@@ -77,7 +77,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private SeekBar seekTempo;
     private ArrayList tempKitFolders;
     private TextView txtLoopChannel;
-    private TextView txtLoopReverbVal;
     private TextView txtLoopStatus;
     private TextView txtMasterVolVal;
     private TextView txtMidiStatus;
@@ -470,7 +469,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnSetBpm = (Button) findViewById(R.id.btnSetBpm);
         this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
-        this.txtLoopReverbVal = (TextView) findViewById(R.id.txtLoopReverbVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
         this.btnTapTempo = (Button) findViewById(R.id.btnTapTempo);
@@ -696,10 +694,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try {
                 if (progress == 0) {
                     presetReverb.setEnabled(false);
-                    TextView textView = this.txtLoopReverbVal;
-                    if (textView != null) {
-                        textView.setText("OFF");
-                    }
                     return;
                 }
                 presetReverb.setEnabled(true);
@@ -713,10 +707,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     preset = progress < 80 ? (short) 4 : (short) 5;
                 }
                 this.globalReverb.setPreset(preset);
-                TextView textView2 = this.txtLoopReverbVal;
-                if (textView2 != null) {
-                    textView2.setText(progress + "%");
-                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
