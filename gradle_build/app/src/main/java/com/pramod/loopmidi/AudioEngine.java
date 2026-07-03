@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.Resources;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -22,31 +23,36 @@ import java.nio.ShortBuffer;
 /**
  * AudioEngine — bridges Java loading/playback to the native Oboe engine.
  *
+ * LOW-LATENCY SETUP:
+ *   The engine queries the device's native sample rate and burst size from
+ *   AudioManager and passes them to the native layer. Matching the hardware's
+ *   actual parameters avoids Android's internal resampler, eliminating the
+ *   20-40 ms of latency it adds on mismatched streams.
+ *
  * Supported input formats (auto-detected by file header):
  *   WAV  — PCM 8-bit unsigned, 16-bit signed, 24-bit signed, 32-bit int or float
- *          Any sample rate · mono or stereo
- *   MP3  — 32 kbps (low quality) … 320 kbps (high quality)
- *   AAC  — LC / HE-AAC
- *   OGG  — Vorbis
- *   FLAC — lossless
- *   Any other format Android's MediaCodec supports
+ *   MP3, AAC, OGG, FLAC — via MediaCodec
  *
- * All formats are decoded → 16-bit PCM mono at TARGET_SR (44 100 Hz) before
- * being passed to nativeLoadSample().
+ * All formats are decoded → 16-bit PCM mono at the device's native sample rate
+ * before being passed to nativeLoadSample(), so no double-resampling occurs.
  */
 public class AudioEngine {
 
     private static final int    PAD_COUNT  = 16;
-    private static final int    TARGET_SR  = 44100;
     private static final String TAG        = "AudioEngine";
 
+    // Device-native sample rate — set from AudioManager in constructor.
+    // Decode all audio to this rate so Oboe never has to resample internally.
+    private int targetSampleRate = 48000;
+
     private final Context context;
-    private long  nativeHandle = 0L;
-    // True only when the .so loaded successfully and nativeCreateAudioEngine() returned non-zero.
+    private long  nativeHandle    = 0L;
     private boolean nativeAvailable = false;
 
     // ── JNI declarations ──────────────────────────────────────────────────────
-    private native long nativeCreateAudioEngine();
+    // nativeSR/nativeBurst: pass AudioManager values so C++ can configure
+    // Oboe with the device's exact hardware parameters (zero-resampling path).
+    private native long nativeCreateAudioEngine(int nativeSR, int nativeBurst);
     private native void nativeDestroyAudioEngine();
     private native void nativeLoadSample(int padIndex, short[] pcm, int length);
     private native void nativePlaySample(int padIndex, float volume, float pitch,
@@ -83,12 +89,39 @@ public class AudioEngine {
     // ── Constructor ────────────────────────────────────────────────────────────
     public AudioEngine(Context ctx) {
         this.context = ctx;
+
+        // ── Query device-native audio parameters ──────────────────────────────
+        // These come from the hardware HAL and tell us the exact SR and buffer
+        // size that the audio subsystem prefers. Passing these to Oboe means the
+        // stream runs without any internal resampling, giving the minimum possible
+        // latency (typically <10 ms on AAudio / Android 8+).
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        int nativeSR    = 48000; // safe default — most devices since ~2015
+        int nativeBurst = 256;   // safe default
+
+        if (am != null) {
+            try {
+                String srStr    = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+                String burstStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+                if (srStr    != null && !srStr.isEmpty())    nativeSR    = Integer.parseInt(srStr);
+                if (burstStr != null && !burstStr.isEmpty()) nativeBurst = Integer.parseInt(burstStr);
+                // Clamp to sane values
+                if (nativeSR    < 8000  || nativeSR    > 192000) nativeSR    = 48000;
+                if (nativeBurst < 32    || nativeBurst > 8192)   nativeBurst = 256;
+            } catch (NumberFormatException e) {
+                Log.w(TAG, "Failed to parse AudioManager properties", e);
+            }
+        }
+        targetSampleRate = nativeSR;
+        Log.i(TAG, "Device audio: nativeSR=" + nativeSR + " nativeBurst=" + nativeBurst);
+
+        // ── Start native Oboe engine ──────────────────────────────────────────
         try {
-            long handle = nativeCreateAudioEngine();
+            long handle = nativeCreateAudioEngine(nativeSR, nativeBurst);
             this.nativeHandle = handle;
             if (handle != 0) {
                 this.nativeAvailable = true;
-                Log.i(TAG, "Audio engine initialized with native Oboe");
+                Log.i(TAG, "Audio engine initialized (Oboe, native path)");
             } else {
                 Log.e(TAG, "nativeCreateAudioEngine returned 0");
             }
@@ -96,17 +129,20 @@ public class AudioEngine {
             Log.e(TAG, "Native engine not available", e);
         }
 
-        // Probe optional JNI symbols
+        // Probe optional JNI symbols — pads not loaded yet so CMD_PLAY is ignored
         if (nativeAvailable) {
             try { nativePlayLoop(0, 0f, 1f, 1f); hasNativePlayLoop = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativePlayLoop not in .so"); }
-            catch (Exception ignored) { hasNativePlayLoop = true; } // symbol exists
+            catch (Exception ignored)      { hasNativePlayLoop = true; }
 
             try { nativeUpdateLoopSpeedPitch(0, 0f, 1f, 1f); hasNativeUpdateLoopSpeedPitch = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativeUpdateLoopSpeedPitch not in .so"); }
-            catch (Exception ignored) { hasNativeUpdateLoopSpeedPitch = true; }
+            catch (Exception ignored)      { hasNativeUpdateLoopSpeedPitch = true; }
         }
     }
+
+    /** Returns the sample rate this engine is running at (device native SR). */
+    public int getSampleRate() { return targetSampleRate; }
 
     public void start() {}
 
@@ -120,6 +156,9 @@ public class AudioEngine {
     }
 
     // ── Public load methods ───────────────────────────────────────────────────
+    // All decode to 16-bit PCM mono at targetSampleRate (= device native SR).
+    // This ensures samples are already at the correct rate so Oboe's output
+    // stream never needs to resample → zero extra latency.
 
     /** Load from a user-selected URI (file picker). Supports any audio format. */
     public SampleData loadWavFromUri(int padIndex, Uri uri) throws IOException {
@@ -207,9 +246,9 @@ public class AudioEngine {
     /**
      * Play a sample with independent speed and pitch control.
      *
-     * @param speed  Playback speed multiplier (1.0 = normal, 2.0 = 2× faster, pitch unchanged).
-     *               Only applied to loop voices (loopMode == 1); drums use pitch for resampling.
-     * @param pitch  Pitch shift multiplier (1.0 = normal, 2.0 = one octave up, speed unchanged).
+     * @param speed  Time-stretch multiplier (1.0 = normal, 2.0 = 2× faster, pitch unchanged).
+     *               Only meaningful for loop voices (loopMode == 1); drums use pitch for rate.
+     * @param pitch  Pitch-shift multiplier (1.0 = normal, 2.0 = one octave up, speed unchanged).
      */
     public void playSample(int padIndex, SampleData sample,
                            float volume, float speed, float pitch, int loopMode,
@@ -243,10 +282,7 @@ public class AudioEngine {
                 false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f);
     }
 
-    /**
-     * Legacy overload for backward compatibility (no separate speed param).
-     * Speed defaults to 1.0 (no time-stretching).
-     */
+    /** Legacy overload for backward compatibility (no separate speed param). Speed = 1.0. */
     public void playSample(int padIndex, SampleData sample,
                            float volume, float pitch, int loopMode,
                            boolean delayOn, float delayMs, float delayLevel,
@@ -279,16 +315,11 @@ public class AudioEngine {
 
     // ═════════════════════════════════════════════════════════════════════════
     //  UNIVERSAL AUDIO DECODER
+    //  Output: 16-bit PCM mono at targetSampleRate (device native SR)
     // ═════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Auto-detect format from file header and decode to 16-bit PCM mono @ TARGET_SR.
-     *   RIFF magic → WAV decoder (pure-Java, fast, no temp file)
-     *   Anything else → MediaCodec decoder (MP3, AAC, OGG, FLAC, …)
-     */
     private short[] decodeAudioToPcm(byte[] data) {
         if (data == null || data.length < 4) return null;
-        // WAV: "RIFF"
         if (data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F') {
             Log.d(TAG, "Format: WAV → pure-Java decoder");
             return decodePcmFromWav(data);
@@ -297,57 +328,47 @@ public class AudioEngine {
         return decodeWithMediaCodec(data);
     }
 
-    // ─── WAV decoder ──────────────────────────────────────────────────────────
+    // ─── WAV decoder ─────────────────────────────────────────────────────────
 
-    /**
-     * Pure-Java WAV decoder.
-     * Supports: 8-bit unsigned, 16-bit signed, 24-bit signed, 32-bit int/float PCM.
-     * Any sample rate (linear resampled to TARGET_SR). Any channel count (mixed to mono).
-     */
     private short[] decodePcmFromWav(byte[] data) {
         try {
             ByteBuffer buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
             if (buf.remaining() < 12) { Log.e(TAG, "WAV: too short"); return null; }
 
-            // RIFF header
-            int riff = buf.getInt(); // "RIFF" = 0x46464952
-            buf.getInt();            // file size (skip)
-            int wave = buf.getInt(); // "WAVE" = 0x45564157
+            int riff = buf.getInt();
+            buf.getInt();
+            int wave = buf.getInt();
             if (riff != 0x46464952 || wave != 0x45564157) {
-                Log.e(TAG, "WAV: bad RIFF/WAVE header");
-                return null;
+                Log.e(TAG, "WAV: bad RIFF/WAVE header"); return null;
             }
 
             int    audioFormat   = 1;
             int    channels      = 1;
-            int    sampleRate    = TARGET_SR;
+            int    sampleRate    = targetSampleRate;
             int    bitsPerSample = 16;
             byte[] pcmBytes      = null;
 
             while (buf.remaining() >= 8) {
                 int chunkId   = buf.getInt();
                 int chunkSize = buf.getInt();
-                if (chunkSize < 0) break; // guard corrupt chunk size
+                if (chunkSize < 0) break;
 
                 if (chunkId == 0x20746D66) {  // "fmt "
                     if (chunkSize < 16) { Log.e(TAG, "WAV: fmt too small"); return null; }
                     audioFormat   = buf.getShort() & 0xFFFF;
                     channels      = buf.getShort() & 0xFFFF;
                     sampleRate    = buf.getInt();
-                    buf.getInt();              // byte rate
-                    buf.getShort();            // block align
+                    buf.getInt();
+                    buf.getShort();
                     bitsPerSample = buf.getShort() & 0xFFFF;
                     int extra = chunkSize - 16;
                     if (extra > 0) skip(buf, extra);
-
                 } else if (chunkId == 0x61746164) {  // "data"
                     int sz = Math.min(chunkSize, buf.remaining());
                     pcmBytes = new byte[sz];
                     buf.get(pcmBytes);
                     break;
-
                 } else {
-                    // Unknown chunk — skip (+ RIFF padding byte for odd sizes)
                     skip(buf, chunkSize + (chunkSize & 1));
                 }
             }
@@ -361,7 +382,6 @@ public class AudioEngine {
 
             float[] mono = new float[frameCount];
             ByteBuffer pb = ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN);
-
             for (int i = 0; i < frameCount; i++) {
                 double sum = 0;
                 for (int c = 0; c < ch; c++) {
@@ -371,12 +391,13 @@ public class AudioEngine {
                 mono[i] = (float)(sum / ch);
             }
 
-            float[] resampled = (sampleRate == TARGET_SR)
-                    ? mono : linearResample(mono, sampleRate, TARGET_SR);
+            // Resample to device native SR if needed
+            float[] resampled = (sampleRate == targetSampleRate)
+                    ? mono : linearResample(mono, sampleRate, targetSampleRate);
 
             short[] out = floatToShort(resampled);
             Log.i(TAG, "WAV decoded: " + channels + "ch " + sampleRate + "Hz "
-                    + bitsPerSample + "bit → " + out.length + " frames @ " + TARGET_SR);
+                    + bitsPerSample + "bit → " + out.length + " frames @ " + targetSampleRate);
             return out;
 
         } catch (Exception e) {
@@ -390,13 +411,12 @@ public class AudioEngine {
         if (s > 0) b.position(b.position() + s);
     }
 
-    /** Read one sample from ByteBuffer → float in [-1, 1]. */
     private float sampleToFloat(ByteBuffer b, int bits, int fmt) {
         switch (bits) {
             case 8:  return ((b.get() & 0xFF) - 128) / 128f;
             case 16: return b.getShort() / 32768f;
             case 24: {
-                int lo = b.get() & 0xFF, mid = b.get() & 0xFF, hi = b.get(); // hi is signed
+                int lo = b.get() & 0xFF, mid = b.get() & 0xFF, hi = b.get();
                 return ((hi << 16) | (mid << 8) | lo) / 8388608f;
             }
             case 32: return (fmt == 3) ? b.getFloat() : b.getInt() / 2147483648f;
@@ -406,27 +426,19 @@ public class AudioEngine {
         }
     }
 
-    // ─── MediaCodec decoder ───────────────────────────────────────────────────
+    // ─── MediaCodec decoder ──────────────────────────────────────────────────
 
-    /**
-     * Decode any Android-supported compressed format using MediaExtractor + MediaCodec.
-     * Handles INFO_OUTPUT_FORMAT_CHANGED to track actual channel count, sample rate,
-     * and PCM encoding. Uses a primitive byte buffer to avoid boxing overhead.
-     * Output: 16-bit PCM mono at TARGET_SR.
-     */
     private short[] decodeWithMediaCodec(byte[] data) {
         File            tmpFile   = null;
         MediaExtractor  extractor = null;
         MediaCodec      codec     = null;
         try {
-            // Write to temp file (MediaExtractor requires a path or FD)
             tmpFile = File.createTempFile("ac_", ".tmp", context.getCacheDir());
             try (FileOutputStream fos = new FileOutputStream(tmpFile)) { fos.write(data); }
 
             extractor = new MediaExtractor();
             extractor.setDataSource(tmpFile.getAbsolutePath());
 
-            // Find first audio track
             int         trackIdx    = -1;
             MediaFormat trackFormat = null;
             for (int i = 0; i < extractor.getTrackCount(); i++) {
@@ -443,92 +455,72 @@ public class AudioEngine {
             }
 
             String mime = trackFormat.getString(MediaFormat.KEY_MIME);
-
-            // Initial metadata (may be updated by INFO_OUTPUT_FORMAT_CHANGED)
-            int[] meta = extractMeta(trackFormat);  // [channels, sampleRate, pcmEncoding]
+            int[] meta = extractMeta(trackFormat);
 
             extractor.selectTrack(trackIdx);
             codec = MediaCodec.createDecoderByType(mime);
             codec.configure(trackFormat, null, null, 0);
             codec.start();
 
-            // Primitive accumulation buffer (1 float per mono frame)
-            // Pre-allocate 30 s @ 44100 Hz then grow if needed
-            int   cap     = TARGET_SR * 30;
+            int   cap     = targetSampleRate * 30;
             float[] accum = new float[cap];
             int   count   = 0;
 
-            MediaCodec.BufferInfo info    = new MediaCodec.BufferInfo();
-            boolean sawInputEOS           = false;
-            boolean sawOutputEOS          = false;
-            final long TIMEOUT_US         = 10_000L;
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean sawInputEOS  = false;
+            boolean sawOutputEOS = false;
+            final long TIMEOUT_US = 10_000L;
 
             while (!sawOutputEOS) {
-
-                // ── Feed input ────────────────────────────────────────────
                 if (!sawInputEOS) {
                     int inIdx = codec.dequeueInputBuffer(TIMEOUT_US);
                     if (inIdx >= 0) {
-                        ByteBuffer ib    = codec.getInputBuffer(inIdx);
+                        ByteBuffer ib = codec.getInputBuffer(inIdx);
                         ib.clear();
                         int nRead = extractor.readSampleData(ib, 0);
                         if (nRead < 0) {
-                            codec.queueInputBuffer(inIdx, 0, 0, 0,
-                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                             sawInputEOS = true;
                         } else {
-                            codec.queueInputBuffer(inIdx, 0, nRead,
-                                    extractor.getSampleTime(), 0);
+                            codec.queueInputBuffer(inIdx, 0, nRead, extractor.getSampleTime(), 0);
                             extractor.advance();
                         }
                     }
                 }
 
-                // ── Drain output ──────────────────────────────────────────
                 int outIdx = codec.dequeueOutputBuffer(info, TIMEOUT_US);
-
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    // Re-read actual output format (channel/rate/encoding can differ from input)
                     meta = extractMeta(codec.getOutputFormat());
-
                 } else if (outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    // Deprecated but handled for older API levels (min SDK 23)
-
+                    // deprecated — no-op
                 } else if (outIdx >= 0) {
                     ByteBuffer ob = codec.getOutputBuffer(outIdx);
                     if (ob != null && info.size > 0) {
                         ob.position(info.offset);
                         ob.limit(info.offset + info.size);
-
-                        // Read according to actual PCM encoding
-                        int ch  = meta[0];
-                        count   = appendFrames(ob, ch, meta[2], accum, count);
-                        if (count >= accum.length - TARGET_SR) {
-                            // Grow buffer
+                        count = appendFrames(ob, meta[0], meta[2], accum, count);
+                        if (count >= accum.length - targetSampleRate) {
                             float[] grown = new float[accum.length * 2];
                             System.arraycopy(accum, 0, grown, 0, count);
                             accum = grown;
                         }
                     }
                     codec.releaseOutputBuffer(outIdx, false);
-                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        sawOutputEOS = true;
-                    }
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) sawOutputEOS = true;
                 }
             }
 
             if (count == 0) { Log.e(TAG, "MediaCodec: decoded 0 frames"); return null; }
 
-            // Resample if needed
-            float[] frames = (count == accum.length) ? accum
-                    : java.util.Arrays.copyOf(accum, count);
-            if (meta[1] != TARGET_SR) {
-                frames = linearResample(frames, meta[1], TARGET_SR);
+            float[] frames = (count == accum.length) ? accum : java.util.Arrays.copyOf(accum, count);
+            // Resample to device native SR (meta[1] is decoded SR)
+            if (meta[1] != targetSampleRate) {
+                frames = linearResample(frames, meta[1], targetSampleRate);
             }
 
             short[] out = floatToShort(frames);
             Log.i(TAG, "MediaCodec decoded: " + meta[0] + "ch " + meta[1] + "Hz "
-                    + mime + " → " + out.length + " frames @ " + TARGET_SR);
+                    + mime + " → " + out.length + " frames @ " + targetSampleRate);
             return out;
 
         } catch (Exception e) {
@@ -541,16 +533,11 @@ public class AudioEngine {
         }
     }
 
-    /**
-     * Extract [channels, sampleRate, pcmEncoding] from a MediaFormat.
-     * pcmEncoding: AudioFormat.ENCODING_PCM_16BIT (default), ENCODING_PCM_8BIT,
-     *              ENCODING_PCM_FLOAT.
-     */
     private int[] extractMeta(MediaFormat fmt) {
         int ch  = fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)
                 ? fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT) : 1;
         int sr  = fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)
-                ? fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)   : TARGET_SR;
+                ? fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)   : targetSampleRate;
         int enc = AudioFormat.ENCODING_PCM_16BIT;
         if (fmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
             enc = fmt.getInteger(MediaFormat.KEY_PCM_ENCODING);
@@ -558,10 +545,6 @@ public class AudioEngine {
         return new int[]{ Math.max(1, ch), Math.max(1, sr), enc };
     }
 
-    /**
-     * Read all PCM frames from ob into accum[count..], mixing ch channels to mono.
-     * Returns new count.
-     */
     private int appendFrames(ByteBuffer ob, int ch, int encoding, float[] accum, int count) {
         ob.order(ByteOrder.LITTLE_ENDIAN);
         switch (encoding) {
@@ -581,8 +564,7 @@ public class AudioEngine {
                 }
                 break;
             }
-            default: // ENCODING_PCM_16BIT
-            {
+            default: {
                 ShortBuffer sb = ob.asShortBuffer();
                 while (sb.remaining() >= ch && count < accum.length) {
                     float sum = 0;
@@ -595,9 +577,8 @@ public class AudioEngine {
         return count;
     }
 
-    // ─── Shared utilities ─────────────────────────────────────────────────────
+    // ─── Shared utilities ────────────────────────────────────────────────────
 
-    /** Linear interpolation resampler. Quality sufficient for percussion/music. */
     private float[] linearResample(float[] src, int srcRate, int dstRate) {
         if (srcRate == dstRate || src.length == 0) return src;
         double ratio  = (double) srcRate / dstRate;
@@ -614,7 +595,6 @@ public class AudioEngine {
         return out;
     }
 
-    /** Clamp and convert float[] [-1,1] → short[] [-32767, 32767]. */
     private short[] floatToShort(float[] f) {
         short[] out = new short[f.length];
         for (int i = 0; i < f.length; i++) {
