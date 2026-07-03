@@ -19,9 +19,9 @@ static const int MAX_PADS        = 16;
 static const int LOOP_VOICES     = 8;   // voices 0-7  : loop playback (long-running)
 static const int DRUM_VOICES     = 16;  // voices 8-23 : drum/pad hits  (short, stackable)
 static const int NUM_VOICES      = LOOP_VOICES + DRUM_VOICES;
-static const int DELAY_BUF_SIZE  = 88200;  // 2 sec @ 44100
+// 4 seconds @ 96 kHz — safe for both 44100 and 48000 native rates
+static const int DELAY_BUF_SIZE  = 192000;
 static const int CMD_QUEUE_SIZE  = 128;    // lock-free ring buffer capacity
-static const int SAMPLE_RATE     = 44100;
 
 // ─── Pad buffer (loaded samples) ─────────────────────────────────────────────
 struct PadBuffer {
@@ -101,6 +101,11 @@ public:
     int       nextDrumVoice = LOOP_VOICES;
     std::shared_ptr<oboe::AudioStream> stream;
 
+    // Device-native audio parameters (set from Java via AudioManager queries)
+    // Using native SR avoids Android's internal resampler and cuts ~20-40 ms latency
+    int sampleRate    = 48000;
+    int framesPerBurst = 256;
+
     float gDelayBuf[DELAY_BUF_SIZE];
     int   gDelayWrite = 0;
 
@@ -108,7 +113,7 @@ public:
     sonicStream loopSonic[LOOP_VOICES];
 
     // scratch buffers (audio thread only — no malloc in callback)
-    static const int SCRATCH_SIZE = 2048;
+    static const int SCRATCH_SIZE = 4096;
     float feedBuf[SCRATCH_SIZE];
     float readBuf[SCRATCH_SIZE];
 
@@ -265,7 +270,7 @@ public:
                 if (loopSonic[vi]) {
                     sonicDestroyStream(loopSonic[vi]);
                 }
-                loopSonic[vi] = sonicCreateStream(SAMPLE_RATE, 1);
+                loopSonic[vi] = sonicCreateStream(sampleRate, 1);
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
@@ -287,10 +292,12 @@ public:
             v.isLoop      = c.isLoop;
             v.delayOn     = c.delayOn;
             v.delayLevel  = c.delayLevel;
-            v.delayOffset = c.delayOn ? (int)(c.delayMs * 44.1f) : 0;
+            // Use actual sampleRate for delay offset calculation (not hardcoded 44.1)
+            v.delayOffset = c.delayOn ? (int)(c.delayMs * (sampleRate / 1000.0f)) : 0;
             if (v.delayOffset >= DELAY_BUF_SIZE) v.delayOffset = DELAY_BUF_SIZE - 1;
 
-            const float sr = 44100.f;
+            // Use actual sampleRate for envelope ramp calculation
+            const float sr = (float)sampleRate;
             v.attackRate  = (c.attackMs  > 0.f) ? (1.f / (c.attackMs  * sr / 1000.f)) : 1.f;
             v.releaseRate = (c.releaseMs > 0.f) ? (1.f / (c.releaseMs * sr / 1000.f)) : 0.f;
             v.envGain     = (c.attackMs  > 0.f) ? 0.f : 1.f;
@@ -331,38 +338,62 @@ public:
 
     void onErrorAfterClose(oboe::AudioStream*, oboe::Result r) override {
         LOGE("Oboe error: %s — restarting", oboe::convertToText(r));
-        init();
+        // Re-init using the same native SR/burst that were set at startup
+        init(sampleRate, framesPerBurst);
     }
 
-    bool init() {
+    // nativeSR:    device's actual hardware sample rate (from AudioManager)
+    // nativeBurst: device's optimal frames-per-buffer (from AudioManager)
+    // Matching these exactly avoids Android's internal audio resampler
+    // and eliminates the ~20-40 ms latency it adds on non-native-rate streams.
+    bool init(int nativeSR = 48000, int nativeBurst = 256) {
+        sampleRate     = nativeSR;
+        framesPerBurst = nativeBurst;
+
         if (stream) { stream->stop(); stream->close(); stream.reset(); }
         memset(gDelayBuf, 0, sizeof(gDelayBuf));
 
-        // Initialize Sonic streams for all loop voices
+        // Initialize Sonic streams with the correct sample rate
         for (int i = 0; i < LOOP_VOICES; i++) {
             if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);
-            loopSonic[i] = sonicCreateStream(SAMPLE_RATE, 1);
+            loopSonic[i] = sonicCreateStream(sampleRate, 1);
         }
 
         oboe::AudioStreamBuilder b;
+        // bufferCapacity: 3 bursts — gives the scheduler headroom without inflating latency
+        // bufferSize (set after open): 2 bursts — minimum stable double-buffer
         oboe::Result r = b.setDirection(oboe::Direction::Output)
             ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
             ->setSharingMode(oboe::SharingMode::Exclusive)
             ->setFormat(oboe::AudioFormat::Float)
             ->setChannelCount(1)
-            ->setSampleRate(SAMPLE_RATE)
-            ->setFramesPerCallback(128)
-            ->setBufferCapacityInFrames(512)
+            ->setSampleRate(sampleRate)           // MATCH device native SR — no resampling
+            ->setFramesPerCallback(framesPerBurst) // MATCH hardware burst — no extra buffering
+            ->setBufferCapacityInFrames(framesPerBurst * 3)
             ->setDataCallback(this)
             ->openStream(stream);
-        if (r != oboe::Result::OK) { LOGE("openStream: %s", oboe::convertToText(r)); return false; }
-        stream->setBufferSizeInFrames(256);
+
+        if (r != oboe::Result::OK) {
+            LOGE("openStream failed: %s", oboe::convertToText(r));
+            // Fallback: try shared mode (some devices deny exclusive)
+            b.setSharingMode(oboe::SharingMode::Shared);
+            r = b.openStream(stream);
+            if (r != oboe::Result::OK) { LOGE("openStream shared also failed"); return false; }
+        }
+
+        // 2 bursts = lowest stable latency on most devices
+        stream->setBufferSizeInFrames(framesPerBurst * 2);
+
         r = stream->start();
-        if (r != oboe::Result::OK) { LOGE("start: %s", oboe::convertToText(r)); return false; }
-        LOGI("Oboe OK — rate=%d burst=%d bufSize=%d api=%s",
-             stream->getSampleRate(), stream->getFramesPerBurst(),
+        if (r != oboe::Result::OK) { LOGE("stream start: %s", oboe::convertToText(r)); return false; }
+
+        LOGI("Oboe OK — rate=%d burst=%d bufSize=%d cap=%d api=%s sharing=%s",
+             stream->getSampleRate(),
+             stream->getFramesPerBurst(),
              stream->getBufferSizeInFrames(),
-             oboe::convertToText(stream->getAudioApi()));
+             stream->getBufferCapacityInFrames(),
+             oboe::convertToText(stream->getAudioApi()),
+             stream->getSharingMode() == oboe::SharingMode::Exclusive ? "exclusive" : "shared");
         return true;
     }
 
@@ -444,10 +475,14 @@ static AudioEngineImpl* getEngine(JNIEnv* env, jobject obj) {
 
 extern "C" {
 
+// nativeSR:    pass AudioManager.getProperty(PROPERTY_OUTPUT_SAMPLE_RATE)
+// nativeBurst: pass AudioManager.getProperty(PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+// Matching these to the device hardware avoids internal Android resampling (~20-40 ms latency)
 JNIEXPORT jlong JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeCreateAudioEngine(JNIEnv*, jobject) {
+Java_com_pramod_loopmidi_AudioEngine_nativeCreateAudioEngine(
+        JNIEnv*, jobject, jint nativeSR, jint nativeBurst) {
     auto* e = new AudioEngineImpl();
-    if (!e->init()) { delete e; return 0L; }
+    if (!e->init((int)nativeSR, (int)nativeBurst)) { delete e; return 0L; }
     return reinterpret_cast<jlong>(e);
 }
 
@@ -479,7 +514,7 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySample(
                          (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
 }
 
-// nativePlayLoop: speed and pitch are now independent parameters
+// nativePlayLoop: speed and pitch are independent parameters
 // speed = time-stretch (1.0 = normal, 2.0 = 2x faster with same pitch)
 // pitch = pitch-shift   (1.0 = normal, 2.0 = one octave up at same speed)
 JNIEXPORT void JNICALL
@@ -500,7 +535,7 @@ Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopSpeedPitch(
     if (e) e->updateLoopSpeedPitch((int)padIdx, (float)volume, (float)speed, (float)pitch);
 }
 
-// Keep old nativeUpdateLoopPitch for backward compatibility — routes to updateLoopSpeedPitch
+// Keep old nativeUpdateLoopPitch for backward compatibility
 JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopPitch(
         JNIEnv* env, jobject obj,
