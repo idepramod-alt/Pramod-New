@@ -1224,7 +1224,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                 }
                             }
                         });
-                        ((TextView) LoopsActivity.this.findViewById(R.id.txtMidiStatus)).setText("MIDI connected");
+                        TextView _tvMidi = (TextView) LoopsActivity.this.findViewById(R.id.txtMidiStatus);
+                        if (_tvMidi != null) _tvMidi.setText("MIDI connected");
                     }
                 }
             }, new Handler(Looper.getMainLooper()));

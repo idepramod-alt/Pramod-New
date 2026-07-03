@@ -232,7 +232,8 @@ public class MainActivity extends Activity {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                    ((TextView) MainActivity.this.findViewById(R.id.txtMidiStatus)).setText("MIDI disconnected");
+                    TextView _tvMidi = (TextView) MainActivity.this.findViewById(R.id.txtMidiStatus);
+                    if (_tvMidi != null) _tvMidi.setText("MIDI disconnected");
                 }
             }
         }, new Handler(Looper.getMainLooper()));
