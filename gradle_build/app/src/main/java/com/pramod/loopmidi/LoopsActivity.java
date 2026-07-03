@@ -130,11 +130,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     private void toggleLoop(final int index) {
-        if (this.loopUris[index] == null) {
+        // A pad has content if it has a user-picked URI (custom loop) OR a sample already
+        // decoded from assets (preset kit). The URI is null for asset-based kits because
+        // Android assets don't have content:// URIs — only loopSamples[] is populated.
+        AudioEngine.SampleData sampleData = this.loopSamples[index];
+        boolean hasContent = this.loopUris[index] != null
+                || (sampleData != null && sampleData.loaded);
+        if (!hasContent) {
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " IS EMPTY");
             return;
         }
-        AudioEngine.SampleData sampleData = this.loopSamples[index];
         if (sampleData == null || !sampleData.loaded) {
             // Prevent duplicate decode threads: if a load is already in progress for this
             // pad, ignore the tap — the completion handler will replay it.
