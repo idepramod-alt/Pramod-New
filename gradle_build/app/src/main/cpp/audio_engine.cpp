@@ -22,6 +22,7 @@ static const int NUM_VOICES      = LOOP_VOICES + DRUM_VOICES;
 // 4 seconds @ 96 kHz — safe for both 44100 and 48000 native rates
 static const int DELAY_BUF_SIZE  = 192000;
 static const int CMD_QUEUE_SIZE  = 128;    // lock-free ring buffer capacity
+static const int SYN_HOP        = 256;   // OLA synthesis hop size
 
 // ─── Pad buffer (loaded samples) ─────────────────────────────────────────────
 struct PadBuffer {
@@ -50,6 +51,10 @@ struct Voice {
     bool    delayOn    = false;
     float   delayLevel = 0.f;
     int     delayOffset= 0;
+    // OLA granular synthesis state
+    int   grainStartA = 0;
+    int   grainStartB = 0;
+    float synPhase    = 0.f;
 };
 
 // ─── Lock-free SPSC command queue ────────────────────────────────────────────
@@ -433,6 +438,12 @@ public:
         cmdQ.push(c);
     }
 
+    void playLoopSP(int padIdx, float volume, float speed, float pitchShift) {
+        if (padIdx >= 0 && padIdx < LOOP_VOICES) {
+            playSample(padIdx, volume, speed, pitchShift, false, 0.f, 0.f, 0, 0.f, 0.f, true);
+        }
+    }
+
     void updateLoopSpeedPitch(int padIdx, float volume, float speed, float pitch) {
         if (padIdx < 0 || padIdx >= LOOP_VOICES) return;
         Cmd c{};
@@ -524,6 +535,15 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlayLoop(
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
                          false, 0.f, 0.f, 0, 0.f, 0.f, true);
+}
+
+// nativePlayLoopSP: start loop with independent speed + pitch
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativePlayLoopSP(
+        JNIEnv* env, jobject obj,
+        jint padIdx, jfloat volume, jfloat speed, jfloat pitchShift) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->playLoopSP((int)padIdx, (float)volume, (float)speed, (float)pitchShift);
 }
 
 // nativeUpdateLoopSpeedPitch: live update speed + pitch without restarting loop
