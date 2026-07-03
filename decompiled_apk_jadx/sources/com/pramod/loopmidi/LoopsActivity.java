@@ -139,7 +139,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         if (this.loopPlaying[index]) {
             if (this.isOneShotMode) {
-                this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+                this.audioEngine.playLoop(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch);
                 this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
                 return;
             }
@@ -150,7 +150,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
         int loopMode = this.isOneShotMode ? 0 : 1;
-        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch, loopMode, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        this.audioEngine.playLoop(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -797,8 +797,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     public void updateAllActiveLoops() {
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
-                this.audioEngine.stopPad(i);
-                this.audioEngine.playSample(i, this.loopSamples[i], this.masterVolume, this.currentSpeed * this.currentPitch, this.isOneShotMode ? 0 : 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+                // Live update — no stop/restart, no gap in audio
+                this.audioEngine.updateLoopPitch(i, this.masterVolume, this.currentSpeed * this.currentPitch);
             }
         }
     }
