@@ -1004,15 +1004,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void loadLoopFromFolder(Uri folderUri) throws IOException {
-        DocumentFile loopFolder;
-        BufferedReader reader;
-        StringBuilder sb;
-        InputStream in;
-        InputStream in2 = null;
+        DocumentFile loopFolder = null;
         try {
             loopFolder = DocumentFile.fromTreeUri(this, folderUri);
         } catch (Exception e) {
-            e4 = e;
+            e.printStackTrace();
         }
         if (loopFolder == null || !loopFolder.isDirectory()) {
             Toast.makeText(this, "Invalid folder!", 0).show();
@@ -1035,51 +1031,52 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         DocumentFile dataFile = loopFolder.findFile("loop_data.json");
         if (dataFile != null) {
+            InputStream in2 = null;
             Exception lastException = null;
             try {
                 in2 = getContentResolver().openInputStream(dataFile.getUri());
             } catch (Exception e2) {
                 lastException = e2;
             }
-            if (in2 == null) {
-                in = in2;
-            } else {
+            if (in2 != null) {
+                BufferedReader reader = null;
+                StringBuilder sb = new StringBuilder();
                 try {
                     reader = new BufferedReader(new InputStreamReader(in2));
-                    sb = new StringBuilder();
                 } catch (Exception e3) {
-                    e4 = e3;
+                    lastException = e3;
                 }
-                while (true) {
-                    String line = reader.readLine();
-                    if (line == null) {
-                        break;
-                    }
-                    in = in2;
+                if (reader != null) {
                     try {
-                        sb.append(line);
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
                     } catch (Exception e4) {
                         lastException = e4;
                     }
-                    if (lastException != null) {
-                        try {
-                            lastException.printStackTrace();
-                        } catch (Exception e5) {
-                            e4 = e5;
-                        }
+                }
+                if (lastException != null) {
+                    lastException.printStackTrace();
+                    Toast.makeText(this, "Load Error: " + lastException.getMessage(), 0).show();
+                    try {
+                        in2.close();
+                    } catch (Exception ignored) {
                     }
-                    in2 = in;
-                    e4 = e5;
-                    e4.printStackTrace();
-                    Toast.makeText(this, "Load Error: " + e4.getMessage(), 0).show();
                     return;
                 }
-                in2.close();
-                JSONObject jsonData = new JSONObject(sb.toString());
-                if (!jsonData.has("speed")) {
-                    in = in2;
-                } else {
-                    in = in2;
+                try {
+                    in2.close();
+                } catch (Exception ignored) {
+                }
+                JSONObject jsonData;
+                try {
+                    jsonData = new JSONObject(sb.toString());
+                } catch (Exception e5) {
+                    e5.printStackTrace();
+                    return;
+                }
+                if (jsonData.has("speed")) {
                     try {
                         this.currentSpeed = (float) jsonData.getDouble("speed");
                     } catch (Exception e6) {
