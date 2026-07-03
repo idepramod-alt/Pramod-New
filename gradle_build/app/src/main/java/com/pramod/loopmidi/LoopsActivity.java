@@ -165,49 +165,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
         if (this.isOneShotMode) {
-            // ONE-SHOT FIX: Always play fresh on each tap. Never set loopPlaying=true for one-shot.
-            // Bug: loopPlaying[index] was permanently stuck true after sample finished (no native
-            // completion callback), causing pad to stay blue and subsequent taps to break.
-            // Also clears stale loop state on the same pad in case user switched modes mid-play.
+            // ONE-SHOT: Play once on each tap. Pad does not latch.
+            // Clear any stale latch state left over if user switched modes mid-play.
             if (this.loopPlaying[index]) {
                 this.loopPlaying[index] = false;
                 this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
             }
             this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
             this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
-            // Stop other looping pads if not in multi-mode
-            if (!this.isMultiMode) {
-                for (int i = 0; i < 8; i++) {
-                    if (i != index && this.loopPlaying[i]) {
-                        this.audioEngine.stopPad(i);
-                        this.loopPlaying[i] = false;
-                        this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
-                    }
-                }
-            }
             return;
         }
+
+        // ── LATCH SYSTEM ──────────────────────────────────────────────────────────
+        // Each pad is an independent latch:
+        //   • First tap  → starts looping forever  (pad turns blue)
+        //   • Second tap → stops that pad           (pad goes black)
+        // No other pad is ever stopped automatically — only an explicit tap on that
+        // pad stops it.  This gives true "hold until tapped again" behavior for
+        // every pad regardless of multi-mode setting.
+        // ─────────────────────────────────────────────────────────────────────────
         if (this.loopPlaying[index]) {
+            // Pad is latched ON → stop it
             this.audioEngine.stopPad(index);
             this.loopPlaying[index] = false;
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
             this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
             return;
         }
+        // Pad is latched OFF → start looping
         this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
-        if (this.isMultiMode) {
-            return;
-        }
-        for (int i = 0; i < 8; i++) {
-            if (i != index && this.loopPlaying[i]) {
-                this.audioEngine.stopPad(i);
-                this.loopPlaying[i] = false;
-                this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
-            }
-        }
     }
 
     private void updateEQ() {
@@ -544,7 +533,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtLoopChannel.setText(string);
         this.masterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
         this.reverbLevel = this.prefs.getInt("loop_reverb_level", 0);
-        this.isMultiMode = this.prefs.getBoolean("loop_multi_mode", false);
+        // Default true: every pad is an independent latch — only an explicit tap on
+        // that pad stops it. User can still turn this off via the checkbox for
+        // single-pad mode (tapping a new pad stops the previous one).
+        this.isMultiMode = this.prefs.getBoolean("loop_multi_mode", true);
         this.isOneShotMode = this.prefs.getBoolean("loop_one_shot_mode", false);
         SeekBar seekBar = this.seekMasterVolume;
         if (seekBar != null) {
