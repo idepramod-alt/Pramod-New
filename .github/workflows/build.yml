@@ -386,121 +386,391 @@ jobs:
           PYEOF
 
       - name: Patch audio_engine.cpp - independent speed/pitch (OLA granular synthesis)
-          run: |
-            python3 - << 'PYEOF'
-            import sys
-            CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
-            with open(CPP, 'r') as f:
-                src = f.read()
-            required = ['CMD_UPDATE_SPEED_PITCH', 'SYN_HOP', 'updateLoopSpeedPitch',
-                        'playLoopSP', 'nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP',
-                        'grainStartA', 'grainStartB', 'synPhase']
-            missing = [s for s in required if s not in src]
-            if missing:
-                print('MISSING symbols: ' + str(missing))
-                sys.exit(1)
-            print('audio_engine.cpp: all ' + str(len(required)) + ' required symbols verified OK')
-            PYEOF
-      - name: Patch AudioEngine.java - add independent speed/pitch native methods
         run: |
           python3 << 'PYEOF'
           import sys
-          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java'
-          with open(JAVA) as f:
+
+          CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
+          with open(CPP) as f:
               src = f.read()
           errors = []
 
-          def must_replace(old, new, label, s):
-              if old not in s:
-                  errors.append(f'FAILED: {label}')
-                  return s
+          def must_replace(old, new, label, src, count=1):
+              if old not in src:
+                  errors.append(f'FAILED to find target for: {label}')
+                  return src
+              occurrences = src.count(old)
+              if count == 1 and occurrences > 1:
+                  errors.append(f'AMBIGUOUS ({occurrences} matches) for: {label}')
+                  return src
+              result = src.replace(old, new, count)
               print(f'OK: {label}')
-              return s.replace(old, new, 1)
+              return result
 
+          # 1. SYN_HOP constant
           src = must_replace(
-              '    /** Live pitch+volume update for a running loop — NO gap, NO restart. */\n'
-              '    private native void nativeUpdateLoopPitch(int padIdx, float volume, float pitch);',
-              '    /** Live pitch+volume update for a running loop — NO gap, NO restart. */\n'
-              '    private native void nativeUpdateLoopPitch(int padIdx, float volume, float pitch);\n'
-              '    private native void nativeUpdateLoopSpeedPitch(int padIdx, float volume, float speed, float pitchShift);\n'
-              '    private native void nativePlayLoopSP(int padIdx, float volume, float speed, float pitchShift);',
-              'native declarations', src
+              'static const int CMD_QUEUE_SIZE  = 128;    // lock-free ring buffer capacity',
+              'static const int CMD_QUEUE_SIZE  = 128;    // lock-free ring buffer capacity\n'
+              'static const int SYN_HOP         = 512;   // OLA granular hop (~11.6ms @ 44100)',
+              'SYN_HOP constant', src
           )
 
+          # 2. Add OLA fields to Voice struct
           src = must_replace(
-              '    public void updateLoopPitch(int padIndex, float volume, float pitch) {\n'
-              '        if (nativeHandle == 0) return;\n'
-              '        nativeUpdateLoopPitch(padIndex, clampF(volume, 0f, 1f), clampF(pitch, 0.1f, 8f));\n'
+              "    bool    isLoop     = false;   // loop voices survive choke; drum voices don't\n    // Envelope",
+              "    bool    isLoop     = false;   // loop voices survive choke; drum voices don't\n"
+              "    // Granular OLA: independent tempo (speed) + musical pitch (pitchShift)\n"
+              "    std::atomic<float> speed{1.f};       // tempo multiplier -- 1.0 = normal\n"
+              "    std::atomic<float> pitchShift{1.f};  // pitch multiplier -- 1.0 = no change\n"
+              "    float grainStartA = 0.f;   // source base of crossfade grain A\n"
+              "    float grainStartB = 0.f;   // source base of crossfade grain B\n"
+              "    float synPhase    = 0.f;   // synthesis crossfade phase [0..SYN_HOP)\n"
+              "    // Envelope",
+              'OLA Voice fields', src
+          )
+
+          # 3. Extend CmdType enum
+          src = must_replace(
+              'enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_PITCH };',
+              'enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_PITCH, CMD_UPDATE_SPEED_PITCH };',
+              'CmdType enum', src
+          )
+
+          # 4. Add speed/pitchShift fields to Cmd struct (first occurrence = Cmd struct)
+          src = must_replace(
+              '    bool    isLoop;\n};',
+              '    bool    isLoop;\n'
+              '    float   speed;       // for CMD_PLAY / CMD_UPDATE_SPEED_PITCH\n'
+              '    float   pitchShift;  // for CMD_PLAY / CMD_UPDATE_SPEED_PITCH\n'
+              '};',
+              'Cmd struct fields', src, count=1
+          )
+
+          # 5. Replace per-voice audio callback rendering with OLA + drum split
+          OLD_RENDER = (
+              '            float vol   = v.volume.load(std::memory_order_relaxed);\n'
+              '            float pitch = v.pitch .load(std::memory_order_relaxed);\n'
+              '\n'
+              '            for (int i = 0; i < numFrames; i++) {\n'
+              '                float fpos = (float)v.position + v.pitchAcc;\n'
+              '                int   ipos = (int)fpos;\n'
+              '                float frac = fpos - ipos;\n'
+              '\n'
+              '                if ((size_t)ipos >= pb.pcm.size()) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '\n'
+              '                float s0   = pb.pcm[ipos];\n'
+              '                float s1   = ((size_t)(ipos+1) < pb.pcm.size()) ? pb.pcm[ipos+1] : 0.f;\n'
+              '                float samp = s0 + frac * (s1 - s0);\n'
+              '\n'
+              '                // Envelope\n'
+              '                if (!v.releasing) {\n'
+              '                    v.envGain = std::min(1.f, v.envGain + v.attackRate);\n'
+              '                } else {\n'
+              '                    v.envGain -= v.releaseRate;\n'
+              '                    if (v.envGain <= 0.f) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                }\n'
+              '                samp *= vol * v.envGain;\n'
+              '\n'
+              '                // Delay tap\n'
+              '                if (v.delayOn && v.delayOffset > 0) {\n'
+              '                    int ri = ((gDelayWrite + i - v.delayOffset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;\n'
+              '                    samp += gDelayBuf[ri] * v.delayLevel;\n'
+              '                }\n'
+              '\n'
+              '                out[i] += samp;\n'
+              '\n'
+              '                // Advance position with pitch shift\n'
+              '                v.pitchAcc += pitch - 1.f;\n'
+              '                int extra = (int)v.pitchAcc;\n'
+              '                v.pitchAcc -= extra;\n'
+              '                v.position += 1 + extra;\n'
+              '                if (v.position >= pb.pcm.size()) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '            }\n'
+              '        }'
+          )
+          NEW_RENDER = (
+              '            float vol      = v.volume.load(std::memory_order_relaxed);\n'
+              '            size_t pcmSize = pb.pcm.size();\n'
+              '\n'
+              '            if (v.isLoop) {\n'
+              '                // OLA Granular: independent tempo (speed) + pitch (pitchShift)\n'
+              '                float spd    = v.speed     .load(std::memory_order_relaxed);\n'
+              '                float pitch  = v.pitchShift.load(std::memory_order_relaxed);\n'
+              '                float fPcmSz = (float)pcmSize;\n'
+              '\n'
+              '                for (int i = 0; i < numFrames; i++) {\n'
+              '                    float ph = v.synPhase;\n'
+              '                    float wB = ph / (float)SYN_HOP;  // grain B fades in\n'
+              '                    float wA = 1.f - wB;             // grain A fades out\n'
+              '\n'
+              '                    float posA = v.grainStartA + ph * pitch;\n'
+              '                    posA -= floorf(posA / fPcmSz) * fPcmSz;\n'
+              '                    int iA = (int)posA;\n'
+              '                    float fA = posA - iA;\n'
+              '                    float sA = pb.pcm[iA % pcmSize] * (1.f - fA)\n'
+              '                             + pb.pcm[(iA + 1) % pcmSize] * fA;\n'
+              '\n'
+              '                    float posB = v.grainStartB + ph * pitch;\n'
+              '                    posB -= floorf(posB / fPcmSz) * fPcmSz;\n'
+              '                    int iB = (int)posB;\n'
+              '                    float fB = posB - iB;\n'
+              '                    float sB = pb.pcm[iB % pcmSize] * (1.f - fB)\n'
+              '                             + pb.pcm[(iB + 1) % pcmSize] * fB;\n'
+              '\n'
+              '                    float samp = (sA * wA + sB * wB) * vol;\n'
+              '                    if (!v.releasing) {\n'
+              '                        v.envGain = std::min(1.f, v.envGain + v.attackRate);\n'
+              '                    } else {\n'
+              '                        v.envGain -= v.releaseRate;\n'
+              '                        if (v.envGain <= 0.f) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                    }\n'
+              '                    samp *= v.envGain;\n'
+              '                    if (v.delayOn && v.delayOffset > 0) {\n'
+              '                        int ri = ((gDelayWrite + i - v.delayOffset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;\n'
+              '                        samp += gDelayBuf[ri] * v.delayLevel;\n'
+              '                    }\n'
+              '                    out[i] += samp;\n'
+              '\n'
+              '                    v.synPhase += 1.f;\n'
+              '                    if (v.synPhase >= (float)SYN_HOP) {\n'
+              '                        v.synPhase -= (float)SYN_HOP;\n'
+              '                        v.grainStartA = v.grainStartB;\n'
+              '                        float newB = v.grainStartB + (float)SYN_HOP * spd;\n'
+              '                        newB -= floorf(newB / fPcmSz) * fPcmSz;\n'
+              '                        v.grainStartB = newB;\n'
+              '                    }\n'
+              '                }\n'
+              '\n'
+              '            } else {\n'
+              '                // Standard linear-interpolation for drum/pad voices\n'
+              '                float pitch = v.pitch.load(std::memory_order_relaxed);\n'
+              '                for (int i = 0; i < numFrames; i++) {\n'
+              '                    float fpos = (float)v.position + v.pitchAcc;\n'
+              '                    int   ipos = (int)fpos;\n'
+              '                    float frac = fpos - ipos;\n'
+              '                    if ((size_t)ipos >= pcmSize) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                    float s0   = pb.pcm[ipos];\n'
+              '                    float s1   = ((size_t)(ipos+1) < pcmSize) ? pb.pcm[ipos+1] : 0.f;\n'
+              '                    float samp = (s0 + frac * (s1 - s0)) * vol;\n'
+              '                    if (!v.releasing) {\n'
+              '                        v.envGain = std::min(1.f, v.envGain + v.attackRate);\n'
+              '                    } else {\n'
+              '                        v.envGain -= v.releaseRate;\n'
+              '                        if (v.envGain <= 0.f) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                    }\n'
+              '                    samp *= v.envGain;\n'
+              '                    if (v.delayOn && v.delayOffset > 0) {\n'
+              '                        int ri = ((gDelayWrite + i - v.delayOffset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;\n'
+              '                        samp += gDelayBuf[ri] * v.delayLevel;\n'
+              '                    }\n'
+              '                    out[i] += samp;\n'
+              '                    v.pitchAcc += pitch - 1.f;\n'
+              '                    int extra = (int)v.pitchAcc;\n'
+              '                    v.pitchAcc -= extra;\n'
+              '                    v.position += 1 + extra;\n'
+              '                    if (v.position >= pcmSize) { v.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                }\n'
+              '            }\n'
+              '        }'
+          )
+          src = must_replace(OLD_RENDER, NEW_RENDER, 'audio callback OLA split', src)
+
+          # 6. CMD_PLAY: init speed/pitchShift + grain state
+          src = must_replace(
+              '            v.volume.store(c.volume,  std::memory_order_relaxed);\n'
+              '            v.pitch .store(c.pitch,   std::memory_order_relaxed);\n'
+              '            v.chokeGroup  = c.chokeGroup;',
+              '            v.volume.store(c.volume,         std::memory_order_relaxed);\n'
+              '            v.pitch .store(c.pitch,          std::memory_order_relaxed);\n'
+              '            v.speed .store(c.speed,          std::memory_order_relaxed);\n'
+              '            v.pitchShift.store(c.pitchShift, std::memory_order_relaxed);\n'
+              '            v.grainStartA = 0.f;\n'
+              '            v.grainStartB = (float)SYN_HOP * c.speed;\n'
+              '            v.synPhase    = 0.f;\n'
+              '            v.chokeGroup  = c.chokeGroup;',
+              'CMD_PLAY grain init', src
+          )
+
+          # 7. Add CMD_UPDATE_SPEED_PITCH case
+          src = must_replace(
+              '        case CMD_UPDATE_PITCH:\n'
+              '            // Live pitch update for loop voice — no gap, no restart\n'
+              '            if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {\n'
+              '                Voice& v = voices[c.padIdx];\n'
+              '                if (v.active.load()) {\n'
+              '                    v.pitch .store(c.pitch,  std::memory_order_relaxed);\n'
+              '                    v.volume.store(c.volume, std::memory_order_relaxed);\n'
+              '                }\n'
+              '            }\n'
+              '            break;\n'
+              '        }',
+              '        case CMD_UPDATE_PITCH:\n'
+              '            // Legacy combined-rate update\n'
+              '            if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {\n'
+              '                Voice& v = voices[c.padIdx];\n'
+              '                if (v.active.load()) {\n'
+              '                    v.pitch .store(c.pitch,  std::memory_order_relaxed);\n'
+              '                    v.volume.store(c.volume, std::memory_order_relaxed);\n'
+              '                }\n'
+              '            }\n'
+              '            break;\n'
+              '\n'
+              '        case CMD_UPDATE_SPEED_PITCH:\n'
+              '            if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {\n'
+              '                Voice& v = voices[c.padIdx];\n'
+              '                if (v.active.load()) {\n'
+              '                    v.speed     .store(c.speed,      std::memory_order_relaxed);\n'
+              '                    v.pitchShift.store(c.pitchShift, std::memory_order_relaxed);\n'
+              '                    v.volume    .store(c.volume,     std::memory_order_relaxed);\n'
+              '                }\n'
+              '            }\n'
+              '            break;\n'
+              '        }',
+              'CMD_UPDATE_SPEED_PITCH case', src
+          )
+
+          # 8. Defaults in playSample() for drum voices
+          src = must_replace(
+              '        c.pitch      = std::max(0.1f, std::min(8.f, pitch));\n'
+              '        c.delayOn    = delayOn;',
+              '        c.pitch      = std::max(0.1f, std::min(8.f, pitch));\n'
+              '        c.speed      = 1.f;\n'
+              '        c.pitchShift = 1.f;\n'
+              '        c.delayOn    = delayOn;',
+              'playSample drum defaults', src
+          )
+
+          # 9. Add updateLoopSpeedPitch() + playLoopSP() C++ methods
+          src = must_replace(
+              '    void updateLoopPitch(int padIdx, float volume, float pitch) {\n'
+              '        if (padIdx < 0 || padIdx >= LOOP_VOICES) return;\n'
+              '        Cmd c{};\n'
+              '        c.type   = CMD_UPDATE_PITCH;\n'
+              '        c.padIdx = padIdx;\n'
+              '        c.volume = std::max(0.f, std::min(1.f, volume));\n'
+              '        c.pitch  = std::max(0.1f, std::min(8.f, pitch));\n'
+              '        cmdQ.push(c);\n'
               '    }',
-              '    public void updateLoopPitch(int padIndex, float volume, float pitch) {\n'
-              '        if (nativeHandle == 0) return;\n'
-              '        nativeUpdateLoopPitch(padIndex, clampF(volume, 0f, 1f), clampF(pitch, 0.1f, 8f));\n'
+              '    void updateLoopPitch(int padIdx, float volume, float pitch) {\n'
+              '        if (padIdx < 0 || padIdx >= LOOP_VOICES) return;\n'
+              '        Cmd c{};\n'
+              '        c.type   = CMD_UPDATE_PITCH;\n'
+              '        c.padIdx = padIdx;\n'
+              '        c.volume = std::max(0.f, std::min(1.f, volume));\n'
+              '        c.pitch  = std::max(0.1f, std::min(8.f, pitch));\n'
+              '        cmdQ.push(c);\n'
               '    }\n'
-              '    public void playLoopSP(int padIndex, SampleData sample, float volume, float speed, float pitchShift) {\n'
-              '        if (nativeHandle == 0 || sample == null || !sample.loaded) return;\n'
-              '        nativePlayLoopSP(padIndex, clampF(volume, 0f, 1f), clampF(speed, 0.1f, 8f), clampF(pitchShift, 0.1f, 8f));\n'
+              '\n'
+              '    void updateLoopSpeedPitch(int padIdx, float volume, float spd, float ps) {\n'
+              '        if (padIdx < 0 || padIdx >= LOOP_VOICES) return;\n'
+              '        Cmd c{};\n'
+              '        c.type       = CMD_UPDATE_SPEED_PITCH;\n'
+              '        c.padIdx     = padIdx;\n'
+              '        c.volume     = std::max(0.f,  std::min(1.f, volume));\n'
+              '        c.speed      = std::max(0.1f, std::min(8.f, spd));\n'
+              '        c.pitchShift = std::max(0.1f, std::min(8.f, ps));\n'
+              '        cmdQ.push(c);\n'
               '    }\n'
-              '    public void updateLoopSpeedPitch(int padIndex, float volume, float speed, float pitchShift) {\n'
-              '        if (nativeHandle == 0) return;\n'
-              '        nativeUpdateLoopSpeedPitch(padIndex, clampF(volume, 0f, 1f), clampF(speed, 0.1f, 8f), clampF(pitchShift, 0.1f, 8f));\n'
+              '\n'
+              '    void playLoopSP(int padIdx, float volume, float spd, float ps) {\n'
+              '        if (padIdx < 0 || padIdx >= MAX_PADS) return;\n'
+              '        if (!pads[padIdx].loaded.load(std::memory_order_acquire)) return;\n'
+              '        Cmd c{};\n'
+              '        c.type       = CMD_PLAY;\n'
+              '        c.padIdx     = padIdx;\n'
+              '        c.volume     = std::max(0.f,  std::min(1.f, volume));\n'
+              '        c.pitch      = 1.f;\n'
+              '        c.speed      = std::max(0.1f, std::min(8.f, spd));\n'
+              '        c.pitchShift = std::max(0.1f, std::min(8.f, ps));\n'
+              '        c.delayOn    = false;\n'
+              '        c.isLoop     = true;\n'
+              '        cmdQ.push(c);\n'
               '    }',
-              'public wrapper methods', src
+              'updateLoopSpeedPitch + playLoopSP methods', src
+          )
+
+          # 10. Add JNI functions
+          src = must_replace(
+              'JNIEXPORT void JNICALL\n'
+              'Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopPitch(\n'
+              '        JNIEnv* env, jobject obj,\n'
+              '        jint padIdx, jfloat volume, jfloat pitch) {\n'
+              '    AudioEngineImpl* e = getEngine(env, obj);\n'
+              '    if (e) e->updateLoopPitch((int)padIdx, (float)volume, (float)pitch);\n'
+              '}',
+              'JNIEXPORT void JNICALL\n'
+              'Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopPitch(\n'
+              '        JNIEnv* env, jobject obj,\n'
+              '        jint padIdx, jfloat volume, jfloat pitch) {\n'
+              '    AudioEngineImpl* e = getEngine(env, obj);\n'
+              '    if (e) e->updateLoopPitch((int)padIdx, (float)volume, (float)pitch);\n'
+              '}\n'
+              '\n'
+              'JNIEXPORT void JNICALL\n'
+              'Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopSpeedPitch(\n'
+              '        JNIEnv* env, jobject obj,\n'
+              '        jint padIdx, jfloat volume, jfloat speed, jfloat pitchShift) {\n'
+              '    AudioEngineImpl* e = getEngine(env, obj);\n'
+              '    if (e) e->updateLoopSpeedPitch((int)padIdx, (float)volume, (float)speed, (float)pitchShift);\n'
+              '}\n'
+              '\n'
+              'JNIEXPORT void JNICALL\n'
+              'Java_com_pramod_loopmidi_AudioEngine_nativePlayLoopSP(\n'
+              '        JNIEnv* env, jobject obj,\n'
+              '        jint padIdx, jfloat volume, jfloat speed, jfloat pitchShift) {\n'
+              '    AudioEngineImpl* e = getEngine(env, obj);\n'
+              '    if (e) e->playLoopSP((int)padIdx, (float)volume, (float)speed, (float)pitchShift);\n'
+              '}',
+              'JNI functions', src
           )
 
           if errors:
               print('ERRORS:\n' + '\n'.join(errors))
               sys.exit(1)
 
-          with open(JAVA, 'w') as f:
+          with open(CPP, 'w') as f:
               f.write(src)
 
-          required = ['nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP',
-                      'playLoopSP', 'updateLoopSpeedPitch']
+          # Verify key symbols are present after patching
+          required = ['CMD_UPDATE_SPEED_PITCH', 'SYN_HOP', 'updateLoopSpeedPitch',
+                      'playLoopSP', 'nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP',
+                      'grainStartA', 'grainStartB', 'synPhase']
           missing = [s for s in required if s not in src]
           if missing:
-              print(f'VERIFY FAILED — missing: {missing}')
+              print(f'VERIFY FAILED — missing symbols: {missing}')
               sys.exit(1)
-          print(f'AudioEngine.java: all {len(required)} required symbols verified OK')
+          print(f'audio_engine.cpp: all {len(required)} required symbols verified OK')
           PYEOF
+
+      - name: Patch AudioEngine.java - add independent speed/pitch native methods
+          run: |
+            python3 - << 'PYEOF'
+            import sys
+            JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java'
+            with open(JAVA) as f:
+                src = f.read()
+            required = ['nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP', 'playLoopSP', 'updateLoopSpeedPitch']
+            missing = [s for s in required if s not in src]
+            if missing:
+                print('MISSING in AudioEngine.java: ' + str(missing))
+                sys.exit(1)
+            print('AudioEngine.java: all ' + str(len(required)) + ' required symbols verified OK')
+            PYEOF
 
       - name: Patch LoopsActivity.java - use independent speed/pitch calls
-        run: |
-          python3 << 'PYEOF'
-          import sys
-          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          with open(JAVA) as f:
-              src = f.read()
-
-          PLAY_OLD    = 'this.audioEngine.playLoop(index, sampleData, this.masterVolume, this.currentSpeed * this.currentPitch)'
-          PLAY_NEW    = 'this.audioEngine.playLoopSP(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch)'
-          UPDATE_OLD  = 'this.audioEngine.updateLoopPitch(i, this.masterVolume, this.currentSpeed * this.currentPitch)'
-          UPDATE_NEW  = 'this.audioEngine.updateLoopSpeedPitch(i, this.masterVolume, this.currentSpeed, this.currentPitch)'
-
-          n_play_old   = src.count(PLAY_OLD)
-          n_update_old = src.count(UPDATE_OLD)
-
-          if n_play_old == 0 and n_update_old == 0:
-              print('ERROR: Neither playLoop nor updateLoopPitch call sites found — check decompiled source')
-              sys.exit(1)
-
-          src = src.replace(PLAY_OLD,   PLAY_NEW)
-          src = src.replace(UPDATE_OLD, UPDATE_NEW)
-
-          with open(JAVA, 'w') as f:
-              f.write(src)
-
-          n_play_new   = src.count(PLAY_NEW)
-          n_update_new = src.count(UPDATE_NEW)
-
-          # Verify no old combined multiplication calls remain
-          if PLAY_OLD in src or UPDATE_OLD in src:
-              print('ERROR: Some old currentSpeed * currentPitch calls were not replaced')
-              sys.exit(1)
-
-          print(f'LoopsActivity.java: replaced {n_play_old} playLoop -> playLoopSP, '
-                f'{n_update_old} updateLoopPitch -> updateLoopSpeedPitch')
-          print(f'Verified: {n_play_new} playLoopSP + {n_update_new} updateLoopSpeedPitch in file')
-          PYEOF
+          run: |
+            python3 - << 'PYEOF'
+            import sys
+            JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+            with open(JAVA) as f:
+                src = f.read()
+            required = ['playLoopSP', 'updateLoopSpeedPitch']
+            missing = [s for s in required if s not in src]
+            if missing:
+                print('MISSING in LoopsActivity.java: ' + str(missing))
+                sys.exit(1)
+            print('LoopsActivity.java: all ' + str(len(required)) + ' required symbols verified OK')
+            PYEOF
 
       - name: Verify speed/pitch patch symbols in all files
         run: |
