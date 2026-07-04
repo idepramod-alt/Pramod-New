@@ -229,7 +229,9 @@ jobs:
           rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
-          rm -rf gradle_build/app/src/main/res/mipmap-anydpi-v26/
+          # NOTE: mipmap-anydpi-v26/ is intentionally kept — it holds the adaptive
+          # launcher icon definition (real foreground image + background), which
+          # was previously being deleted here and replaced by a solid blue fallback.
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
@@ -473,23 +475,13 @@ jobs:
 
       - name: Create mipmap launcher icons
         run: |
+          pip3 install --quiet --disable-pip-version-check Pillow
           python3 - << 'PYEOF'
-          import struct, zlib, os
+          import os
+          from PIL import Image, ImageDraw
 
-          def make_png(width, height, r, g, b):
-              """Generate a minimal valid solid-color PNG using only stdlib."""
-              def chunk(tag, data):
-                  c = zlib.crc32(tag + data) & 0xFFFFFFFF
-                  return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', c)
-
-              sig = b'\x89PNG\r\n\x1a\n'
-              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
-              # Build raw scanlines: filter byte (0) + RGB pixels
-              row = b'\x00' + bytes([r, g, b] * width)
-              raw = row * height
-              idat = chunk(b'IDAT', zlib.compress(raw, 9))
-              iend = chunk(b'IEND', b'')
-              return sig + ihdr + idat + iend
+          SRC = 'app_icon_source.png'
+          base = 'gradle_build/app/src/main/res'
 
           # Standard Android mipmap sizes
           sizes = {
@@ -499,20 +491,31 @@ jobs:
               'mipmap-xxhdpi':  144,
               'mipmap-xxxhdpi': 192,
           }
-          base = 'gradle_build/app/src/main/res'
-          # Blue launcher icon matching the app theme
-          png_data = {s: make_png(px, px, 33, 150, 243) for s, px in sizes.items()}
 
-          for folder, data in png_data.items():
+          src_img = Image.open(SRC).convert('RGBA')
+          # Center-crop to a square so it isn't stretched
+          w, h = src_img.size
+          side = min(w, h)
+          left, top = (w - side) // 2, (h - side) // 2
+          src_img = src_img.crop((left, top, left + side, top + side))
+
+          for folder, px in sizes.items():
               path = os.path.join(base, folder)
               os.makedirs(path, exist_ok=True)
-              with open(os.path.join(path, 'ic_launcher.png'), 'wb') as f:
-                  f.write(data)
-              with open(os.path.join(path, 'ic_launcher_round.png'), 'wb') as f:
-                  f.write(data)
-              print(f'Created {folder}/ic_launcher.png ({sizes[folder]}px)')
 
-          print('All mipmap icons created.')
+              square = src_img.resize((px, px), Image.LANCZOS)
+              square.save(os.path.join(path, 'ic_launcher.png'))
+
+              # Circular mask for legacy round-icon variant (pre-Android 8 devices)
+              mask = Image.new('L', (px, px), 0)
+              ImageDraw.Draw(mask).ellipse((0, 0, px, px), fill=255)
+              round_icon = Image.new('RGBA', (px, px), (0, 0, 0, 0))
+              round_icon.paste(square, (0, 0), mask)
+              round_icon.save(os.path.join(path, 'ic_launcher_round.png'))
+
+              print(f'Created {folder}/ic_launcher.png + ic_launcher_round.png ({px}px) from real icon')
+
+          print('All mipmap icons created from app_icon_source.png.')
           PYEOF
 
       - name: Setup Gradle 8.9 wrapper
