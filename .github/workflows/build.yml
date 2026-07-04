@@ -229,9 +229,11 @@ jobs:
           rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
-          # NOTE: mipmap-anydpi-v26/ is intentionally kept — it holds the adaptive
-          # launcher icon definition (real foreground image + background), which
-          # was previously being deleted here and replaced by a solid blue fallback.
+          # mipmap-anydpi-v26/ (adaptive icon XML) references a foreground drawable
+          # that does not exist in this source tree, which breaks AAPT resource
+          # linking. Removing it makes Android fall back to the real per-density
+          # ic_launcher.png/ic_launcher_round.png generated below on all API levels.
+          rm -rf gradle_build/app/src/main/res/mipmap-anydpi-v26/
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
