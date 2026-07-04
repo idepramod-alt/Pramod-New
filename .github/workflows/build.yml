@@ -390,6 +390,130 @@ jobs:
           print('All exception variable fixes applied.')
           PYEOF
 
+      - name: Fix loadLoopFromFolder jadx exception scoping (Python)
+        run: |
+          python3 << 'PYEOF'
+          import re
+
+          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+          with open(JAVA) as f:
+              src = f.read()
+
+          # Replace the entire broken loadLoopFromFolder method with clean Java.
+          # jadx generated overlapping exception variable scopes (e4 hoisted but then
+          # re-declared in catch, e5 used out of scope) that javac rejects.
+          OLD_METHOD_START = 'public void loadLoopFromFolder(Uri folderUri) throws IOException {'
+          OLD_METHOD_END   = '        Toast.makeText(this, "Loop Loaded Successfully!", 0).show();\n    }'
+
+          CLEAN_METHOD = '''\
+      public void loadLoopFromFolder(Uri folderUri) throws IOException {
+          DocumentFile loopFolder = null;
+          try {
+              loopFolder = DocumentFile.fromTreeUri(this, folderUri);
+          } catch (Exception e) {
+              e.printStackTrace();
+          }
+          if (loopFolder == null || !loopFolder.isDirectory()) {
+              Toast.makeText(this, "Invalid folder!", 0).show();
+              return;
+          }
+          String folderName = loopFolder.getName();
+          if (folderName != null && folderName.endsWith("_loop.mcn")) {
+              String strReplace = folderName.replace("_loop.mcn", "");
+              this.currentLoopName = strReplace;
+              this.txtLoopChannel.setText(strReplace);
+              this.prefs.edit().putString("loop_name_ch_" + this.loopChannelIndex, this.currentLoopName).apply();
+          }
+          for (int i = 0; i < 8; i++) {
+              this.loopUris[i] = null;
+              String fileName = "loop_pad_" + (i + 1) + ".wav";
+              DocumentFile wav = loopFolder.findFile(fileName);
+              if (wav != null) {
+                  this.loopUris[i] = wav.getUri();
+              }
+          }
+          DocumentFile dataFile = loopFolder.findFile("loop_data.json");
+          if (dataFile != null) {
+              try {
+                  InputStream in2 = getContentResolver().openInputStream(dataFile.getUri());
+                  if (in2 != null) {
+                      try {
+                          java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(in2));
+                          StringBuilder sb = new StringBuilder();
+                          String line;
+                          while ((line = reader.readLine()) != null) {
+                              sb.append(line);
+                          }
+                          in2.close();
+                          org.json.JSONObject jsonData = new org.json.JSONObject(sb.toString());
+                          if (jsonData.has("speed")) {
+                              try { this.currentSpeed = (float) jsonData.getDouble("speed"); } catch (Exception ignored) {}
+                          }
+                          if (jsonData.has("pitch")) {
+                              try { this.currentPitch = (float) jsonData.getDouble("pitch"); } catch (Exception ignored) {}
+                          }
+                          if (jsonData.has("masterVolume")) {
+                              try { this.masterVolume = (float) jsonData.getDouble("masterVolume"); } catch (Exception ignored) {}
+                          }
+                          if (jsonData.has("reverbLevel")) {
+                              try { this.reverbLevel = jsonData.getInt("reverbLevel"); } catch (Exception ignored) {}
+                          }
+                          if (jsonData.has("isMultiMode")) {
+                              try { this.isMultiMode = jsonData.getBoolean("isMultiMode"); } catch (Exception ignored) {}
+                          }
+                          if (jsonData.has("isOneShotMode")) {
+                              try { this.isOneShotMode = jsonData.getBoolean("isOneShotMode"); } catch (Exception ignored) {}
+                          }
+                      } catch (Exception e) {
+                          e.printStackTrace();
+                          Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+                          return;
+                      }
+                  }
+              } catch (Exception e) {
+                  e.printStackTrace();
+                  Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+                  return;
+              }
+          }
+          SeekBar seekBar = this.seekTempo;
+          if (seekBar != null) {
+              seekBar.setProgress((int) (this.currentSpeed * 100.0f));
+          }
+          SeekBar seekBar2 = this.seekPitch;
+          if (seekBar2 != null) {
+              seekBar2.setProgress((int) (this.currentPitch * 100.0f));
+          }
+          SeekBar seekBar3 = this.seekMasterVolume;
+          if (seekBar3 != null) {
+              seekBar3.setProgress((int) (this.masterVolume * 100.0f));
+          }
+          CheckBox checkBox = this.chkMultiMode;
+          if (checkBox != null) {
+              checkBox.setChecked(this.isMultiMode);
+          }
+          CheckBox checkBox2 = this.chkOneShotMode;
+          if (checkBox2 != null) {
+              checkBox2.setChecked(this.isOneShotMode);
+          }
+          updateReverbLevel(this.reverbLevel);
+          saveLoopsToMemory();
+          loadLoopsFromMemory();
+          Toast.makeText(this, "Loop Loaded Successfully!", 0).show();
+      }'''
+
+          start_idx = src.find(OLD_METHOD_START)
+          end_idx   = src.find(OLD_METHOD_END, start_idx)
+          if start_idx == -1 or end_idx == -1:
+              print('WARNING: loadLoopFromFolder boundaries not found — skipping patch')
+          else:
+              end_idx += len(OLD_METHOD_END)
+              src = src[:start_idx] + CLEAN_METHOD + src[end_idx:]
+              with open(JAVA, 'w') as f:
+                  f.write(src)
+              print('loadLoopFromFolder: replaced with clean Java implementation')
+          PYEOF
+
       - name: Patch audio_engine.cpp - independent speed/pitch (OLA granular synthesis)
         run: |
             python3 - << 'PYEOF'
