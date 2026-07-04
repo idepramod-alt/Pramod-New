@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(oboe_audio_engine CXX)
+project(oboe_audio_engine C CXX)
 
 # Oboe delivered via Prefab from the oboe AAR (AGP downloads it automatically)
 find_package(oboe REQUIRED CONFIG)
