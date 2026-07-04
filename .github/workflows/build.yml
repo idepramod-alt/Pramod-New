@@ -229,6 +229,7 @@ jobs:
           rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi/
           rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
+          rm -rf gradle_build/app/src/main/res/mipmap-anydpi-v26/
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
