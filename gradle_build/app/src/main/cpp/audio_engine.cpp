@@ -158,7 +158,7 @@ public:
                 sonicSetPitch(sonic, ptch);
 
                 // Feed raw samples into Sonic until it has enough to produce numFrames output
-                int avail = sonicGetSamplesAvailable(sonic);
+                int avail = sonicSamplesAvailable(sonic);
                 if (avail < numFrames) {
                     // How many raw samples to feed: more when speed > 1 (faster playback)
                     int toFeed = (int)((numFrames - avail) * spd) + 256;
