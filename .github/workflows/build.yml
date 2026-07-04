@@ -459,6 +459,50 @@ jobs:
             && echo "  OK: no stale speed*pitch multiplication" || { echo "  FAIL: old speed*pitch call still present"; exit 1; }
           echo "=== All patch verifications passed ==="
 
+      - name: Create mipmap launcher icons
+        run: |
+          python3 - << 'PYEOF'
+          import struct, zlib, os
+
+          def make_png(width, height, r, g, b):
+              """Generate a minimal valid solid-color PNG using only stdlib."""
+              def chunk(tag, data):
+                  c = zlib.crc32(tag + data) & 0xFFFFFFFF
+                  return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', c)
+
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+              # Build raw scanlines: filter byte (0) + RGB pixels
+              row = b'\x00' + bytes([r, g, b] * width)
+              raw = row * height
+              idat = chunk(b'IDAT', zlib.compress(raw, 9))
+              iend = chunk(b'IEND', b'')
+              return sig + ihdr + idat + iend
+
+          # Standard Android mipmap sizes
+          sizes = {
+              'mipmap-mdpi':    48,
+              'mipmap-hdpi':    72,
+              'mipmap-xhdpi':   96,
+              'mipmap-xxhdpi':  144,
+              'mipmap-xxxhdpi': 192,
+          }
+          base = 'gradle_build/app/src/main/res'
+          # Blue launcher icon matching the app theme
+          png_data = {s: make_png(px, px, 33, 150, 243) for s, px in sizes.items()}
+
+          for folder, data in png_data.items():
+              path = os.path.join(base, folder)
+              os.makedirs(path, exist_ok=True)
+              with open(os.path.join(path, 'ic_launcher.png'), 'wb') as f:
+                  f.write(data)
+              with open(os.path.join(path, 'ic_launcher_round.png'), 'wb') as f:
+                  f.write(data)
+              print(f'Created {folder}/ic_launcher.png ({sizes[folder]}px)')
+
+          print('All mipmap icons created.')
+          PYEOF
+
       - name: Setup Gradle 8.9 wrapper
         working-directory: gradle_build
         run: gradle wrapper --gradle-version=8.9
