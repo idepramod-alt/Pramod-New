@@ -116,6 +116,14 @@ public:
 
     // One Sonic stream per loop voice — handles pitch-preserving speed and vice-versa
     sonicStream loopSonic[LOOP_VOICES];
+    // Last speed/pitch actually applied to each Sonic stream. Sonic reconfigures
+    // its internal resampling ratio every time SetSpeed/SetPitch is called, so
+    // calling it unconditionally on every single audio buffer (as before) caused
+    // constant micro re-syncs even when nothing changed, and any noticeable
+    // glitch/warble whenever the user dragged the speed/pitch sliders. Only call
+    // Sonic's setters when the value actually changed.
+    float loopSonicLastSpeed[LOOP_VOICES];
+    float loopSonicLastPitch[LOOP_VOICES];
 
     // scratch buffers (audio thread only — no malloc in callback)
     static const int SCRATCH_SIZE = 4096;
@@ -124,6 +132,10 @@ public:
 
     AudioEngineImpl() {
         memset(loopSonic, 0, sizeof(loopSonic));
+        for (int i = 0; i < LOOP_VOICES; i++) {
+            loopSonicLastSpeed[i] = 1.f;
+            loopSonicLastPitch[i] = 1.f;
+        }
     }
 
     // ── Audio callback (realtime thread — no malloc, no mutex, no blocking) ──
@@ -154,14 +166,28 @@ public:
                 float spd  = v.speed.load(std::memory_order_relaxed);
                 float ptch = v.pitch .load(std::memory_order_relaxed);
 
-                sonicSetSpeed(sonic, spd);
-                sonicSetPitch(sonic, ptch);
+                // Only reconfigure Sonic when the value actually changed. Calling
+                // sonicSetSpeed/sonicSetPitch unconditionally every single audio
+                // buffer (every ~5-20ms) forced Sonic to re-sync its internal
+                // resampling ratio constantly, which is what produced the audible
+                // warble/glitch on the loop while the speed/pitch sliders were
+                // being touched (and, to a lesser degree, even at rest).
+                if (spd != loopSonicLastSpeed[vi]) {
+                    sonicSetSpeed(sonic, spd);
+                    loopSonicLastSpeed[vi] = spd;
+                }
+                if (ptch != loopSonicLastPitch[vi]) {
+                    sonicSetPitch(sonic, ptch);
+                    loopSonicLastPitch[vi] = ptch;
+                }
 
-                // Feed raw samples into Sonic until it has enough to produce numFrames output
+                // Feed raw samples into Sonic until it has enough to produce numFrames output,
+                // keeping some extra lookahead so a sudden speed change doesn't starve the
+                // stream mid-buffer (which would otherwise leave a silent gap/click).
                 int avail = sonicSamplesAvailable(sonic);
-                if (avail < numFrames) {
+                if (avail < numFrames * 2) {
                     // How many raw samples to feed: more when speed > 1 (faster playback)
-                    int toFeed = (int)((numFrames - avail) * spd) + 256;
+                    int toFeed = (int)((numFrames * 2 - avail) * spd) + 512;
                     if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
                     int fed = 0;
@@ -279,6 +305,8 @@ public:
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
+                    loopSonicLastSpeed[vi] = c.speed;
+                    loopSonicLastPitch[vi] = c.pitch;
                 }
             } else {
                 vi = nextDrumVoice;
@@ -330,10 +358,17 @@ public:
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
-                    // Update Sonic stream parameters live
+                    // Update Sonic stream parameters live (only when actually changed —
+                    // see loopSonicLastSpeed/Pitch comment above)
                     if (loopSonic[c.padIdx]) {
-                        sonicSetSpeed(loopSonic[c.padIdx], c.speed);
-                        sonicSetPitch(loopSonic[c.padIdx], c.pitch);
+                        if (c.speed != loopSonicLastSpeed[c.padIdx]) {
+                            sonicSetSpeed(loopSonic[c.padIdx], c.speed);
+                            loopSonicLastSpeed[c.padIdx] = c.speed;
+                        }
+                        if (c.pitch != loopSonicLastPitch[c.padIdx]) {
+                            sonicSetPitch(loopSonic[c.padIdx], c.pitch);
+                            loopSonicLastPitch[c.padIdx] = c.pitch;
+                        }
                     }
                 }
             }
