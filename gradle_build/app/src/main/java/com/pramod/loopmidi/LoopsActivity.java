@@ -58,7 +58,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnRenameLoop;
     private Button btnSaveLoop;
     private Button btnSetBpm;
-    private Button btnTapTempo;
     private Button btnTempoMinus;
     private Button btnTempoPlus;
     private CheckBox chkMultiMode;
@@ -92,8 +91,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private int reverbLevel = 0;
     private boolean isMultiMode = false;
     private boolean isOneShotMode = false;
-    private long[] tapTimes = new long[4];
-    private int tapIndex = 0;
     private boolean editMode = false;
     private int selectedPad = 0;
     private Uri[] loopUris = new Uri[8];
@@ -553,7 +550,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
-        this.btnTapTempo = (Button) findViewById(R.id.btnTapTempo);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
@@ -607,15 +603,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         LoopsActivity.this.advancedControlPanel.setVisibility(0);
                         LoopsActivity.this.btnAdvancedLoops.setBackgroundResource(R.drawable.btn_3d_orange);
                     }
-                }
-            });
-        }
-        Button button2 = this.btnTapTempo;
-        if (button2 != null) {
-            button2.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.4
-                @Override // android.view.View.OnClickListener
-                public void onClick(View v) {
-                    LoopsActivity.this.handleTapTempo();
                 }
             });
         }
@@ -718,41 +705,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             });
-        }
-    }
-
-    public void handleTapTempo() {
-        long now = System.currentTimeMillis();
-        long[] jArr = this.tapTimes;
-        int i = this.tapIndex;
-        jArr[i] = now;
-        this.tapIndex = (i + 1) % 4;
-        int validTaps = 0;
-        long totalDelta = 0;
-        for (int i2 = 0; i2 < 3; i2++) {
-            int i3 = this.tapIndex;
-            int current = (((i3 - 1) - i2) + 4) % 4;
-            int previous = (((i3 - 2) - i2) + 4) % 4;
-            long[] jArr2 = this.tapTimes;
-            long delta = jArr2[current] - jArr2[previous];
-            if (delta <= 250 || delta >= 2000) {
-                if (delta != 0) {
-                    break;
-                }
-            } else {
-                totalDelta += delta;
-                validTaps++;
-            }
-        }
-        if (validTaps > 0) {
-            long avgDelta = totalDelta / validTaps;
-            float bpm = 60000.0f / ((float) avgDelta);
-            float speed = bpm / 120.0f;
-            float speed2 = Math.max(0.1f, Math.min(2.0f, speed));
-            SeekBar seekBar = this.seekTempo;
-            if (seekBar != null) {
-                seekBar.setProgress((int) (100.0f * speed2));
-            }
         }
     }
 
@@ -876,10 +828,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void updateAllActiveLoops() {
+        // Live-update speed/pitch on already-playing loops WITHOUT stopping or
+        // restarting them — stopPad()+playSample() here used to kill the voice
+        // and restart it from position 0 on every single slider tick, causing
+        // the audible "cut" every time speed/pitch was dragged.
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
-                this.audioEngine.stopPad(i);
-                this.audioEngine.playSample(i, this.loopSamples[i], this.masterVolume, this.currentSpeed, this.currentPitch, this.isOneShotMode ? 0 : 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
                 this.audioEngine.updateLoopSpeedPitch(i, this.masterVolume, this.currentSpeed, this.currentPitch);
             }
         }
