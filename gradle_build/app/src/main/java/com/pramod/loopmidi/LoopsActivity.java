@@ -176,11 +176,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
             this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
             if (!this.isMultiMode) {
+                // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
+                // one-shot hits never set loopPlaying=true, so gating this on that flag
+                // meant a still-ringing one-shot on another pad was NEVER actually choked
+                // when a new pad was tapped, letting both sounds play together. stopPad()
+                // is a harmless no-op on the native side if that pad has nothing active.
                 for (int i = 0; i < 8; i++) {
-                    if (i != index && this.loopPlaying[i]) {
+                    if (i != index) {
                         this.audioEngine.stopPad(i);
-                        this.loopPlaying[i] = false;
-                        this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                        if (this.loopPlaying[i]) {
+                            this.loopPlaying[i] = false;
+                            this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                        }
                     }
                 }
             }
@@ -195,8 +202,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
             return;
         }
-        // loopMode=1 → auto-repeat until explicitly stopped
-        this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        // Start the loop via playLoopSP only. Previously this ALSO called
+        // playSample(..., loopMode=1, ...) right before playLoopSP — both routes
+        // end up issuing a native "start loop" command for the same voice slot,
+        // so the second call immediately tore down and recreated the Sonic
+        // stream the first call had just set up, causing an audible restart
+        // click at the moment playback began.
         this.audioEngine.playLoopSP(index, this.masterVolume, this.currentSpeed, this.currentPitch);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
