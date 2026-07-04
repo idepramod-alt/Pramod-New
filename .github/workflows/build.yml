@@ -263,7 +263,11 @@ jobs:
       - name: Copy Java sources from decompiled
         run: |
           mkdir -p gradle_build/app/src/main/java/com/pramod/loopmidi
+          # Exclude AudioEngine.java and LoopsActivity.java — gradle_build/ already has
+          # patched versions with nativeUpdateLoopSpeedPitch / nativePlayLoopSP / playLoopSP /
+          # updateLoopSpeedPitch. Copying the decompiled versions would overwrite and lose them.
           find decompiled_apk_jadx/sources/com/pramod/loopmidi -name "*.java" ! -name "R.java" \
+            ! -name "AudioEngine.java" ! -name "LoopsActivity.java" \
             -exec cp {} gradle_build/app/src/main/java/com/pramod/loopmidi/ \;
 
       - name: Create ActivationActivity stub
