@@ -536,6 +536,7 @@ public final class R {
         public static int btnPrevLoop = 0x7f08006a;
         public static int btnRenameKit = 0x7f08006b;
         public static int btnRenameLoop = 0x7f08006c;
+        public static int btnResetSpeedPitch = 0x7f080211;
         public static int btnSaveKit = 0x7f08006d;
         public static int btnSaveLoop = 0x7f08006e;
         public static int btnSetBpm = 0x7f08006f;
