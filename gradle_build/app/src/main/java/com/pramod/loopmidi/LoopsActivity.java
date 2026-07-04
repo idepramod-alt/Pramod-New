@@ -382,7 +382,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     public void onClick(DialogInterface dialogInterface, int i) {
         ArrayList arrayList = this.tempKitFolders;
         if (arrayList != null) {
-            loadLoopFromFolder(((DocumentFile) arrayList.get(i)).getUri());
+            try {
+                loadLoopFromFolder(((DocumentFile) arrayList.get(i)).getUri());
+            } catch (IOException e) {
+                e.printStackTrace();
+                Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+            }
         }
     }
 
@@ -400,7 +405,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.audioEngine.stop();
             this.audioEngine = null;
         }
-        closeMidiDevice();
+        try {
+            closeMidiDevice();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override // android.app.Activity
@@ -476,7 +485,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         String name = fromTreeUri.getName();
         if (name != null && name.toLowerCase().endsWith(".mcn")) {
-            loadLoopFromFolder(uri);
+            try {
+                loadLoopFromFolder(uri);
+            } catch (IOException e) {
+                e.printStackTrace();
+                Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+            }
             return;
         }
         ArrayList arrayList = new ArrayList();
