@@ -1059,15 +1059,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void loadLoopFromFolder(Uri folderUri) throws IOException {
-        DocumentFile loopFolder;
-        BufferedReader reader;
-        StringBuilder sb;
-        InputStream in;
-        InputStream in2 = null;
+        DocumentFile loopFolder = null;
         try {
             loopFolder = DocumentFile.fromTreeUri(this, folderUri);
         } catch (Exception e) {
-            e4 = e;
+            e.printStackTrace();
         }
         if (loopFolder == null || !loopFolder.isDirectory()) {
             Toast.makeText(this, "Invalid folder!", 0).show();
@@ -1090,71 +1086,46 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         DocumentFile dataFile = loopFolder.findFile("loop_data.json");
         if (dataFile != null) {
-            Exception lastException = null;
             try {
-                in2 = getContentResolver().openInputStream(dataFile.getUri());
-            } catch (Exception e2) {
-                lastException = e2;
-            }
-            if (in2 == null) {
-                in = in2;
-            } else {
-                try {
-                    reader = new BufferedReader(new InputStreamReader(in2));
-                    sb = new StringBuilder();
-                } catch (Exception e3) {
-                    e4 = e3;
-                }
-                while (true) {
-                    String line = reader.readLine();
-                    if (line == null) {
-                        break;
-                    }
-                    in = in2;
+                InputStream in2 = getContentResolver().openInputStream(dataFile.getUri());
+                if (in2 != null) {
                     try {
-                        sb.append(line);
-                    } catch (Exception e4) {
-                        lastException = e4;
-                    }
-                    if (lastException != null) {
-                        try {
-                            lastException.printStackTrace();
-                        } catch (Exception e5) {
-                            e4 = e5;
+                        java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(in2));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
                         }
+                        in2.close();
+                        org.json.JSONObject jsonData = new org.json.JSONObject(sb.toString());
+                        if (jsonData.has("speed")) {
+                            try { this.currentSpeed = (float) jsonData.getDouble("speed"); } catch (Exception ignored) {}
+                        }
+                        if (jsonData.has("pitch")) {
+                            try { this.currentPitch = (float) jsonData.getDouble("pitch"); } catch (Exception ignored) {}
+                        }
+                        if (jsonData.has("masterVolume")) {
+                            try { this.masterVolume = (float) jsonData.getDouble("masterVolume"); } catch (Exception ignored) {}
+                        }
+                        if (jsonData.has("reverbLevel")) {
+                            try { this.reverbLevel = jsonData.getInt("reverbLevel"); } catch (Exception ignored) {}
+                        }
+                        if (jsonData.has("isMultiMode")) {
+                            try { this.isMultiMode = jsonData.getBoolean("isMultiMode"); } catch (Exception ignored) {}
+                        }
+                        if (jsonData.has("isOneShotMode")) {
+                            try { this.isOneShotMode = jsonData.getBoolean("isOneShotMode"); } catch (Exception ignored) {}
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+                        return;
                     }
-                    in2 = in;
-                    e4 = e5;
-                    e4.printStackTrace();
-                    Toast.makeText(this, "Load Error: " + e4.getMessage(), 0).show();
-                    return;
                 }
-                in2.close();
-                JSONObject jsonData = new JSONObject(sb.toString());
-                if (!jsonData.has("speed")) {
-                    in = in2;
-                } else {
-                    in = in2;
-                    try {
-                        this.currentSpeed = (float) jsonData.getDouble("speed");
-                    } catch (Exception e6) {
-                    }
-                }
-                if (jsonData.has("pitch")) {
-                    this.currentPitch = (float) jsonData.getDouble("pitch");
-                }
-                if (jsonData.has("masterVolume")) {
-                    this.masterVolume = (float) jsonData.getDouble("masterVolume");
-                }
-                if (jsonData.has("reverbLevel")) {
-                    this.reverbLevel = jsonData.getInt("reverbLevel");
-                }
-                if (jsonData.has("isMultiMode")) {
-                    this.isMultiMode = jsonData.getBoolean("isMultiMode");
-                }
-                if (jsonData.has("isOneShotMode")) {
-                    this.isOneShotMode = jsonData.getBoolean("isOneShotMode");
-                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                Toast.makeText(this, "Load Error: " + e.getMessage(), 0).show();
+                return;
             }
         }
         SeekBar seekBar = this.seekTempo;
