@@ -54,6 +54,8 @@
         <TextView android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PTCH:"/>
         <SeekBar android:id="@+id/seekPitch" android:layout_width="0dp" android:layout_height="wrap_content" android:max="200" android:progress="100" android:layout_weight="1"/>
         <TextView android:textSize="10sp" android:textColor="#ff00afff" android:gravity="end" android:id="@+id/txtPitchVal" android:layout_width="30dp" android:layout_height="wrap_content" android:text="1.0x"/>
+        <View android:background="#ff555555" android:layout_width="1dp" android:layout_height="20dp" android:layout_marginStart="6dp" android:layout_marginEnd="6dp"/>
+        <Button android:textSize="8sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnResetSpeedPitch" android:background="@drawable/btn_3d_dark" android:layout_width="40dp" android:layout_height="30dp" android:text="RESET"/>
     </LinearLayout>
     <LinearLayout android:orientation="vertical" android:id="@+id/loopPadArea" android:padding="2dp" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
