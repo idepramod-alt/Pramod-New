@@ -60,6 +60,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnSetBpm;
     private Button btnTempoMinus;
     private Button btnTempoPlus;
+    private Button btnResetSpeedPitch;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
     private int currentScaleOffset;
@@ -167,7 +168,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 this.loopPlaying[index] = false;
                 this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
             }
-            this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+            // chokeGroup = index+1 (unique per pad) so retapping the SAME pad cuts off
+            // its previous still-playing instance before starting the new one. Without
+            // this, every tap grabbed a brand-new drum voice while the earlier instance
+            // kept ringing out, so repeated taps piled up overlapping copies of the same
+            // sample — the "mix-up"/garbled sound instead of a clean one-shot retrigger.
+            this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
             this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
             if (!this.isMultiMode) {
                 for (int i = 0; i < 8; i++) {
@@ -298,6 +304,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         new Thread(() -> {
             final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[8];
             for (int i2 = 0; i2 < 8; i2++) {
+                // Abort BEFORE touching the native pad buffer if a newer kit switch
+                // has already started. Without this check, a slow/stale load thread
+                // from a previously-selected kit can call nativeLoadSample() after a
+                // newer kit's thread already loaded the correct sound into the same
+                // pad slot — silently overwriting it with the wrong kit's audio, so
+                // a sound "not even in this kit" plays when the pad is tapped.
+                if (myGeneration != this.loadGeneration) return;
                 try {
                     String assetPath = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
                     loaded[i2] = engine.loadWavFromAsset(i2, assetPath);
@@ -550,6 +563,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
+        this.btnResetSpeedPitch = (Button) findViewById(R.id.btnResetSpeedPitch);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
@@ -706,6 +720,39 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
+        Button button7 = this.btnResetSpeedPitch;
+        if (button7 != null) {
+            button7.setOnClickListener(new View.OnClickListener() {
+                @Override // android.view.View.OnClickListener
+                public void onClick(View v) {
+                    LoopsActivity.this.resetSpeedPitch();
+                }
+            });
+        }
+    }
+
+    public void resetSpeedPitch() {
+        this.currentSpeed = 1.0f;
+        this.currentPitch = 1.0f;
+        this.currentScaleOffset = 0;
+        SeekBar seekBar = this.seekTempo;
+        if (seekBar != null) {
+            seekBar.setProgress(100);
+        }
+        SeekBar seekBar2 = this.seekPitch;
+        if (seekBar2 != null) {
+            seekBar2.setProgress(100);
+        }
+        TextView textView = this.txtTempoVal;
+        if (textView != null) {
+            textView.setText("1.0x");
+        }
+        TextView textView2 = this.txtPitchVal;
+        if (textView2 != null) {
+            textView2.setText("1.0x");
+        }
+        updateScaleUI();
+        updateAllActiveLoops();
     }
 
     private void setupReverb() {
