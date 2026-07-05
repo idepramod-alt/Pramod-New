@@ -117,13 +117,18 @@ public:
     // One Sonic stream per loop voice — handles pitch-preserving speed and vice-versa
     sonicStream loopSonic[LOOP_VOICES];
     // Last speed/pitch actually applied to each Sonic stream. Sonic reconfigures
-    // its internal resampling ratio every time SetSpeed/SetPitch is called, so
-    // calling it unconditionally on every single audio buffer (as before) caused
-    // constant micro re-syncs even when nothing changed, and any noticeable
-    // glitch/warble whenever the user dragged the speed/pitch sliders. Only call
-    // Sonic's setters when the value actually changed.
+    // its internal resampling buffers when SetSpeed/SetPitch is called; only call
+    // the setters when the value has actually changed to avoid unnecessary work.
     float loopSonicLastSpeed[LOOP_VOICES];
     float loopSonicLastPitch[LOOP_VOICES];
+    // Output fade-in counter per loop voice. Set to LOOP_FADE_LEN after a
+    // pitch/speed change so the first ~2ms of output after Sonic reconfigures
+    // fades from 0→1 instead of clicking. Sonic uses realloc() internally, so
+    // the ONLY safe place to call sonicSetPitch/sonicSetSpeed is CMD_UPDATE_SPEED_PITCH
+    // (fired at most every 40ms via Java debounce). Calling them every audio
+    // callback (smooth ramping) triggers realloc on the real-time thread → crash.
+    static const int LOOP_FADE_LEN = 96;   // 2ms at 48 kHz
+    int loopFadeFrames[LOOP_VOICES];
 
     // scratch buffers (audio thread only — no malloc in callback)
     static const int SCRATCH_SIZE = 4096;
@@ -131,7 +136,8 @@ public:
     float readBuf[SCRATCH_SIZE];
 
     AudioEngineImpl() {
-        memset(loopSonic, 0, sizeof(loopSonic));
+        memset(loopSonic,      0, sizeof(loopSonic));
+        memset(loopFadeFrames, 0, sizeof(loopFadeFrames));
         for (int i = 0; i < LOOP_VOICES; i++) {
             loopSonicLastSpeed[i] = 1.f;
             loopSonicLastPitch[i] = 1.f;
@@ -164,28 +170,13 @@ public:
                 // ── Loop voice: use Sonic for independent speed + pitch ──────────
                 sonicStream sonic = loopSonic[vi];
 
-                // ── Smooth speed/pitch ramping (eliminates Sonic-reconfig crackling) ──
-                // Each audio callback, move 15% toward the target value stored by Java.
-                // This spreads sonicSetSpeed/sonicSetPitch reconfiguration over ~6
-                // callbacks (~30ms), making speed/pitch transitions completely inaudible
-                // instead of producing the sharp crack from an instantaneous hard jump.
-                float targetSpd  = v.speed.load(std::memory_order_relaxed);
-                float targetPtch = v.pitch.load(std::memory_order_relaxed);
-                const float SMOOTH = 0.15f;
-                float newSpd  = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd  - loopSonicLastSpeed[vi]);
-                float newPtch = loopSonicLastPitch[vi] + SMOOTH * (targetPtch - loopSonicLastPitch[vi]);
-                // Snap to target when very close — stops infinite micro-updates
-                if (fabsf(newSpd  - targetSpd)  < 0.002f) newSpd  = targetSpd;
-                if (fabsf(newPtch - targetPtch) < 0.002f) newPtch = targetPtch;
-                if (newSpd != loopSonicLastSpeed[vi]) {
-                    sonicSetSpeed(sonic, newSpd);
-                    loopSonicLastSpeed[vi] = newSpd;
-                }
-                if (newPtch != loopSonicLastPitch[vi]) {
-                    sonicSetPitch(sonic, newPtch);
-                    loopSonicLastPitch[vi] = newPtch;
-                }
-                float spd = loopSonicLastSpeed[vi];   // use smoothed value for buffer calc
+                // Speed/pitch are applied directly in CMD_UPDATE_SPEED_PITCH (at most
+                // every 40ms via Java debounce). We NEVER call sonicSetSpeed/Pitch here
+                // in the audio callback — Sonic uses realloc() internally and calling
+                // it 200×/s on the real-time thread triggers malloc on the audio thread
+                // which causes Android to kill the stream (crash). A 2ms output fade
+                // in the mix loop below masks the one-time reconfig click instead.
+                float spd = loopSonicLastSpeed[vi];   // speed currently applied to Sonic
 
                 // ── Sonic feeding with loop-boundary crossfade ───────────────────
                 // Keep enough OUTPUT samples buffered (3× numFrames) so playback
@@ -236,7 +227,15 @@ public:
                             break;
                         }
                     }
-                    out[i] += readBuf[i] * vol * v.envGain;
+                    float s = readBuf[i] * vol * v.envGain;
+                    // 2ms fade-in after pitch/speed change masks Sonic reconfig click.
+                    // loopFadeFrames[vi] is set in CMD_UPDATE_SPEED_PITCH and counts
+                    // down here; the sample scales from 0→1 over LOOP_FADE_LEN frames.
+                    if (loopFadeFrames[vi] > 0) {
+                        s *= 1.0f - ((float)loopFadeFrames[vi] / (float)LOOP_FADE_LEN);
+                        loopFadeFrames[vi]--;
+                    }
+                    out[i] += s;
                 }
 
             } else {
@@ -339,6 +338,7 @@ public:
             v.padIndex    = c.padIdx;
             v.position    = 0;
             v.pitchAcc    = 0.f;
+            if (c.isLoop && vi < LOOP_VOICES) loopFadeFrames[vi] = 0;
             v.volume.store(c.volume, std::memory_order_relaxed);
             v.speed .store(c.speed,  std::memory_order_relaxed);
             v.pitch .store(c.pitch,  std::memory_order_relaxed);
@@ -372,18 +372,32 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed+pitch update for loop voice — no gap, no restart.
-            // Only update the target atomics here; DO NOT call sonicSetSpeed/
-            // sonicSetPitch directly. The render loop ramps loopSonicLastSpeed/
-            // Pitch smoothly toward v.speed/v.pitch (15% per callback, ~30ms),
-            // so each sonicSet call is a tiny step — completely inaudible —
-            // instead of a hard jump that cracks on Sonic's internal re-sync.
+            // Live speed+pitch update — apply to Sonic immediately.
+            // This is called at most every 40ms (Java-side seekbar debounce),
+            // so Sonic's internal realloc() fires at most 25×/s, not 200×/s.
+            // A 2ms output fade (loopFadeFrames) in the render loop above
+            // masks the brief Sonic reconfig click at the change boundary.
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
                 if (v.active.load()) {
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
+                    if (loopSonic[c.padIdx]) {
+                        bool spdChg = (c.speed != loopSonicLastSpeed[c.padIdx]);
+                        bool ptcChg = (c.pitch != loopSonicLastPitch[c.padIdx]);
+                        if (spdChg) {
+                            sonicSetSpeed(loopSonic[c.padIdx], c.speed);
+                            loopSonicLastSpeed[c.padIdx] = c.speed;
+                        }
+                        if (ptcChg) {
+                            sonicSetPitch(loopSonic[c.padIdx], c.pitch);
+                            loopSonicLastPitch[c.padIdx] = c.pitch;
+                        }
+                        if (spdChg || ptcChg) {
+                            loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
+                        }
+                    }
                 }
             }
             break;

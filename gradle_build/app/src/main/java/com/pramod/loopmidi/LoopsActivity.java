@@ -1135,12 +1135,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.txtLoopChannel.setText(strReplace);
             this.prefs.edit().putString("loop_name_ch_" + this.loopChannelIndex, this.currentLoopName).apply();
         }
+        // Try all common audio extensions so any format works (mp3, ogg, flac,
+        // aac, m4a, wav, 3gp …). AudioEngine.decodeAudioToPcm handles them all
+        // via MediaCodec for compressed formats and a pure-Java WAV decoder.
+        final String[] AUDIO_EXTS = {"wav", "mp3", "ogg", "flac", "aac", "m4a", "3gp", "opus", "wma"};
         for (int i = 0; i < 8; i++) {
             this.loopUris[i] = null;
-            String fileName = "loop_pad_" + (i + 1) + ".wav";
-            DocumentFile wav = loopFolder.findFile(fileName);
-            if (wav != null) {
-                this.loopUris[i] = wav.getUri();
+            String base = "loop_pad_" + (i + 1);
+            for (String ext : AUDIO_EXTS) {
+                DocumentFile audioFile = loopFolder.findFile(base + "." + ext);
+                if (audioFile != null && audioFile.exists()) {
+                    this.loopUris[i] = audioFile.getUri();
+                    break;
+                }
             }
         }
         DocumentFile dataFile = loopFolder.findFile("loop_data.json");

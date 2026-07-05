@@ -348,12 +348,42 @@ public class AudioEngine {
 
     private short[] decodeAudioToPcm(byte[] data) {
         if (data == null || data.length < 4) return null;
+        short[] pcm;
         if (data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F') {
             Log.d(TAG, "Format: WAV → pure-Java decoder");
-            return decodePcmFromWav(data);
+            pcm = decodePcmFromWav(data);
+        } else {
+            Log.d(TAG, "Format: compressed → MediaCodec decoder");
+            pcm = decodeWithMediaCodec(data);
         }
-        Log.d(TAG, "Format: compressed → MediaCodec decoder");
-        return decodeWithMediaCodec(data);
+        // Peak-normalize so low-quality or quiet recordings play at
+        // consistent volume. Targets -3 dBFS; never reduces gain.
+        return normalizeAudio(pcm);
+    }
+
+    /**
+     * Peak-normalize decoded PCM to -3 dBFS so any source quality plays
+     * at a consistent volume. Only boosts (never cuts) up to +12 dB.
+     */
+    private short[] normalizeAudio(short[] pcm) {
+        if (pcm == null || pcm.length == 0) return pcm;
+        int peak = 0;
+        for (short s : pcm) {
+            int abs = Math.abs((int) s);
+            if (abs > peak) peak = abs;
+        }
+        if (peak == 0) return pcm;                    // silence — nothing to do
+        final float TARGET = 23170f;                  // -3 dBFS = 32767 × 0.707
+        if (peak >= (int) TARGET) return pcm;         // already loud — don't reduce
+        float gain = TARGET / peak;
+        if (gain > 4.0f) gain = 4.0f;                // cap at +12 dB; avoid amplifying noise
+        short[] out = new short[pcm.length];
+        for (int i = 0; i < pcm.length; i++) {
+            int v = Math.round(pcm[i] * gain);
+            out[i] = (short) Math.max(-32768, Math.min(32767, v));
+        }
+        Log.i(TAG, "normalizeAudio: peak=" + peak + " gain=×" + String.format("%.2f", gain));
+        return out;
     }
 
     // ─── WAV decoder ─────────────────────────────────────────────────────────
