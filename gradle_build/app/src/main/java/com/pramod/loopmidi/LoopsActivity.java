@@ -98,6 +98,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private AudioEngine audioEngine;
     private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
     private boolean[] loopPlaying = new boolean[8];
+    // Debounce handler: prevents flooding the native command queue when sliders
+    // are dragged (onProgressChanged fires 60+ times/sec). Audio update fires
+    // 40ms after the last slider move; UI labels update immediately as before.
+    private final Handler speedPitchHandler = new Handler(Looper.getMainLooper());
+    private Runnable speedPitchRunnable = null;
     // Load-generation token: incremented on every kit/channel change.
     // Background threads capture the value at start and discard results if it changed.
     private volatile int loadGeneration = 0;
@@ -810,26 +815,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) throws IllegalStateException, UnsupportedOperationException, IllegalArgumentException {
                 float value = Math.max(0.1f, progress / 100.0f);
+                // Update UI labels immediately so the display feels instant
                 if (seekBar.getId() == R.id.seekTempo) {
                     LoopsActivity.this.currentSpeed = value;
                     if (LoopsActivity.this.txtTempoVal != null) {
                         LoopsActivity.this.txtTempoVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentSpeed)));
                     }
-                    LoopsActivity.this.updateAllActiveLoops();
                 } else if (seekBar.getId() == R.id.seekPitch) {
                     LoopsActivity.this.currentPitch = value;
                     if (LoopsActivity.this.txtPitchVal != null) {
                         LoopsActivity.this.txtPitchVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentPitch)));
                     }
-                    LoopsActivity.this.updateAllActiveLoops();
                 } else if (seekBar.getId() == R.id.seekMasterVolume) {
                     LoopsActivity.this.masterVolume = progress / 100.0f;
                     if (LoopsActivity.this.txtMasterVolVal != null) {
                         LoopsActivity.this.txtMasterVolVal.setText(progress + "%");
                     }
                     LoopsActivity.this.prefs.edit().putFloat("loop_master_volume", LoopsActivity.this.masterVolume).apply();
-                    LoopsActivity.this.updateAllActiveLoops();
                 }
+                // Debounce: cancel any pending audio update and reschedule.
+                // Fires 40ms after the last slider movement — prevents flooding
+                // the native command queue when dragging (60+ events/sec).
+                if (LoopsActivity.this.speedPitchRunnable != null) {
+                    LoopsActivity.this.speedPitchHandler.removeCallbacks(LoopsActivity.this.speedPitchRunnable);
+                }
+                LoopsActivity.this.speedPitchRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        LoopsActivity.this.updateAllActiveLoops();
+                        LoopsActivity.this.speedPitchRunnable = null;
+                    }
+                };
+                LoopsActivity.this.speedPitchHandler.postDelayed(LoopsActivity.this.speedPitchRunnable, 40L);
             }
 
             @Override // android.widget.SeekBar.OnSeekBarChangeListener

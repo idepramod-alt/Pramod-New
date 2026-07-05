@@ -163,40 +163,58 @@ public:
             if (v.isLoop && vi < LOOP_VOICES && loopSonic[vi] != nullptr) {
                 // ── Loop voice: use Sonic for independent speed + pitch ──────────
                 sonicStream sonic = loopSonic[vi];
-                float spd  = v.speed.load(std::memory_order_relaxed);
-                float ptch = v.pitch .load(std::memory_order_relaxed);
 
-                // Only reconfigure Sonic when the value actually changed. Calling
-                // sonicSetSpeed/sonicSetPitch unconditionally every single audio
-                // buffer (every ~5-20ms) forced Sonic to re-sync its internal
-                // resampling ratio constantly, which is what produced the audible
-                // warble/glitch on the loop while the speed/pitch sliders were
-                // being touched (and, to a lesser degree, even at rest).
-                if (spd != loopSonicLastSpeed[vi]) {
-                    sonicSetSpeed(sonic, spd);
-                    loopSonicLastSpeed[vi] = spd;
+                // ── Smooth speed/pitch ramping (eliminates Sonic-reconfig crackling) ──
+                // Each audio callback, move 15% toward the target value stored by Java.
+                // This spreads sonicSetSpeed/sonicSetPitch reconfiguration over ~6
+                // callbacks (~30ms), making speed/pitch transitions completely inaudible
+                // instead of producing the sharp crack from an instantaneous hard jump.
+                float targetSpd  = v.speed.load(std::memory_order_relaxed);
+                float targetPtch = v.pitch.load(std::memory_order_relaxed);
+                const float SMOOTH = 0.15f;
+                float newSpd  = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd  - loopSonicLastSpeed[vi]);
+                float newPtch = loopSonicLastPitch[vi] + SMOOTH * (targetPtch - loopSonicLastPitch[vi]);
+                // Snap to target when very close — stops infinite micro-updates
+                if (fabsf(newSpd  - targetSpd)  < 0.002f) newSpd  = targetSpd;
+                if (fabsf(newPtch - targetPtch) < 0.002f) newPtch = targetPtch;
+                if (newSpd != loopSonicLastSpeed[vi]) {
+                    sonicSetSpeed(sonic, newSpd);
+                    loopSonicLastSpeed[vi] = newSpd;
                 }
-                if (ptch != loopSonicLastPitch[vi]) {
-                    sonicSetPitch(sonic, ptch);
-                    loopSonicLastPitch[vi] = ptch;
+                if (newPtch != loopSonicLastPitch[vi]) {
+                    sonicSetPitch(sonic, newPtch);
+                    loopSonicLastPitch[vi] = newPtch;
                 }
+                float spd = loopSonicLastSpeed[vi];   // use smoothed value for buffer calc
 
-                // Feed raw samples into Sonic until it has enough to produce numFrames output,
-                // keeping some extra lookahead so a sudden speed change doesn't starve the
-                // stream mid-buffer (which would otherwise leave a silent gap/click).
+                // ── Generous Sonic feeding with loop-boundary crossfade ──────────
+                // Scale the feed target by current speed: at speed > 1 Sonic consumes
+                // more raw input per output frame, so the old fixed threshold of
+                // numFrames*2 starved the stream at high speeds → silent gap / click.
+                // Crossfade the last XFADE samples of the loop into the head to remove
+                // the hard discontinuity (click) that occurred at every loop wrap point.
+                static const int XFADE = 256;
+                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
+                if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
                 int avail = sonicSamplesAvailable(sonic);
-                if (avail < numFrames * 2) {
-                    // How many raw samples to feed: more when speed > 1 (faster playback)
-                    int toFeed = (int)((numFrames * 2 - avail) * spd) + 512;
+                if (avail < feedTarget) {
+                    int toFeed = feedTarget - avail;
                     if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
                     int fed = 0;
                     size_t pcmSize = pb.pcm.size();
                     while (fed < toFeed) {
-                        if (v.position >= pcmSize) {
-                            v.position = 0;  // seamless loop wrap
+                        if (v.position >= pcmSize) v.position = 0;
+                        size_t pos = v.position;
+                        float s = pb.pcm[pos];
+                        // Crossfade tail → head at loop boundary to eliminate wrap click
+                        if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
+                            size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
+                            float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
+                            s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
                         }
-                        feedBuf[fed++] = pb.pcm[v.position++];
+                        feedBuf[fed++] = s;
+                        v.position++;
                     }
                     sonicWriteFloatToStream(sonic, feedBuf, fed);
                 }
@@ -274,10 +292,10 @@ public:
             gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = out[i];
         gDelayWrite = (gDelayWrite + numFrames) % DELAY_BUF_SIZE;
 
-        // Hard clip
+        // Soft saturation (tanh): smoother than hard clip; avoids the harsh
+        // click that hard clipping adds when transients exceed ±1.0.
         for (int i = 0; i < numFrames; i++) {
-            if      (out[i] >  1.f) out[i] =  1.f;
-            else if (out[i] < -1.f) out[i] = -1.f;
+            out[i] = tanhf(out[i]);
         }
         return oboe::DataCallbackResult::Continue;
     }
@@ -351,25 +369,18 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed+pitch update for loop voice — no gap, no restart
+            // Live speed+pitch update for loop voice — no gap, no restart.
+            // Only update the target atomics here; DO NOT call sonicSetSpeed/
+            // sonicSetPitch directly. The render loop ramps loopSonicLastSpeed/
+            // Pitch smoothly toward v.speed/v.pitch (15% per callback, ~30ms),
+            // so each sonicSet call is a tiny step — completely inaudible —
+            // instead of a hard jump that cracks on Sonic's internal re-sync.
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
                 if (v.active.load()) {
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
-                    // Update Sonic stream parameters live (only when actually changed —
-                    // see loopSonicLastSpeed/Pitch comment above)
-                    if (loopSonic[c.padIdx]) {
-                        if (c.speed != loopSonicLastSpeed[c.padIdx]) {
-                            sonicSetSpeed(loopSonic[c.padIdx], c.speed);
-                            loopSonicLastSpeed[c.padIdx] = c.speed;
-                        }
-                        if (c.pitch != loopSonicLastPitch[c.padIdx]) {
-                            sonicSetPitch(loopSonic[c.padIdx], c.pitch);
-                            loopSonicLastPitch[c.padIdx] = c.pitch;
-                        }
-                    }
                 }
             }
             break;
