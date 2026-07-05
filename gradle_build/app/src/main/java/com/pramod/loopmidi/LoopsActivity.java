@@ -477,12 +477,28 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void onStopLoopClick(View view) {
         try {
+            // Use stopAll() unconditionally instead of checking loopPlaying[i].
+            // In One-Shot mode pads play via playSample() and loopPlaying[i] is
+            // never set to true, so the old guard silently skipped every pad and
+            // the stop button appeared to do nothing. stopAll() sends a single
+            // CMD_STOP_ALL that silences every active voice regardless of mode.
+            if (this.audioEngine != null) {
+                this.audioEngine.stopAll();
+            }
+            // Cancel any queued slider-debounce runnable so a pending update
+            // can't re-start a voice immediately after we stopped everything.
+            if (this.speedPitchRunnable != null) {
+                this.speedPitchHandler.removeCallbacks(this.speedPitchRunnable);
+                this.speedPitchRunnable = null;
+            }
             for (int i = 0; i < 8; i++) {
-                if (this.loopPlaying[i]) {
-                    this.audioEngine.stopPad(i);
-                    this.loopPlaying[i] = false;
+                this.loopPlaying[i] = false;
+                if (this.loopPads[i] != null) {
                     this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
                 }
+            }
+            if (this.txtLoopStatus != null) {
+                this.txtLoopStatus.setText("STOPPED");
             }
         } catch (Throwable th) {
         }

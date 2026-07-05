@@ -187,18 +187,21 @@ public:
                 }
                 float spd = loopSonicLastSpeed[vi];   // use smoothed value for buffer calc
 
-                // ── Generous Sonic feeding with loop-boundary crossfade ──────────
-                // Scale the feed target by current speed: at speed > 1 Sonic consumes
-                // more raw input per output frame, so the old fixed threshold of
-                // numFrames*2 starved the stream at high speeds → silent gap / click.
-                // Crossfade the last XFADE samples of the loop into the head to remove
-                // the hard discontinuity (click) that occurred at every loop wrap point.
+                // ── Sonic feeding with loop-boundary crossfade ───────────────────
+                // Keep enough OUTPUT samples buffered (3× numFrames) so playback
+                // never starves mid-buffer. sonicSamplesAvailable() returns OUTPUT
+                // samples (after speed processing), so the threshold must be in the
+                // output domain too. When avail drops below the target, feed enough
+                // RAW INPUT samples to refill it — scale by spd because Sonic needs
+                // spd× more input per output frame at higher speeds.
+                // Crossfade the last XFADE input samples at the loop boundary so the
+                // wrap point is inaudible (blends tail smoothly into head).
                 static const int XFADE = 256;
-                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
-                if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
+                const int OUTPUT_TARGET = numFrames * 3;  // desired buffered output frames
                 int avail = sonicSamplesAvailable(sonic);
-                if (avail < feedTarget) {
-                    int toFeed = feedTarget - avail;
+                if (avail < OUTPUT_TARGET) {
+                    // How many raw input samples to feed to reach OUTPUT_TARGET
+                    int toFeed = (int)((OUTPUT_TARGET - avail) * spd) + 256;
                     if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
                     int fed = 0;
@@ -404,10 +407,18 @@ public:
         if (stream) { stream->stop(); stream->close(); stream.reset(); }
         memset(gDelayBuf, 0, sizeof(gDelayBuf));
 
-        // Initialize Sonic streams with the correct sample rate
+        // Reinitialize Sonic streams with the new sample rate.
+        // Also reset loopSonicLastSpeed/Pitch to 1.0 so that the render
+        // loop's smooth-ramp comparisons match the freshly created streams'
+        // default state (speed=1.0, pitch=1.0). Without this reset, after
+        // an Oboe error/restart the render loop sees "already at target"
+        // (old last == old target) but the new stream is at default 1.0,
+        // so sonicSetSpeed/Pitch would never fire → wrong playback speed/pitch.
         for (int i = 0; i < LOOP_VOICES; i++) {
             if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);
             loopSonic[i] = sonicCreateStream(sampleRate, 1);
+            loopSonicLastSpeed[i] = 1.0f;
+            loopSonicLastPitch[i] = 1.0f;
         }
 
         oboe::AudioStreamBuilder b;
