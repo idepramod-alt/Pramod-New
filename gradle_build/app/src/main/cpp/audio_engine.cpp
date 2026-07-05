@@ -372,30 +372,75 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed+pitch update — apply to Sonic immediately.
-            // This is called at most every 40ms (Java-side seekbar debounce),
-            // so Sonic's internal realloc() fires at most 25×/s, not 200×/s.
-            // A 2ms output fade (loopFadeFrames) in the render loop above
-            // masks the brief Sonic reconfig click at the change boundary.
+            // Live speed+pitch update for a playing loop.
+            //
+            // IMPORTANT — why we RECREATE the stream instead of calling setSpeed/setPitch:
+            // Sonic uses WSOLA (Waveform Similarity Overlap-Add) internally. When
+            // sonicSetSpeed or sonicSetPitch is called on a *running* stream the
+            // algorithm's overlap windows, grain positions and internal phase state
+            // become inconsistent with the new ratio → audible crackling at every
+            // parameter change regardless of how infrequently they fire.
+            //
+            // Fix: destroy the old stream, create a fresh one with the new params,
+            // then pre-fill it from the current loop position so the render loop
+            // finds a ready buffer on its very next invocation. A LOOP_FADE_LEN
+            // output fade (96 frames ≈ 2 ms) smoothly gates in the new stream.
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
                 if (v.active.load()) {
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
-                    if (loopSonic[c.padIdx]) {
-                        bool spdChg = (c.speed != loopSonicLastSpeed[c.padIdx]);
-                        bool ptcChg = (c.pitch != loopSonicLastPitch[c.padIdx]);
-                        if (spdChg) {
-                            sonicSetSpeed(loopSonic[c.padIdx], c.speed);
-                            loopSonicLastSpeed[c.padIdx] = c.speed;
-                        }
-                        if (ptcChg) {
-                            sonicSetPitch(loopSonic[c.padIdx], c.pitch);
-                            loopSonicLastPitch[c.padIdx] = c.pitch;
-                        }
-                        if (spdChg || ptcChg) {
-                            loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
+
+                    bool spdChg = (c.speed != loopSonicLastSpeed[c.padIdx]);
+                    bool ptcChg = (c.pitch != loopSonicLastPitch[c.padIdx]);
+
+                    if ((spdChg || ptcChg) && loopSonic[c.padIdx]) {
+                        int pi = v.padIndex;
+                        if (pi >= 0 && pi < MAX_PADS) {
+                            PadBuffer& pb = pads[pi];
+                            if (pb.loaded.load(std::memory_order_acquire) && !pb.pcm.empty()) {
+
+                                // Recreate stream with correct params from scratch.
+                                sonicDestroyStream(loopSonic[c.padIdx]);
+                                sonicStream ns = sonicCreateStream(sampleRate, 1);
+                                if (ns) {
+                                    sonicSetSpeed(ns, c.speed);
+                                    sonicSetPitch(ns, c.pitch);
+                                    loopSonicLastSpeed[c.padIdx] = c.speed;
+                                    loopSonicLastPitch[c.padIdx] = c.pitch;
+
+                                    // Pre-fill: feed enough raw input from the current
+                                    // playback position so the render loop reads real
+                                    // audio instead of zeros on the first call.
+                                    // Advance v.position so render loop continues
+                                    // seamlessly from where the pre-fill left off.
+                                    static const int XFADE = 256;
+                                    int toFeed = (int)(framesPerBurst * 4 * c.speed) + 512;
+                                    if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
+                                    size_t pcmSize = pb.pcm.size();
+                                    for (int fi = 0; fi < toFeed; fi++) {
+                                        if (v.position >= pcmSize) v.position = 0;
+                                        size_t pos = v.position;
+                                        float s = pb.pcm[pos];
+                                        // Preserve loop-boundary crossfade during pre-fill
+                                        if (pcmSize > (size_t)(XFADE * 2) &&
+                                                pos >= pcmSize - (size_t)XFADE) {
+                                            size_t tailOff = pos - (pcmSize - XFADE);
+                                            float t = (float)tailOff / (float)XFADE;
+                                            s = s * (1.0f - t) + pb.pcm[tailOff] * t;
+                                        }
+                                        feedBuf[fi] = s;
+                                        v.position++;
+                                    }
+                                    sonicWriteFloatToStream(ns, feedBuf, toFeed);
+                                    loopSonic[c.padIdx] = ns;
+                                    loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
+                                } else {
+                                    // sonicCreateStream failed (out of memory?) — keep old
+                                    loopSonic[c.padIdx] = nullptr;
+                                }
+                            }
                         }
                     }
                 }
