@@ -239,37 +239,38 @@ public:
                 // never starves mid-buffer. sonicSamplesAvailable() returns OUTPUT
                 // samples (after speed processing), so the threshold must be in the
                 // output domain too. When avail drops below the target, feed enough
-                // Feed unconditionally every callback — same formula as the
-                // confirmed-working commit #103.  Using a fixed large target
-                // (numFrames*spd*3+512) means Sonic's internal output buffer
-                // grows once on the first few callbacks to accommodate this
-                // amount, then NEVER needs to grow again (realloc only
-                // enlarges, never shrinks).  A conditional avail-based feed
-                // risks starving Sonic when the check just barely fires late,
-                // producing silent frames → crackling.  Unconditional feeding
-                // guarantees Sonic's output ring is always well-stocked.
+                // ── Sonic feeding: top-up to feedTarget level ───────────────────
+                // feedTarget = numFrames*spd*3+512 (same as confirmed-working #103).
+                // Only feed the DIFFERENCE (feedTarget - avail) to maintain this
+                // level — not unconditional feeding, which would overfill Sonic's
+                // output ring every callback and trigger realloc() growth.
                 // Crossfade the last XFADE input samples at the loop boundary
-                // so the wrap point click is inaudible.
+                // so the wrap-point click is inaudible (blends tail into head).
                 static const int XFADE = 256;
-                int toFeed = (int)(numFrames * spd * 3) + 512;
-                if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
+                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
+                if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
+                int avail = sonicSamplesAvailable(sonic);
+                if (avail < feedTarget) {
+                    int toFeed = feedTarget - avail;
+                    if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
-                int fed = 0;
-                size_t pcmSize = pb.pcm.size();
-                while (fed < toFeed) {
-                    if (v.position >= pcmSize) v.position = 0;
-                    size_t pos = v.position;
-                    float s = pb.pcm[pos];
-                    // Crossfade tail → head at loop boundary to eliminate wrap click
-                    if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
-                        size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
-                        float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
-                        s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
+                    int fed = 0;
+                    size_t pcmSize = pb.pcm.size();
+                    while (fed < toFeed) {
+                        if (v.position >= pcmSize) v.position = 0;
+                        size_t pos = v.position;
+                        float s = pb.pcm[pos];
+                        // Crossfade tail → head at loop boundary to eliminate wrap click
+                        if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
+                            size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
+                            float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
+                            s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
+                        }
+                        feedBuf[fed++] = s;
+                        v.position++;
                     }
-                    feedBuf[fed++] = s;
-                    v.position++;
+                    sonicWriteFloatToStream(sonic, feedBuf, fed);
                 }
-                sonicWriteFloatToStream(sonic, feedBuf, fed);
 
                 // Read smooth-ramped output from Sonic
                 int got = sonicReadFloatFromStream(sonic, readBuf,
