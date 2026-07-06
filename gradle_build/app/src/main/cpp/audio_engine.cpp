@@ -235,7 +235,41 @@ public:
                 // ── Loop voice: use Sonic for independent speed + pitch ──────────
                 sonicStream sonic = loopSonic[vi];
 
-                float spd = loopSonicLastSpeed[vi];   // speed currently applied to Sonic
+                // ── Smooth speed/pitch ramping ───────────────────────────────────
+                // WHY: sonicSetSpeed/sonicSetPitch with a hard jump to the target
+                // value causes Sonic's WSOLA internals to re-sync abruptly — the
+                // first ~10ms of output after the jump contains audible artifacts
+                // (the "crack" when dragging the seekbar).
+                //
+                // FIX: Each audio callback, move only 15% toward the target stored
+                // by the Java side (v.speed / v.pitch atomics updated by CMD_UPDATE).
+                // This spreads the transition over ~6 callbacks (~30ms), making each
+                // individual sonicSet call a tiny step that Sonic's WSOLA handles
+                // smoothly — completely inaudible instead of a sharp crack.
+                //
+                // CMD_UPDATE_SPEED_PITCH only writes the TARGET atomics; it does NOT
+                // call sonicSetSpeed/Pitch directly. All Sonic param changes happen
+                // here, gradually, on the audio thread, at a pace Sonic can handle.
+                {
+                    float targetSpd  = v.speed.load(std::memory_order_relaxed);
+                    float targetPtch = v.pitch.load(std::memory_order_relaxed);
+                    const float SMOOTH = 0.15f;
+                    float newSpd  = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd  - loopSonicLastSpeed[vi]);
+                    float newPtch = loopSonicLastPitch[vi] + SMOOTH * (targetPtch - loopSonicLastPitch[vi]);
+                    // Snap to target when very close — stops infinite micro-updates
+                    if (fabsf(newSpd  - targetSpd)  < 0.002f) newSpd  = targetSpd;
+                    if (fabsf(newPtch - targetPtch) < 0.002f) newPtch = targetPtch;
+                    if (newSpd != loopSonicLastSpeed[vi]) {
+                        sonicSetSpeed(sonic, newSpd);
+                        loopSonicLastSpeed[vi] = newSpd;
+                    }
+                    if (newPtch != loopSonicLastPitch[vi]) {
+                        sonicSetPitch(sonic, newPtch);
+                        loopSonicLastPitch[vi] = newPtch;
+                    }
+                }
+
+                float spd = loopSonicLastSpeed[vi];   // current (ramped) speed for feed calc
 
                 // ── Sonic feeding with loop-boundary crossfade ───────────────────
                 // Keep enough OUTPUT samples buffered (3× numFrames) so playback
@@ -458,99 +492,24 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed/pitch update — snapshot → recreate → crossfade.
-            // See the comment block on LOOP_FADE_LEN above for full rationale.
+            // Live speed/pitch update — update TARGET atomics ONLY.
+            //
+            // DO NOT call sonicSetSpeed/sonicSetPitch here.
+            // The render loop's smooth-ramp block (15% per callback) reads
+            // v.speed / v.pitch each callback and gradually moves
+            // loopSonicLastSpeed/Pitch toward the target, calling sonicSet
+            // with tiny per-callback steps that Sonic's WSOLA handles cleanly.
+            //
+            // A hard sonicSet jump to the target value from the command handler
+            // was the root cause of crackling: Sonic's internal WSOLA overlap
+            // windows re-synchronise abruptly → discontinuity → audible crack.
+            // Spreading the same change over ~6 callbacks (~30ms) is inaudible.
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
                 if (v.active.load()) {
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
-
-                    bool spdChg = (c.speed != loopSonicLastSpeed[c.padIdx]);
-                    bool ptcChg = (c.pitch != loopSonicLastPitch[c.padIdx]);
-
-                    if ((spdChg || ptcChg) && loopSonic[c.padIdx]) {
-                        int pi = v.padIndex;
-                        PadBuffer* pb = (pi >= 0 && pi < MAX_PADS) ? &pads[pi] : nullptr;
-                        bool hasPcm = pb && pb->loaded.load(std::memory_order_acquire)
-                                         && !pb->pcm.empty();
-
-                        // ── Step 1: snapshot LOOP_FADE_LEN frames of OLD audio ────
-                        // Take whatever Sonic has buffered already.  If the buffer is
-                        // short (e.g. right after CMD_PLAY when Sonic hasn't filled
-                        // yet), pad the remainder with raw PCM so the old side of the
-                        // crossfade is NEVER zeros — zeros cause the step discontinuity
-                        // that was the root cause of every previous crackling attempt.
-                        int snap = sonicSamplesAvailable(loopSonic[c.padIdx]);
-                        if (snap > LOOP_FADE_LEN) snap = LOOP_FADE_LEN;
-                        if (snap > 0)
-                            sonicReadFloatFromStream(loopSonic[c.padIdx],
-                                                     loopOldOut[c.padIdx], snap);
-                        if (snap < LOOP_FADE_LEN) {
-                            if (hasPcm) {
-                                size_t pos     = v.position;
-                                size_t pcmSize = pb->pcm.size();
-                                for (int fi = snap; fi < LOOP_FADE_LEN; fi++) {
-                                    if (pos >= pcmSize) pos = 0;
-                                    loopOldOut[c.padIdx][fi] = pb->pcm[pos++];
-                                }
-                            } else {
-                                // Fallback: silently repeat last known sample
-                                float last = (snap > 0) ? loopOldOut[c.padIdx][snap - 1] : 0.f;
-                                for (int fi = snap; fi < LOOP_FADE_LEN; fi++)
-                                    loopOldOut[c.padIdx][fi] = last;
-                            }
-                        }
-                        loopOldFrames[c.padIdx] = LOOP_FADE_LEN;
-
-                        // ── Step 2: drain → reconfigure (fresh WSOLA, zero malloc) ──
-                        //
-                        // WHY drain instead of destroy+create:
-                        //   sonicDestroyStream/sonicCreateStream call free()/malloc()
-                        //   which locks the system allocator mutex.  If ANY other
-                        //   thread holds that mutex (e.g. the Java GC, a MediaCodec
-                        //   decode thread), the audio callback blocks → buffer underrun
-                        //   → crackling.  This is priority inversion in its purest
-                        //   form, and it was the root cause of every remaining crack.
-                        //
-                        // drainSonicStream() uses sonicFlushStream() + a read loop —
-                        // no heap allocation at all.  After the drain, the stream's
-                        // WSOLA overlap windows are empty (same effect as a fresh
-                        // stream), so sonicSetSpeed/Pitch produce clean output from
-                        // frame 0 without artifacts.
-                        drainSonicStream(loopSonic[c.padIdx], feedBuf, SCRATCH_SIZE);
-                        sonicStream ns = loopSonic[c.padIdx];  // same allocation, fresh state
-                        if (ns) {
-                            sonicSetSpeed(ns, c.speed);
-                            sonicSetPitch(ns, c.pitch);
-                            loopSonicLastSpeed[c.padIdx] = c.speed;
-                            loopSonicLastPitch[c.padIdx] = c.pitch;
-
-                            // Prime: feed enough raw PCM so the reconfigured stream
-                            // has at least LOOP_FADE_LEN output frames queued.
-                            // At speed S, Sonic needs S× more input per output frame,
-                            // so scale by speed to guarantee enough output.
-                            if (hasPcm) {
-                                int toFeed = (int)(LOOP_FADE_LEN * c.speed) + 256;
-                                if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
-                                size_t pos     = v.position;
-                                size_t pcmSize = pb->pcm.size();
-                                for (int fi = 0; fi < toFeed; fi++) {
-                                    if (pos >= pcmSize) pos = 0;
-                                    feedBuf[fi] = pb->pcm[pos++];
-                                }
-                                sonicWriteFloatToStream(ns, feedBuf, toFeed);
-                            }
-                            // loopSonic[c.padIdx] already points to ns — no swap needed
-
-                            // ── Step 3: arm crossfade ────────────────────────────
-                            loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
-                        } else {
-                            // Stream pointer is null (shouldn't happen post-init)
-                            loopFadeFrames[c.padIdx] = 0;
-                        }
-                    }
                 }
             }
             break;
