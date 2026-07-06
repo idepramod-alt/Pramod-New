@@ -119,50 +119,13 @@ public:
     float loopSonicLastSpeed[LOOP_VOICES];
     float loopSonicLastPitch[LOOP_VOICES];
 
-    // ── Crossfade state for seamless speed/pitch transitions ─────────────────
-    //
-    // Root cause of crackling: calling sonicSetSpeed/sonicSetPitch on a
-    // *running* Sonic stream leaves WSOLA's internal overlap windows in an
-    // inconsistent state.  The first ~128-256 output frames after the call are
-    // artifact frames (WSOLA is adapting to the new ratio).  Any crossfade that
-    // fades those artifact frames IN will still crackle — the artifacts appear
-    // early in the crossfade at low but audible amplitude.
-    //
-    // Fix — three steps, all on the audio thread, no blocking:
-    //
-    // 1. SNAPSHOT (before changing anything): consume up to LOOP_FADE_LEN
-    //    frames from Sonic's output buffer.  If the buffer has fewer, fill the
-    //    remainder with raw PCM so the old side of the crossfade is never zeros.
-    //    (Zero-fill = step discontinuity every 40ms = the original crackling.)
-    //
-    // 2. RECREATE: sonicDestroyStream + sonicCreateStream gives a fresh WSOLA
-    //    state with no inconsistency.  Prime the new stream with enough raw
-    //    input so it has LOOP_FADE_LEN output frames ready immediately.
-    //    sonicCreateStream is a small (~1 KB) allocation; at ≤25×/s (Java 40ms
-    //    debounce) it costs < 0.1% of the callback budget on any modern ARMv8
-    //    SoC — well within real-time budget.
-    //
-    // 3. CROSSFADE: old snapshot fades OUT (1→0) while new stream fades IN
-    //    (0→1) over LOOP_FADE_LEN frames.  Both signals present throughout →
-    //    output level never jumps → zero discontinuity → zero crackling.
-    //
-    // LOOP_FADE_LEN = 512 (~10 ms at 48 kHz): long enough for WSOLA warm-up
-    // to complete well before new output reaches full volume.
-    static const int LOOP_FADE_LEN = 512;    // ~10 ms at 48 kHz
-    float loopOldOut[LOOP_VOICES][512];      // pre-change snapshot (fade-out side)
-    int   loopOldFrames[LOOP_VOICES];        // valid frames in loopOldOut[vi] (always == LOOP_FADE_LEN after a swap)
-    int   loopFadeFrames[LOOP_VOICES];       // crossfade frames remaining (LOOP_FADE_LEN → 0)
-
     // scratch buffers (audio thread only — no malloc in callback)
     static const int SCRATCH_SIZE = 4096;
     float feedBuf[SCRATCH_SIZE];
     float readBuf[SCRATCH_SIZE];
 
     AudioEngineImpl() {
-        memset(loopSonic,      0, sizeof(loopSonic));
-        memset(loopOldOut,     0, sizeof(loopOldOut));
-        memset(loopOldFrames,  0, sizeof(loopOldFrames));
-        memset(loopFadeFrames, 0, sizeof(loopFadeFrames));
+        memset(loopSonic, 0, sizeof(loopSonic));
         for (int i = 0; i < LOOP_VOICES; i++) {
             loopSonicLastSpeed[i] = 1.f;
             loopSonicLastPitch[i] = 1.f;
@@ -306,14 +269,9 @@ public:
                     sonicWriteFloatToStream(sonic, feedBuf, fed);
                 }
 
-                // Read post-change (or steady-state) output from Sonic
+                // Read smooth-ramped output from Sonic
                 int got = sonicReadFloatFromStream(sonic, readBuf,
                                                    numFrames < SCRATCH_SIZE ? numFrames : SCRATCH_SIZE);
-
-                // xfStart: offset into loopOldOut already consumed this crossfade.
-                // Computed once so decrementing loopFadeFrames inside the loop
-                // doesn't skew the index.
-                const int xfStart = LOOP_FADE_LEN - loopFadeFrames[vi];
 
                 for (int i = 0; i < numFrames; i++) {
                     // Envelope
@@ -326,25 +284,7 @@ public:
                             break;
                         }
                     }
-
-                    float new_s = (i < got) ? readBuf[i] : 0.f;
-                    float s;
-
-                    if (loopFadeFrames[vi] > 0) {
-                        // Crossfade: old snapshot (pre-param-change) fades OUT,
-                        // new Sonic output (post-param-change) fades IN together.
-                        // No sample is ever stepped to zero → no crackling.
-                        int   xfPos = xfStart + i;
-                        float old_s = (xfPos < loopOldFrames[vi]) ? loopOldOut[vi][xfPos] : 0.f;
-                        float t_new = (float)(xfPos + 1) / (float)LOOP_FADE_LEN;
-                        if (t_new > 1.f) t_new = 1.f;
-                        s = old_s * (1.f - t_new) + new_s * t_new;
-                        loopFadeFrames[vi]--;
-                    } else {
-                        s = new_s;
-                    }
-
-                    out[i] += s * vol * v.envGain;
+                    out[i] += (i < got ? readBuf[i] : 0.f) * vol * v.envGain;
                 }
 
             } else {
@@ -455,10 +395,6 @@ public:
             v.padIndex    = c.padIdx;
             v.position    = 0;
             v.pitchAcc    = 0.f;
-            if (c.isLoop && vi < LOOP_VOICES) {
-                loopFadeFrames[vi] = 0;
-                loopOldFrames[vi]  = 0;
-            }
             v.volume.store(c.volume, std::memory_order_relaxed);
             v.speed .store(c.speed,  std::memory_order_relaxed);
             v.pitch .store(c.pitch,  std::memory_order_relaxed);
@@ -546,16 +482,31 @@ public:
             loopSonicLastSpeed[i] = 1.0f;
             loopSonicLastPitch[i] = 1.0f;
 
-            // ── Pre-size Sonic internal buffers ──────────────────────────────
-            // sonicWriteFloatToStream / sonicFlushStream can call realloc() the
-            // FIRST time they need to grow an internal ring buffer.  Pre-sizing
-            // here (called from a non-RT thread) ensures all rings are already
-            // large enough for any write ≤ SCRATCH_SIZE that will ever happen
-            // inside the audio callback — eliminating all realloc paths from
-            // the real-time path entirely.
+            // ── Pre-size Sonic internal buffers at WORST-CASE (max speed + max pitch) ──
+            //
+            // Why this is critical:
+            //   Sonic's WSOLA internally calls enlargeInputBufferIfNeeded() /
+            //   enlargeOutputBufferIfNeeded() / enlargePitchBufferIfNeeded()
+            //   whenever it needs more space.  These call realloc() — which locks
+            //   the system allocator mutex.  If the RT audio thread holds realloc
+            //   while the GC runs, that's priority inversion → buffer underrun
+            //   → crackling (or worse, crash).
+            //
+            //   The buffer sizes depend on `maxRequired`, which is proportional to
+            //   speed × pitch.  Pre-sizing here at speed=4.0 (max) and pitch=8.0
+            //   (max) guarantees all rings are already at their largest possible
+            //   size.  Any subsequent sonicWriteFloatToStream call in the audio
+            //   callback — at any speed/pitch ≤ these maximums — will NEVER need
+            //   to reallocate.  This makes the smooth-ramp approach (calling
+            //   sonicSetSpeed/Pitch with tiny per-callback steps) permanently safe.
             if (loopSonic[i]) {
                 float dummy[SCRATCH_SIZE];
                 memset(dummy, 0, sizeof(dummy));
+                // Set to absolute maximums so Sonic computes max `maxRequired`
+                sonicSetSpeed(loopSonic[i], 4.0f);   // app-side max speed
+                sonicSetPitch(loopSonic[i], 8.0f);   // app-side max pitch
+                // Write + flush + drain: grows all internal rings to their
+                // maximum size while still on a non-RT thread (mallocs are safe here)
                 sonicWriteFloatToStream(loopSonic[i], dummy, SCRATCH_SIZE);
                 sonicFlushStream(loopSonic[i]);
                 int avail;
@@ -563,7 +514,10 @@ public:
                     int n = avail < SCRATCH_SIZE ? avail : SCRATCH_SIZE;
                     sonicReadFloatFromStream(loopSonic[i], dummy, n);
                 }
-                // Stream is now sized + clean: ready for RT use with no further allocs
+                // Reset to defaults — stream is now sized for worst case + clean
+                sonicSetSpeed(loopSonic[i], 1.0f);
+                sonicSetPitch(loopSonic[i], 1.0f);
+                // Stream is ready: no further allocs at any speed/pitch ≤ max values
             }
         }
 
