@@ -169,30 +169,44 @@ public:
         }
     }
 
-    // ── Drain a Sonic stream to a clean "fresh" state — NO malloc/free ────────
+    // ── Drain a Sonic stream to a clean "fresh" state — safe for RT thread ────
     //
-    // sonicFlushStream() forces all buffered input through WSOLA and writes the
-    // result to the output ring.  After draining, the stream has:
-    //   • no buffered input
-    //   • no WSOLA overlap windows from the old speed/pitch
-    //   • output ring empty
+    // Why not just sonicFlushStream() first?
+    //   sonicFlushStream() pushes remaining buffered input through WSOLA into
+    //   the output ring.  If the output ring is already near-full, Sonic may
+    //   call realloc() to grow it — and realloc() locks the system allocator
+    //   mutex → priority inversion → crackling.
     //
-    // This is equivalent to destroy + create but with ZERO heap allocation —
-    // critical because malloc/free inside the audio callback can block on an
-    // allocator mutex, causing priority inversion → buffer underrun → crackling.
+    // Safe drain order:
+    //   1. Read-drain all existing output first  → output ring is now empty
+    //      (maximum free space — realloc impossible in step 2).
+    //   2. sonicFlushStream() → processes any remaining buffered input and
+    //      writes result to the now-empty output ring (no realloc needed).
+    //   3. Read-drain the flushed output.
     //
-    // tmpBuf / tmpLen: any scratch buffer big enough (feedBuf / SCRATCH_SIZE works).
+    // Additionally: all Sonic streams are pre-sized in init() by writing and
+    // draining SCRATCH_SIZE samples before any callback runs.  This guarantees
+    // the input/pitch/output ring capacities are already large enough for all
+    // subsequent writes ≤ SCRATCH_SIZE, eliminating realloc paths entirely.
+    //
+    // After this call the stream is in a clean idle state: input ring empty,
+    // output ring empty, WSOLA buffers flushed — equivalent to a fresh stream
+    // without any heap allocation in this function itself.
     void drainSonicStream(sonicStream s, float* tmpBuf, int tmpLen) {
         if (!s) return;
-        sonicFlushStream(s);          // push all internally buffered frames to output ring
+        // Step 1: drain pre-existing output (frees output ring space)
         int avail;
         while ((avail = sonicSamplesAvailable(s)) > 0) {
             int n = (avail < tmpLen) ? avail : tmpLen;
             sonicReadFloatFromStream(s, tmpBuf, n);
         }
-        // After the drain the stream is in a clean idle state: no old overlap
-        // windows, no residual input — sonicSetSpeed/Pitch can now be called
-        // without leaving WSOLA in an inconsistent transition state.
+        // Step 2: flush remaining input → output (output ring has max free space now)
+        sonicFlushStream(s);
+        // Step 3: drain the flushed output
+        while ((avail = sonicSamplesAvailable(s)) > 0) {
+            int n = (avail < tmpLen) ? avail : tmpLen;
+            sonicReadFloatFromStream(s, tmpBuf, n);
+        }
     }
 
     // ── Audio callback (realtime thread — no malloc, no mutex, no blocking) ──
@@ -378,11 +392,19 @@ public:
             int vi;
             if (c.isLoop) {
                 vi = c.padIdx % LOOP_VOICES;
-                // Reset Sonic stream for clean restart — NO malloc/free.
-                // drainSonicStream() flushes WSOLA internal state without
-                // destroying the allocation; sonicSetSpeed/Pitch on the
-                // drained stream then starts fresh with zero artifacts.
-                drainSonicStream(loopSonic[vi], feedBuf, SCRATCH_SIZE);
+                // Reset Sonic stream for clean restart — no malloc in hot path.
+                // drainSonicStream() flushes WSOLA state without destroying the
+                // allocation; sonicSetSpeed/Pitch on the drained stream then
+                // starts fresh with zero artifacts.
+                // Null guard: streams are pre-allocated in init(), but if one is
+                // somehow null (e.g. sonicCreateStream() returned null at startup
+                // due to OOM) we fall back to creating one here.  This branch is
+                // NOT on the hot path — it fires at most once per lifetime.
+                if (!loopSonic[vi]) {
+                    loopSonic[vi] = sonicCreateStream(sampleRate, 1);
+                } else {
+                    drainSonicStream(loopSonic[vi], feedBuf, SCRATCH_SIZE);
+                }
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
@@ -564,6 +586,26 @@ public:
             loopSonic[i] = sonicCreateStream(sampleRate, 1);
             loopSonicLastSpeed[i] = 1.0f;
             loopSonicLastPitch[i] = 1.0f;
+
+            // ── Pre-size Sonic internal buffers ──────────────────────────────
+            // sonicWriteFloatToStream / sonicFlushStream can call realloc() the
+            // FIRST time they need to grow an internal ring buffer.  Pre-sizing
+            // here (called from a non-RT thread) ensures all rings are already
+            // large enough for any write ≤ SCRATCH_SIZE that will ever happen
+            // inside the audio callback — eliminating all realloc paths from
+            // the real-time path entirely.
+            if (loopSonic[i]) {
+                float dummy[SCRATCH_SIZE];
+                memset(dummy, 0, sizeof(dummy));
+                sonicWriteFloatToStream(loopSonic[i], dummy, SCRATCH_SIZE);
+                sonicFlushStream(loopSonic[i]);
+                int avail;
+                while ((avail = sonicSamplesAvailable(loopSonic[i])) > 0) {
+                    int n = avail < SCRATCH_SIZE ? avail : SCRATCH_SIZE;
+                    sonicReadFloatFromStream(loopSonic[i], dummy, n);
+                }
+                // Stream is now sized + clean: ready for RT use with no further allocs
+            }
         }
 
         oboe::AudioStreamBuilder b;
