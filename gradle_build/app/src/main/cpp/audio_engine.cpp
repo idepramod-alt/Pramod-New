@@ -239,35 +239,37 @@ public:
                 // never starves mid-buffer. sonicSamplesAvailable() returns OUTPUT
                 // samples (after speed processing), so the threshold must be in the
                 // output domain too. When avail drops below the target, feed enough
-                // RAW INPUT samples to refill it — scale by spd because Sonic needs
-                // spd× more input per output frame at higher speeds.
-                // Crossfade the last XFADE input samples at the loop boundary so the
-                // wrap point is inaudible (blends tail smoothly into head).
+                // Feed unconditionally every callback — same formula as the
+                // confirmed-working commit #103.  Using a fixed large target
+                // (numFrames*spd*3+512) means Sonic's internal output buffer
+                // grows once on the first few callbacks to accommodate this
+                // amount, then NEVER needs to grow again (realloc only
+                // enlarges, never shrinks).  A conditional avail-based feed
+                // risks starving Sonic when the check just barely fires late,
+                // producing silent frames → crackling.  Unconditional feeding
+                // guarantees Sonic's output ring is always well-stocked.
+                // Crossfade the last XFADE input samples at the loop boundary
+                // so the wrap point click is inaudible.
                 static const int XFADE = 256;
-                const int OUTPUT_TARGET = numFrames * 3;  // desired buffered output frames
-                int avail = sonicSamplesAvailable(sonic);
-                if (avail < OUTPUT_TARGET) {
-                    // How many raw input samples to feed to reach OUTPUT_TARGET
-                    int toFeed = (int)((OUTPUT_TARGET - avail) * spd) + 256;
-                    if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
+                int toFeed = (int)(numFrames * spd * 3) + 512;
+                if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
-                    int fed = 0;
-                    size_t pcmSize = pb.pcm.size();
-                    while (fed < toFeed) {
-                        if (v.position >= pcmSize) v.position = 0;
-                        size_t pos = v.position;
-                        float s = pb.pcm[pos];
-                        // Crossfade tail → head at loop boundary to eliminate wrap click
-                        if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
-                            size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
-                            float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
-                            s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
-                        }
-                        feedBuf[fed++] = s;
-                        v.position++;
+                int fed = 0;
+                size_t pcmSize = pb.pcm.size();
+                while (fed < toFeed) {
+                    if (v.position >= pcmSize) v.position = 0;
+                    size_t pos = v.position;
+                    float s = pb.pcm[pos];
+                    // Crossfade tail → head at loop boundary to eliminate wrap click
+                    if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
+                        size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
+                        float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
+                        s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
                     }
-                    sonicWriteFloatToStream(sonic, feedBuf, fed);
+                    feedBuf[fed++] = s;
+                    v.position++;
                 }
+                sonicWriteFloatToStream(sonic, feedBuf, fed);
 
                 // Read smooth-ramped output from Sonic
                 int got = sonicReadFloatFromStream(sonic, readBuf,
