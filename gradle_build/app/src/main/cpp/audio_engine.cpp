@@ -116,19 +116,30 @@ public:
 
     // One Sonic stream per loop voice — handles pitch-preserving speed and vice-versa
     sonicStream loopSonic[LOOP_VOICES];
-    // Last speed/pitch actually applied to each Sonic stream. Sonic reconfigures
-    // its internal resampling buffers when SetSpeed/SetPitch is called; only call
-    // the setters when the value has actually changed to avoid unnecessary work.
     float loopSonicLastSpeed[LOOP_VOICES];
     float loopSonicLastPitch[LOOP_VOICES];
-    // Output fade-in counter per loop voice. Set to LOOP_FADE_LEN after a
-    // pitch/speed change so the first ~2ms of output after Sonic reconfigures
-    // fades from 0→1 instead of clicking. Sonic uses realloc() internally, so
-    // the ONLY safe place to call sonicSetPitch/sonicSetSpeed is CMD_UPDATE_SPEED_PITCH
-    // (fired at most every 40ms via Java debounce). Calling them every audio
-    // callback (smooth ramping) triggers realloc on the real-time thread → crash.
-    static const int LOOP_FADE_LEN = 96;   // 2ms at 48 kHz
-    int loopFadeFrames[LOOP_VOICES];
+
+    // ── Crossfade state for seamless speed/pitch transitions ─────────────────
+    // Problem: any approach that changes Sonic's output waveform (setSpeed/Pitch,
+    // stream recreation) creates a discontinuity at the boundary.  The old
+    // "fade-in from zero" approach had the worst possible case — a step from
+    // the last sample of the old output to 0, which is an audible click/crack,
+    // repeated every 40ms during slider movement.
+    //
+    // Fix: SNAPSHOT the current Sonic output (sonicReadFloatFromStream consumes
+    // already-processed frames — no malloc, no extra work) BEFORE applying new
+    // params, then crossfade: old snapshot fades OUT while new Sonic output
+    // fades IN over LOOP_FADE_LEN frames.  Both signals are present during the
+    // crossfade so the output level never jumps → zero crackling.
+    //
+    // sonicSetSpeed/Pitch themselves are safe: they just write a float field.
+    // The crash in the earlier "smooth-ramp" attempt came from calling them
+    // 200×/s, forcing WSOLA to reprocess every callback.  At ≤25×/s (Java
+    // 40ms debounce) they are fine; the crossfade hides the WSOLA transient.
+    static const int LOOP_FADE_LEN = 256;    // ~5ms at 48 kHz ≈ one full burst
+    float loopOldOut[LOOP_VOICES][256];      // pre-change Sonic snapshot (fade-out side)
+    int   loopOldFrames[LOOP_VOICES];        // valid frames stored in loopOldOut[vi]
+    int   loopFadeFrames[LOOP_VOICES];       // crossfade frames remaining (LOOP_FADE_LEN→0)
 
     // scratch buffers (audio thread only — no malloc in callback)
     static const int SCRATCH_SIZE = 4096;
@@ -137,6 +148,8 @@ public:
 
     AudioEngineImpl() {
         memset(loopSonic,      0, sizeof(loopSonic));
+        memset(loopOldOut,     0, sizeof(loopOldOut));
+        memset(loopOldFrames,  0, sizeof(loopOldFrames));
         memset(loopFadeFrames, 0, sizeof(loopFadeFrames));
         for (int i = 0; i < LOOP_VOICES; i++) {
             loopSonicLastSpeed[i] = 1.f;
@@ -170,12 +183,6 @@ public:
                 // ── Loop voice: use Sonic for independent speed + pitch ──────────
                 sonicStream sonic = loopSonic[vi];
 
-                // Speed/pitch are applied directly in CMD_UPDATE_SPEED_PITCH (at most
-                // every 40ms via Java debounce). We NEVER call sonicSetSpeed/Pitch here
-                // in the audio callback — Sonic uses realloc() internally and calling
-                // it 200×/s on the real-time thread triggers malloc on the audio thread
-                // which causes Android to kill the stream (crash). A 2ms output fade
-                // in the mix loop below masks the one-time reconfig click instead.
                 float spd = loopSonicLastSpeed[vi];   // speed currently applied to Sonic
 
                 // ── Sonic feeding with loop-boundary crossfade ───────────────────
@@ -213,10 +220,16 @@ public:
                     sonicWriteFloatToStream(sonic, feedBuf, fed);
                 }
 
-                // Read processed output
+                // Read post-change (or steady-state) output from Sonic
                 int got = sonicReadFloatFromStream(sonic, readBuf,
                                                    numFrames < SCRATCH_SIZE ? numFrames : SCRATCH_SIZE);
-                for (int i = 0; i < got && i < numFrames; i++) {
+
+                // xfStart: offset into loopOldOut already consumed this crossfade.
+                // Computed once so decrementing loopFadeFrames inside the loop
+                // doesn't skew the index.
+                const int xfStart = LOOP_FADE_LEN - loopFadeFrames[vi];
+
+                for (int i = 0; i < numFrames; i++) {
                     // Envelope
                     if (!v.releasing) {
                         v.envGain = std::min(1.f, v.envGain + v.attackRate);
@@ -227,15 +240,25 @@ public:
                             break;
                         }
                     }
-                    float s = readBuf[i] * vol * v.envGain;
-                    // 2ms fade-in after pitch/speed change masks Sonic reconfig click.
-                    // loopFadeFrames[vi] is set in CMD_UPDATE_SPEED_PITCH and counts
-                    // down here; the sample scales from 0→1 over LOOP_FADE_LEN frames.
+
+                    float new_s = (i < got) ? readBuf[i] : 0.f;
+                    float s;
+
                     if (loopFadeFrames[vi] > 0) {
-                        s *= 1.0f - ((float)loopFadeFrames[vi] / (float)LOOP_FADE_LEN);
+                        // Crossfade: old snapshot (pre-param-change) fades OUT,
+                        // new Sonic output (post-param-change) fades IN together.
+                        // No sample is ever stepped to zero → no crackling.
+                        int   xfPos = xfStart + i;
+                        float old_s = (xfPos < loopOldFrames[vi]) ? loopOldOut[vi][xfPos] : 0.f;
+                        float t_new = (float)(xfPos + 1) / (float)LOOP_FADE_LEN;
+                        if (t_new > 1.f) t_new = 1.f;
+                        s = old_s * (1.f - t_new) + new_s * t_new;
                         loopFadeFrames[vi]--;
+                    } else {
+                        s = new_s;
                     }
-                    out[i] += s;
+
+                    out[i] += s * vol * v.envGain;
                 }
 
             } else {
@@ -338,7 +361,10 @@ public:
             v.padIndex    = c.padIdx;
             v.position    = 0;
             v.pitchAcc    = 0.f;
-            if (c.isLoop && vi < LOOP_VOICES) loopFadeFrames[vi] = 0;
+            if (c.isLoop && vi < LOOP_VOICES) {
+                loopFadeFrames[vi] = 0;
+                loopOldFrames[vi]  = 0;
+            }
             v.volume.store(c.volume, std::memory_order_relaxed);
             v.speed .store(c.speed,  std::memory_order_relaxed);
             v.pitch .store(c.pitch,  std::memory_order_relaxed);
@@ -372,19 +398,22 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed+pitch update for a playing loop.
+            // Live speed/pitch update while loop is playing.
             //
-            // IMPORTANT — why we RECREATE the stream instead of calling setSpeed/setPitch:
-            // Sonic uses WSOLA (Waveform Similarity Overlap-Add) internally. When
-            // sonicSetSpeed or sonicSetPitch is called on a *running* stream the
-            // algorithm's overlap windows, grain positions and internal phase state
-            // become inconsistent with the new ratio → audible crackling at every
-            // parameter change regardless of how infrequently they fire.
+            // Strategy: snapshot → setParams → crossfade.
             //
-            // Fix: destroy the old stream, create a fresh one with the new params,
-            // then pre-fill it from the current loop position so the render loop
-            // finds a ready buffer on its very next invocation. A LOOP_FADE_LEN
-            // output fade (96 frames ≈ 2 ms) smoothly gates in the new stream.
+            // 1. SNAPSHOT: consume up to LOOP_FADE_LEN already-processed output
+            //    frames from Sonic's internal buffer (sonicReadFloatFromStream —
+            //    no malloc, just a memcpy from Sonic's ring buffer).  These frames
+            //    become the "old" side of the crossfade.
+            //
+            // 2. SETPARAMS: call sonicSetSpeed / sonicSetPitch.  These just write
+            //    a float field — no realloc, safe on the audio thread.  Sonic's
+            //    next output will reflect the new ratio.
+            //
+            // 3. CROSSFADE: the render loop blends snapshot (fading out) + new
+            //    Sonic output (fading in) over LOOP_FADE_LEN frames so there is
+            //    never a step discontinuity in the output signal → no crackling.
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
                 if (v.active.load()) {
@@ -396,52 +425,28 @@ public:
                     bool ptcChg = (c.pitch != loopSonicLastPitch[c.padIdx]);
 
                     if ((spdChg || ptcChg) && loopSonic[c.padIdx]) {
-                        int pi = v.padIndex;
-                        if (pi >= 0 && pi < MAX_PADS) {
-                            PadBuffer& pb = pads[pi];
-                            if (pb.loaded.load(std::memory_order_acquire) && !pb.pcm.empty()) {
+                        // --- Step 1: snapshot pre-change output ---
+                        int snap = sonicSamplesAvailable(loopSonic[c.padIdx]);
+                        if (snap > LOOP_FADE_LEN) snap = LOOP_FADE_LEN;
+                        if (snap > 0)
+                            sonicReadFloatFromStream(loopSonic[c.padIdx],
+                                                     loopOldOut[c.padIdx], snap);
+                        else
+                            memset(loopOldOut[c.padIdx], 0, sizeof(float) * LOOP_FADE_LEN);
+                        loopOldFrames[c.padIdx]  = snap;
 
-                                // Recreate stream with correct params from scratch.
-                                sonicDestroyStream(loopSonic[c.padIdx]);
-                                sonicStream ns = sonicCreateStream(sampleRate, 1);
-                                if (ns) {
-                                    sonicSetSpeed(ns, c.speed);
-                                    sonicSetPitch(ns, c.pitch);
-                                    loopSonicLastSpeed[c.padIdx] = c.speed;
-                                    loopSonicLastPitch[c.padIdx] = c.pitch;
-
-                                    // Pre-fill: feed enough raw input from the current
-                                    // playback position so the render loop reads real
-                                    // audio instead of zeros on the first call.
-                                    // Advance v.position so render loop continues
-                                    // seamlessly from where the pre-fill left off.
-                                    static const int XFADE = 256;
-                                    int toFeed = (int)(framesPerBurst * 4 * c.speed) + 512;
-                                    if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
-                                    size_t pcmSize = pb.pcm.size();
-                                    for (int fi = 0; fi < toFeed; fi++) {
-                                        if (v.position >= pcmSize) v.position = 0;
-                                        size_t pos = v.position;
-                                        float s = pb.pcm[pos];
-                                        // Preserve loop-boundary crossfade during pre-fill
-                                        if (pcmSize > (size_t)(XFADE * 2) &&
-                                                pos >= pcmSize - (size_t)XFADE) {
-                                            size_t tailOff = pos - (pcmSize - XFADE);
-                                            float t = (float)tailOff / (float)XFADE;
-                                            s = s * (1.0f - t) + pb.pcm[tailOff] * t;
-                                        }
-                                        feedBuf[fi] = s;
-                                        v.position++;
-                                    }
-                                    sonicWriteFloatToStream(ns, feedBuf, toFeed);
-                                    loopSonic[c.padIdx] = ns;
-                                    loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
-                                } else {
-                                    // sonicCreateStream failed (out of memory?) — keep old
-                                    loopSonic[c.padIdx] = nullptr;
-                                }
-                            }
+                        // --- Step 2: apply new params ---
+                        if (spdChg) {
+                            sonicSetSpeed(loopSonic[c.padIdx], c.speed);
+                            loopSonicLastSpeed[c.padIdx] = c.speed;
                         }
+                        if (ptcChg) {
+                            sonicSetPitch(loopSonic[c.padIdx], c.pitch);
+                            loopSonicLastPitch[c.padIdx] = c.pitch;
+                        }
+
+                        // --- Step 3: arm crossfade in render loop ---
+                        loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
                     }
                 }
             }
