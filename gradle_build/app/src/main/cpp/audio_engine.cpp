@@ -169,6 +169,32 @@ public:
         }
     }
 
+    // ── Drain a Sonic stream to a clean "fresh" state — NO malloc/free ────────
+    //
+    // sonicFlushStream() forces all buffered input through WSOLA and writes the
+    // result to the output ring.  After draining, the stream has:
+    //   • no buffered input
+    //   • no WSOLA overlap windows from the old speed/pitch
+    //   • output ring empty
+    //
+    // This is equivalent to destroy + create but with ZERO heap allocation —
+    // critical because malloc/free inside the audio callback can block on an
+    // allocator mutex, causing priority inversion → buffer underrun → crackling.
+    //
+    // tmpBuf / tmpLen: any scratch buffer big enough (feedBuf / SCRATCH_SIZE works).
+    void drainSonicStream(sonicStream s, float* tmpBuf, int tmpLen) {
+        if (!s) return;
+        sonicFlushStream(s);          // push all internally buffered frames to output ring
+        int avail;
+        while ((avail = sonicSamplesAvailable(s)) > 0) {
+            int n = (avail < tmpLen) ? avail : tmpLen;
+            sonicReadFloatFromStream(s, tmpBuf, n);
+        }
+        // After the drain the stream is in a clean idle state: no old overlap
+        // windows, no residual input — sonicSetSpeed/Pitch can now be called
+        // without leaving WSOLA in an inconsistent transition state.
+    }
+
     // ── Audio callback (realtime thread — no malloc, no mutex, no blocking) ──
     oboe::DataCallbackResult onAudioReady(
             oboe::AudioStream*, void* audioData, int32_t numFrames) override {
@@ -352,11 +378,11 @@ public:
             int vi;
             if (c.isLoop) {
                 vi = c.padIdx % LOOP_VOICES;
-                // Reset Sonic stream for clean restart
-                if (loopSonic[vi]) {
-                    sonicDestroyStream(loopSonic[vi]);
-                }
-                loopSonic[vi] = sonicCreateStream(sampleRate, 1);
+                // Reset Sonic stream for clean restart — NO malloc/free.
+                // drainSonicStream() flushes WSOLA internal state without
+                // destroying the allocation; sonicSetSpeed/Pitch on the
+                // drained stream then starts fresh with zero artifacts.
+                drainSonicStream(loopSonic[vi], feedBuf, SCRATCH_SIZE);
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
@@ -456,23 +482,33 @@ public:
                         }
                         loopOldFrames[c.padIdx] = LOOP_FADE_LEN;
 
-                        // ── Step 2: recreate Sonic stream (fresh WSOLA state) ─────
-                        // sonicSetSpeed/Pitch on a running stream leaves WSOLA's
-                        // internal overlap windows inconsistent → first ~256 output
-                        // frames are artifacts even if we crossfade over them.
-                        // Destroying and recreating the stream gives a clean slate;
-                        // the new stream starts artifact-free from frame 0.
-                        sonicDestroyStream(loopSonic[c.padIdx]);
-                        sonicStream ns = sonicCreateStream(sampleRate, 1);
+                        // ── Step 2: drain → reconfigure (fresh WSOLA, zero malloc) ──
+                        //
+                        // WHY drain instead of destroy+create:
+                        //   sonicDestroyStream/sonicCreateStream call free()/malloc()
+                        //   which locks the system allocator mutex.  If ANY other
+                        //   thread holds that mutex (e.g. the Java GC, a MediaCodec
+                        //   decode thread), the audio callback blocks → buffer underrun
+                        //   → crackling.  This is priority inversion in its purest
+                        //   form, and it was the root cause of every remaining crack.
+                        //
+                        // drainSonicStream() uses sonicFlushStream() + a read loop —
+                        // no heap allocation at all.  After the drain, the stream's
+                        // WSOLA overlap windows are empty (same effect as a fresh
+                        // stream), so sonicSetSpeed/Pitch produce clean output from
+                        // frame 0 without artifacts.
+                        drainSonicStream(loopSonic[c.padIdx], feedBuf, SCRATCH_SIZE);
+                        sonicStream ns = loopSonic[c.padIdx];  // same allocation, fresh state
                         if (ns) {
                             sonicSetSpeed(ns, c.speed);
                             sonicSetPitch(ns, c.pitch);
                             loopSonicLastSpeed[c.padIdx] = c.speed;
                             loopSonicLastPitch[c.padIdx] = c.pitch;
 
-                            // Prime: feed enough raw PCM so the new stream has
-                            // at least LOOP_FADE_LEN output frames queued.
-                            // Scale input by speed (faster = needs more input/output).
+                            // Prime: feed enough raw PCM so the reconfigured stream
+                            // has at least LOOP_FADE_LEN output frames queued.
+                            // At speed S, Sonic needs S× more input per output frame,
+                            // so scale by speed to guarantee enough output.
                             if (hasPcm) {
                                 int toFeed = (int)(LOOP_FADE_LEN * c.speed) + 256;
                                 if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
@@ -484,13 +520,12 @@ public:
                                 }
                                 sonicWriteFloatToStream(ns, feedBuf, toFeed);
                             }
-                            loopSonic[c.padIdx] = ns;
+                            // loopSonic[c.padIdx] already points to ns — no swap needed
 
                             // ── Step 3: arm crossfade ────────────────────────────
                             loopFadeFrames[c.padIdx] = LOOP_FADE_LEN;
                         } else {
-                            // sonicCreateStream failed — leave voice silent, reset state
-                            loopSonic[c.padIdx]     = nullptr;
+                            // Stream pointer is null (shouldn't happen post-init)
                             loopFadeFrames[c.padIdx] = 0;
                         }
                     }
