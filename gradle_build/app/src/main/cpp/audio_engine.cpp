@@ -132,46 +132,6 @@ public:
         }
     }
 
-    // ── Drain a Sonic stream to a clean "fresh" state — safe for RT thread ────
-    //
-    // Why not just sonicFlushStream() first?
-    //   sonicFlushStream() pushes remaining buffered input through WSOLA into
-    //   the output ring.  If the output ring is already near-full, Sonic may
-    //   call realloc() to grow it — and realloc() locks the system allocator
-    //   mutex → priority inversion → crackling.
-    //
-    // Safe drain order:
-    //   1. Read-drain all existing output first  → output ring is now empty
-    //      (maximum free space — realloc impossible in step 2).
-    //   2. sonicFlushStream() → processes any remaining buffered input and
-    //      writes result to the now-empty output ring (no realloc needed).
-    //   3. Read-drain the flushed output.
-    //
-    // Additionally: all Sonic streams are pre-sized in init() by writing and
-    // draining SCRATCH_SIZE samples before any callback runs.  This guarantees
-    // the input/pitch/output ring capacities are already large enough for all
-    // subsequent writes ≤ SCRATCH_SIZE, eliminating realloc paths entirely.
-    //
-    // After this call the stream is in a clean idle state: input ring empty,
-    // output ring empty, WSOLA buffers flushed — equivalent to a fresh stream
-    // without any heap allocation in this function itself.
-    void drainSonicStream(sonicStream s, float* tmpBuf, int tmpLen) {
-        if (!s) return;
-        // Step 1: drain pre-existing output (frees output ring space)
-        int avail;
-        while ((avail = sonicSamplesAvailable(s)) > 0) {
-            int n = (avail < tmpLen) ? avail : tmpLen;
-            sonicReadFloatFromStream(s, tmpBuf, n);
-        }
-        // Step 2: flush remaining input → output (output ring has max free space now)
-        sonicFlushStream(s);
-        // Step 3: drain the flushed output
-        while ((avail = sonicSamplesAvailable(s)) > 0) {
-            int n = (avail < tmpLen) ? avail : tmpLen;
-            sonicReadFloatFromStream(s, tmpBuf, n);
-        }
-    }
-
     // ── Audio callback (realtime thread — no malloc, no mutex, no blocking) ──
     oboe::DataCallbackResult onAudioReady(
             oboe::AudioStream*, void* audioData, int32_t numFrames) override {
@@ -234,16 +194,11 @@ public:
 
                 float spd = loopSonicLastSpeed[vi];   // current (ramped) speed for feed calc
 
-                // ── Sonic feeding with loop-boundary crossfade ───────────────────
-                // Keep enough OUTPUT samples buffered (3× numFrames) so playback
-                // never starves mid-buffer. sonicSamplesAvailable() returns OUTPUT
-                // samples (after speed processing), so the threshold must be in the
-                // output domain too. When avail drops below the target, feed enough
                 // ── Sonic feeding: top-up to feedTarget level ───────────────────
                 // feedTarget = numFrames*spd*3+512 (same as confirmed-working #103).
                 // Only feed the DIFFERENCE (feedTarget - avail) to maintain this
-                // level — not unconditional feeding, which would overfill Sonic's
-                // output ring every callback and trigger realloc() growth.
+                // level. Unconditional feeding would overfill Sonic's output ring
+                // every callback → unbounded realloc growth on RT thread.
                 // Crossfade the last XFADE input samples at the loop boundary
                 // so the wrap-point click is inaudible (blends tail into head).
                 static const int XFADE = 256;
@@ -291,8 +246,17 @@ public:
                 }
 
             } else {
-                // ── Drum voice: simple linear-interpolation resampling ───────────
-                float pitch = v.pitch.load(std::memory_order_relaxed);
+                // ── Drum/one-shot voice: linear-interpolation resampling ─────────
+                // rate = speed × pitch: speed changes how fast the sample plays
+                // (and therefore its duration), pitch shifts the frequency on top.
+                // Linear resampling combines both effects into one step — classic
+                // "tape speed" behaviour expected for one-shot pads.
+                // Clamped to [0.1, 4.0] so Sonic never receives extreme values
+                // that could cause integer overflow in the position accumulator.
+                float rate = v.speed.load(std::memory_order_relaxed)
+                           * v.pitch.load(std::memory_order_relaxed);
+                if (rate < 0.1f) rate = 0.1f;
+                if (rate > 4.0f) rate = 4.0f;
 
                 for (int i = 0; i < numFrames; i++) {
                     float fpos = (float)v.position + v.pitchAcc;
@@ -328,8 +292,8 @@ public:
 
                     out[i] += samp;
 
-                    // Advance position with pitch shift (resampling)
-                    v.pitchAcc += pitch - 1.f;
+                    // Advance position by combined speed×pitch rate
+                    v.pitchAcc += rate - 1.f;
                     int extra = (int)v.pitchAcc;
                     v.pitchAcc -= extra;
                     v.position += 1 + extra;
@@ -369,19 +333,12 @@ public:
             int vi;
             if (c.isLoop) {
                 vi = c.padIdx % LOOP_VOICES;
-                // Reset Sonic stream for clean restart — no malloc in hot path.
-                // drainSonicStream() flushes WSOLA state without destroying the
-                // allocation; sonicSetSpeed/Pitch on the drained stream then
-                // starts fresh with zero artifacts.
-                // Null guard: streams are pre-allocated in init(), but if one is
-                // somehow null (e.g. sonicCreateStream() returned null at startup
-                // due to OOM) we fall back to creating one here.  This branch is
-                // NOT on the hot path — it fires at most once per lifetime.
-                if (!loopSonic[vi]) {
-                    loopSonic[vi] = sonicCreateStream(sampleRate, 1);
-                } else {
-                    drainSonicStream(loopSonic[vi], feedBuf, SCRATCH_SIZE);
-                }
+                // Destroy + create gives a completely fresh Sonic stream with
+                // clean WSOLA/PSOLA internal state at each loop start.
+                // sonicCreateStream is a small malloc (~1-2 KB) that happens
+                // once at loop start — not in the speed/pitch update hot path.
+                if (loopSonic[vi]) sonicDestroyStream(loopSonic[vi]);
+                loopSonic[vi] = sonicCreateStream(sampleRate, 1);
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
@@ -433,22 +390,34 @@ public:
         case CMD_UPDATE_SPEED_PITCH:
             // Live speed/pitch update — update TARGET atomics ONLY.
             //
-            // DO NOT call sonicSetSpeed/sonicSetPitch here.
-            // The render loop's smooth-ramp block (15% per callback) reads
-            // v.speed / v.pitch each callback and gradually moves
-            // loopSonicLastSpeed/Pitch toward the target, calling sonicSet
-            // with tiny per-callback steps that Sonic's WSOLA handles cleanly.
+            // For loop voices: DO NOT call sonicSetSpeed/sonicSetPitch here.
+            // The render loop's smooth-ramp (15%/callback) gradually moves
+            // toward the target — tiny sonicSet steps that Sonic handles cleanly.
+            // A hard jump was the root cause of crackling.
             //
-            // A hard sonicSet jump to the target value from the command handler
-            // was the root cause of crackling: Sonic's internal WSOLA overlap
-            // windows re-synchronise abruptly → discontinuity → audible crack.
-            // Spreading the same change over ~6 callbacks (~30ms) is inaudible.
+            // For drum/one-shot voices: v.speed and v.pitch are read directly
+            // in the render loop (no Sonic involved — linear resampling only).
+            // Updating them here takes effect on the very next callback.
+
+            // ── Update active loop voice at slot c.padIdx ──
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
                 Voice& v = voices[c.padIdx];
-                if (v.active.load()) {
+                if (v.active.load() && v.isLoop) {
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
+                }
+            }
+            // ── Update active drum/one-shot voice with this pad index ──
+            // Drum voices are allocated at indices LOOP_VOICES..NUM_VOICES-1.
+            // They are identified by padIndex (pad number), not voice slot.
+            for (int dvi = LOOP_VOICES; dvi < NUM_VOICES; dvi++) {
+                Voice& dv = voices[dvi];
+                if (dv.active.load() && dv.padIndex == c.padIdx && !dv.isLoop) {
+                    dv.speed .store(c.speed,  std::memory_order_relaxed);
+                    dv.pitch .store(c.pitch,  std::memory_order_relaxed);
+                    dv.volume.store(c.volume, std::memory_order_relaxed);
+                    break;  // at most one active one-shot per pad
                 }
             }
             break;
@@ -482,46 +451,10 @@ public:
         for (int i = 0; i < LOOP_VOICES; i++) {
             if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);
             loopSonic[i] = sonicCreateStream(sampleRate, 1);
+            // Reset last-applied values so the smooth ramp in the render loop
+            // fires correctly after an Oboe error/restart cycle.
             loopSonicLastSpeed[i] = 1.0f;
             loopSonicLastPitch[i] = 1.0f;
-
-            // ── Pre-size Sonic internal buffers at WORST-CASE (max speed + max pitch) ──
-            //
-            // Why this is critical:
-            //   Sonic's WSOLA internally calls enlargeInputBufferIfNeeded() /
-            //   enlargeOutputBufferIfNeeded() / enlargePitchBufferIfNeeded()
-            //   whenever it needs more space.  These call realloc() — which locks
-            //   the system allocator mutex.  If the RT audio thread holds realloc
-            //   while the GC runs, that's priority inversion → buffer underrun
-            //   → crackling (or worse, crash).
-            //
-            //   The buffer sizes depend on `maxRequired`, which is proportional to
-            //   speed × pitch.  Pre-sizing here at speed=4.0 (max) and pitch=8.0
-            //   (max) guarantees all rings are already at their largest possible
-            //   size.  Any subsequent sonicWriteFloatToStream call in the audio
-            //   callback — at any speed/pitch ≤ these maximums — will NEVER need
-            //   to reallocate.  This makes the smooth-ramp approach (calling
-            //   sonicSetSpeed/Pitch with tiny per-callback steps) permanently safe.
-            if (loopSonic[i]) {
-                float dummy[SCRATCH_SIZE];
-                memset(dummy, 0, sizeof(dummy));
-                // Set to absolute maximums so Sonic computes max `maxRequired`
-                sonicSetSpeed(loopSonic[i], 4.0f);   // app-side max speed
-                sonicSetPitch(loopSonic[i], 8.0f);   // app-side max pitch
-                // Write + flush + drain: grows all internal rings to their
-                // maximum size while still on a non-RT thread (mallocs are safe here)
-                sonicWriteFloatToStream(loopSonic[i], dummy, SCRATCH_SIZE);
-                sonicFlushStream(loopSonic[i]);
-                int avail;
-                while ((avail = sonicSamplesAvailable(loopSonic[i])) > 0) {
-                    int n = avail < SCRATCH_SIZE ? avail : SCRATCH_SIZE;
-                    sonicReadFloatFromStream(loopSonic[i], dummy, n);
-                }
-                // Reset to defaults — stream is now sized for worst case + clean
-                sonicSetSpeed(loopSonic[i], 1.0f);
-                sonicSetPitch(loopSonic[i], 1.0f);
-                // Stream is ready: no further allocs at any speed/pitch ≤ max values
-            }
         }
 
         oboe::AudioStreamBuilder b;
