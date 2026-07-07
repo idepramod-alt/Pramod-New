@@ -524,18 +524,33 @@ jobs:
         working-directory: gradle_build
         run: gradle wrapper --gradle-version=8.9
 
-      - name: Clean stale R.java and Gradle build cache
+      - name: Clean stale committed build artifacts
         run: |
-          # The repo ships a pre-committed R.java and a .gradle cache directory.
-          # Gradle sees these and marks :app:processDebugResources as UP-TO-DATE,
-          # so the R class is never regenerated — causing "cannot find symbol"
-          # errors for any IDs added since the last committed R.java.
-          # Removing them forces a full, clean resource-processing pass.
-          rm -f gradle_build/app/src/main/java/com/pramod/loopmidi/R.java
+          # The repo ships pre-committed build outputs:
+          #   - R.java (stale, missing IDs added in recent commits)
+          #   - .gradle/ task-history cache (causes processDebugResources to be
+          #     skipped as UP-TO-DATE, so R class is never regenerated)
+          #   - app/build/ (intermediates, generated, outputs from prior builds)
+          #   - build/ (root project build cache)
+          # Gradle sees these and marks :app:processDebugResources UP-TO-DATE,
+          # skipping AAPT — so any new layout ID is missing from R, causing
+          # "cannot find symbol" compilation errors.
+          # Full removal forces a clean, reproducible resource-processing pass.
+          rm -f  gradle_build/app/src/main/java/com/pramod/loopmidi/R.java
           rm -rf gradle_build/.gradle
-          rm -rf gradle_build/app/build/generated
-          rm -rf gradle_build/app/build/intermediates
-          echo "Stale R.java and Gradle cache cleaned — resources will be regenerated fresh."
+          rm -rf gradle_build/app/build
+          rm -rf gradle_build/build
+          # Verify stale artifacts are gone
+          [ ! -f gradle_build/app/src/main/java/com/pramod/loopmidi/R.java ] \
+            && echo "OK: stale R.java removed" \
+            || { echo "FAIL: R.java still present"; exit 1; }
+          [ ! -d gradle_build/.gradle ] \
+            && echo "OK: .gradle cache removed" \
+            || { echo "FAIL: .gradle still present"; exit 1; }
+          [ ! -d gradle_build/app/build ] \
+            && echo "OK: app/build removed" \
+            || { echo "FAIL: app/build still present"; exit 1; }
+          echo "All stale build artifacts cleaned — Gradle will run a full fresh build."
 
       - name: Build Debug APK
         working-directory: gradle_build
