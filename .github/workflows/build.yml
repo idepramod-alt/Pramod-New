@@ -524,6 +524,19 @@ jobs:
         working-directory: gradle_build
         run: gradle wrapper --gradle-version=8.9
 
+      - name: Clean stale R.java and Gradle build cache
+        run: |
+          # The repo ships a pre-committed R.java and a .gradle cache directory.
+          # Gradle sees these and marks :app:processDebugResources as UP-TO-DATE,
+          # so the R class is never regenerated — causing "cannot find symbol"
+          # errors for any IDs added since the last committed R.java.
+          # Removing them forces a full, clean resource-processing pass.
+          rm -f gradle_build/app/src/main/java/com/pramod/loopmidi/R.java
+          rm -rf gradle_build/.gradle
+          rm -rf gradle_build/app/build/generated
+          rm -rf gradle_build/app/build/intermediates
+          echo "Stale R.java and Gradle cache cleaned — resources will be regenerated fresh."
+
       - name: Build Debug APK
         working-directory: gradle_build
         run: |
