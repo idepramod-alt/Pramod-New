@@ -919,11 +919,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             @Override
                             public void onClick(DialogInterface d, int which) {
                                 LoopsActivity.this.selectedPad = which;
-                                android.content.Intent intent = new android.content.Intent(
-                                    android.content.Intent.ACTION_OPEN_DOCUMENT);
+                                // Exact same Intent as original showEditOptions "Select Loop Audio"
+                                Intent intent = new Intent("android.intent.action.OPEN_DOCUMENT");
+                                intent.addCategory("android.intent.category.OPENABLE");
                                 intent.setType("audio/*");
-                                intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                intent.addFlags(android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                                intent.addFlags(1);  // FLAG_GRANT_READ_URI_PERMISSION
+                                intent.addFlags(64); // FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                                 LoopsActivity.this.startActivityForResult(intent, REQ_PICK_LOOP_WAV);
                             }
                         })
