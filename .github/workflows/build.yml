@@ -556,823 +556,115 @@ jobs:
           echo "All stale build artifacts cleaned — Gradle will run a full fresh build."
 
 
-      # ═══════════════════════════════════════════════════════════════════════
+      # ════════════════════════════════════════════════════════════════════════
       # FEATURE BATCH: Roland SPD-SX style improvements
       # 1. Drum rolling fix  2. Latency fix  3. Multi-track recording
-      # ═══════════════════════════════════════════════════════════════════════
+      # ════════════════════════════════════════════════════════════════════════
 
       - name: Fix drum rolling - no-choke for rapid drum hits
         run: |
-          python3 << 'PYEOF'
-          import re, sys
-
-          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          with open(JAVA) as f:
-              src = f.read()
-
-          # Change chokeGroup from index+1 → 0 so rapid same-pad drum hits
-          # layer/stack instead of each new hit cutting the previous one.
-          # This is the root cause of the "adha sound cut" rolling problem.
-          OLD = ('this.audioEngine.playSample(index, sampleData, effectiveVolume(index), '
-                 'this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, '
-                 'index + 1, 0.0f, 0.0f);')
-          NEW = ('// chokeGroup=0: no-choke → drum rolls stack without cutting previous voice\n'
-                 '            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), '
-                 'this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, '
-                 '0, 0.0f, 0.0f);')
-          if OLD in src:
-              src = src.replace(OLD, NEW)
-              print('OK: chokeGroup=0 patch applied')
-          else:
-              print('WARN: chokeGroup pattern not found — may already be patched')
-
-          with open(JAVA, 'w') as f:
-              f.write(src)
-          PYEOF
+          JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
+          grep -q 'chokeGroup=0.*drum\|chokeGroup = 0.*drum' "$JAVA" 2>/dev/null && { echo "already patched"; exit 0; }
+          sed -i 's/playSample(index, sampleData, effectiveVolume(index), this\.currentSpeed, this\.currentPitch, 0, false, 0\.0f, 0\.0f, 0\.0f, 0\.0f, 0\.0f, index + 1, 0\.0f, 0\.0f)/playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f) \/\/ chokeGroup=0: drum rolls/g' "$JAVA"
+          grep -n 'chokeGroup' "$JAVA" | head -3 || true
+          echo "OK: drum rolling fix done"
 
       - name: Fix drum latency - AAudio API + Sonification content type
         run: |
-          python3 << 'PYEOF'
-          CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
-          with open(CPP) as f:
-              src = f.read()
-
-          # Add explicit AAudio API selection and Sonification content type
-          # AAudio is the modern low-latency audio API (Android 8+)
-          # ContentType::Sonification tells the OS this is a musical instrument → lowest latency path
-          OLD = ("        oboe::Result r = b.setDirection(oboe::Direction::Output)\n"
-                 "            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)\n"
-                 "            ->setSharingMode(oboe::SharingMode::Exclusive)\n"
-                 "            ->setFormat(oboe::AudioFormat::Float)\n"
-                 "            ->setChannelCount(1)\n"
-                 "            ->setSampleRate(sampleRate)           // MATCH device native SR — no resampling\n"
-                 "            ->setFramesPerCallback(framesPerBurst) // MATCH hardware burst — no extra buffering\n"
-                 "            ->setBufferCapacityInFrames(framesPerBurst * 3)\n"
-                 "            ->setDataCallback(this)\n"
-                 "            ->openStream(stream);")
-          NEW = ("        oboe::Result r = b.setDirection(oboe::Direction::Output)\n"
-                 "            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)\n"
-                 "            ->setSharingMode(oboe::SharingMode::Exclusive)\n"
-                 "            ->setFormat(oboe::AudioFormat::Float)\n"
-                 "            ->setChannelCount(1)\n"
-                 "            ->setSampleRate(sampleRate)\n"
-                 "            ->setFramesPerCallback(framesPerBurst)\n"
-                 "            ->setBufferCapacityInFrames(framesPerBurst * 2)\n"
-                 "            ->setAudioApi(oboe::AudioApi::AAudio)\n"
-                 "            ->setContentType(oboe::ContentType::Sonification)\n"
-                 "            ->setUsage(oboe::Usage::Game)\n"
-                 "            ->setDataCallback(this)\n"
-                 "            ->openStream(stream);")
-          if OLD in src:
-              src = src.replace(OLD, NEW)
-              print('OK: AAudio + Sonification latency patch applied')
-          else:
-              # Try to find the builder chain and patch it anyway
-              import re
-              if 'setAudioApi' not in src:
-                  src = src.replace(
-                      '->setDataCallback(this)\n            ->openStream(stream);',
-                      '->setAudioApi(oboe::AudioApi::AAudio)\n            ->setContentType(oboe::ContentType::Sonification)\n            ->setUsage(oboe::Usage::Game)\n            ->setDataCallback(this)\n            ->openStream(stream);'
-                  )
-                  print('OK: AAudio patch applied via fallback path')
-              else:
-                  print('INFO: AAudio already present, skipping')
-
-          with open(CPP, 'w') as f:
-              f.write(src)
-          PYEOF
-
-      - name: Add multi-track recording system to audio_engine.cpp
-        run: |
-          python3 << 'PYEOF'
-          CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
-          with open(CPP) as f:
-              src = f.read()
-
-          # ── 1. Expand CmdType enum to include recording commands ──────────────
-          OLD_ENUM = 'enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH };'
-          NEW_ENUM = ('enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH,\n'
-                      '               CMD_REC_START, CMD_REC_STOP, CMD_PLAY_TRACK, CMD_STOP_TRACK };')
-          if OLD_ENUM in src:
-              src = src.replace(OLD_ENUM, NEW_ENUM)
-              print('OK: CmdType enum expanded')
-          else:
-              print('WARN: CmdType enum not found')
-
-          # ── 2. Add recTrack + trackVol + trackLoop fields to Cmd struct ───────
-          OLD_CMD = '    bool    isLoop;\n};'
-          NEW_CMD = ('    bool    isLoop;\n'
-                     '    int     recTrack = 0;    // recording track index (0-3)\n'
-                     '    float   trackVol = 1.f;  // track playback volume\n'
-                     '    bool    trackLoop= false; // loop the track on playback\n'
-                     '};')
-          if OLD_CMD in src:
-              src = src.replace(OLD_CMD, NEW_CMD)
-              print('OK: Cmd struct extended')
-          else:
-              print('WARN: Cmd struct tail not found')
-
-          # ── 3. Add recording state + helpers to AudioEngineImpl ───────────────
-          RECORDING_FIELDS = '''
-    // ── Multi-track recorder (4 tracks × 90 sec max at 48 kHz = ~86 MB) ───────
-    static const int MAX_REC_TRACKS = 4;
-    static const int REC_MAX_SEC    = 90;
-
-    std::vector<float> recTrack[MAX_REC_TRACKS]; // per-track PCM buffer
-    int                recLen  [MAX_REC_TRACKS] = {}; // valid sample count
-
-    std::atomic<int>  recActiveTrack{-1};  // ≥0 while recording
-    std::atomic<bool> recRunning{false};
-    int               recWritePos  = 0;
-    int               recMaxFrames = 48000 * REC_MAX_SEC; // updated in init()
-
-    struct RecPlayState {
-        std::atomic<bool> active{false};
-        int               readPos = 0;
-        std::atomic<float>vol{1.f};
-        bool              looping = false;
-    };
-    RecPlayState recPlay[MAX_REC_TRACKS];
-'''
-          # Insert fields after the scratch buffers declaration
-          ANCHOR = '    float feedBuf[SCRATCH_SIZE];\n    float readBuf[SCRATCH_SIZE];'
-          if ANCHOR in src:
-              src = src.replace(ANCHOR, ANCHOR + RECORDING_FIELDS)
-              print('OK: recording fields added to AudioEngineImpl')
-          else:
-              print('WARN: scratch buffer anchor not found')
-
-          # ── 4. Reserve recording buffers in init() ────────────────────────────
-          INIT_ANCHOR = ('        for (int i = 0; i < LOOP_VOICES; i++) {\n'
-                         '            if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);\n'
-                         '            loopSonic[i] = sonicCreateStream(sampleRate, 1);')
-          INIT_INSERT = ('        // Pre-allocate recording track buffers (called each stream reinit)\n'
-                         '        recMaxFrames = sampleRate * REC_MAX_SEC;\n'
-                         '        for (int ti = 0; ti < MAX_REC_TRACKS; ti++) {\n'
-                         '            recTrack[ti].assign(recMaxFrames, 0.f);\n'
-                         '            // Preserve existing recording if length > 0 (device change reinit)\n'
-                         '        }\n')
-          if INIT_ANCHOR in src and 'recMaxFrames = sampleRate' not in src:
-              src = src.replace(INIT_ANCHOR, INIT_INSERT + INIT_ANCHOR)
-              print('OK: recording buffer init added')
-          else:
-              print('WARN: init anchor not found or already patched')
-
-          # ── 5. Mix recorded tracks + capture output in onAudioReady ──────────
-          # Insert BEFORE the delay write section
-          DELAY_WRITE = ('        // Write to delay buffer\n'
-                         '        for (int i = 0; i < numFrames; i++)\n'
-                         '            gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = out[i];')
-          MIX_AND_CAPTURE = (
-              '        // ── Mix playing recorded tracks ───────────────────────────────────\n'
-              '        for (int t = 0; t < MAX_REC_TRACKS; t++) {\n'
-              '            RecPlayState& rp = recPlay[t];\n'
-              '            if (!rp.active.load(std::memory_order_relaxed)) continue;\n'
-              '            int len = recLen[t];\n'
-              '            if (len <= 0) { rp.active.store(false); continue; }\n'
-              '            float rv = rp.vol.load(std::memory_order_relaxed);\n'
-              '            for (int i = 0; i < numFrames; i++) {\n'
-              '                if (rp.readPos < len) {\n'
-              '                    out[i] += recTrack[t][rp.readPos++] * rv;\n'
-              '                } else {\n'
-              '                    if (rp.looping) rp.readPos = 0;\n'
-              '                    else { rp.active.store(false, std::memory_order_relaxed); break; }\n'
-              '                }\n'
-              '            }\n'
-              '        }\n'
-              '\n'
-              '        // ── Capture mixed output to active recording track ─────────────────\n'
-              '        int rtrack = recActiveTrack.load(std::memory_order_relaxed);\n'
-              '        if (rtrack >= 0 && rtrack < MAX_REC_TRACKS && recRunning.load()) {\n'
-              '            int rmax = recMaxFrames;\n'
-              '            for (int i = 0; i < numFrames; i++) {\n'
-              '                if (recWritePos < rmax) {\n'
-              '                    recTrack[rtrack][recWritePos++] = out[i];\n'
-              '                } else {\n'
-              '                    recRunning.store(false, std::memory_order_relaxed);\n'
-              '                    recActiveTrack.store(-1, std::memory_order_relaxed);\n'
-              '                    break;\n'
-              '                }\n'
-              '            }\n'
-              '            recLen[rtrack] = recWritePos;\n'
-              '        }\n'
-              '\n'
-          )
-          if DELAY_WRITE in src and 'recActiveTrack' not in src.split('onAudioReady')[1].split('processCmd')[0]:
-              src = src.replace(DELAY_WRITE, MIX_AND_CAPTURE + DELAY_WRITE)
-              print('OK: recording mix+capture added to onAudioReady')
-          elif 'recMaxFrames' in src and 'rtrack' in src:
-              print('INFO: recording capture already present')
-          else:
-              # fallback search
-              alt = '        gDelayWrite = (gDelayWrite + numFrames) % DELAY_BUF_SIZE;'
-              if alt in src and 'rtrack' not in src:
-                  pos = src.rfind(DELAY_WRITE[:40])
-                  if pos >= 0:
-                      src = src[:pos] + MIX_AND_CAPTURE + src[pos:]
-                      print('OK: recording capture added via fallback')
-                  else:
-                      print('WARN: delay write anchor not found')
-              else:
-                  print('INFO: recording already present or anchor missing')
-
-          # ── 6. Add recording cases to processCmd ─────────────────────────────
-          BREAK_TAIL = ('            break;\n'
-                        '        }\n'
-                        '\n'
-                        '        case CMD_STOP_PAD:')
-          REC_CASES = (
-              '\n'
-              '        case CMD_REC_START:\n'
-              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS) {\n'
-              '                recWritePos = 0;\n'
-              '                recLen[c.recTrack] = 0;\n'
-              '                std::fill(recTrack[c.recTrack].begin(), recTrack[c.recTrack].end(), 0.f);\n'
-              '                recActiveTrack.store(c.recTrack, std::memory_order_release);\n'
-              '                recRunning.store(true, std::memory_order_release);\n'
-              '            }\n'
-              '            break;\n'
-              '\n'
-              '        case CMD_REC_STOP:\n'
-              '            recRunning.store(false, std::memory_order_relaxed);\n'
-              '            recActiveTrack.store(-1, std::memory_order_relaxed);\n'
-              '            break;\n'
-              '\n'
-              '        case CMD_PLAY_TRACK:\n'
-              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS && recLen[c.recTrack] > 0) {\n'
-              '                RecPlayState& rp = recPlay[c.recTrack];\n'
-              '                rp.readPos = 0;\n'
-              '                rp.vol.store(c.trackVol, std::memory_order_relaxed);\n'
-              '                rp.looping = c.trackLoop;\n'
-              '                rp.active.store(true, std::memory_order_release);\n'
-              '            }\n'
-              '            break;\n'
-              '\n'
-              '        case CMD_STOP_TRACK:\n'
-              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS) {\n'
-              '                recPlay[c.recTrack].active.store(false, std::memory_order_relaxed);\n'
-              '            }\n'
-              '            break;\n'
-          )
-          # Find the last break before CMD_STOP_PAD to insert recording cases
-          if 'CMD_REC_START' not in src and BREAK_TAIL in src:
-              src = src.replace(BREAK_TAIL, BREAK_TAIL + REC_CASES, 1)
-              print('OK: recording commands added to processCmd')
-          elif 'CMD_REC_START' in src:
-              print('INFO: recording commands already present')
-          else:
-              print('WARN: processCmd anchor not found for recording cases')
-
-          # ── 7. Add JNI methods for recording ─────────────────────────────────
-          JNI_INSERT_BEFORE = '} // extern "C"'
-          RECORDING_JNI = '''
-// ── Recording JNI ──────────────────────────────────────────────────────────────
-
-JNIEXPORT void JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeStartRecord(
-        JNIEnv*, jobject obj, jint track) {
-    // getEngine needs env but obj carries the handle field
-    JNIEnv* env = nullptr; // will use global trick
-    // Use the global engine handle directly via nativeHandle field
-    jclass   cls = nullptr;
-    jfieldID fid = nullptr;
-    // We need env — Oboe callback is on RT thread; JNI calls are on Java thread.
-    // Re-acquire env via JavaVM (not needed here — this IS called from Java thread).
-    // For simplicity: re-use getEngine with a valid env pointer trick.
-    // Since this JNI function receives env as first param, we use it:
-    {
-        jclass   c2  = env->GetObjectClass(obj);
-        jfieldID f2  = env->GetFieldID(c2, "nativeHandle", "J");
-        if (!f2) return;
-        AudioEngineImpl* e = reinterpret_cast<AudioEngineImpl*>(env->GetLongField(obj, f2));
-        if (!e) return;
-        Cmd cmd{};
-        cmd.type     = CMD_REC_START;
-        cmd.recTrack = (int)track;
-        e->cmdQ.push(cmd);
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeStopRecord(JNIEnv* env, jobject obj) {
-    AudioEngineImpl* e = getEngine(env, obj);
-    if (!e) return;
-    Cmd cmd{};
-    cmd.type = CMD_REC_STOP;
-    e->cmdQ.push(cmd);
-}
-
-JNIEXPORT jint JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedFrameCount(
-        JNIEnv* env, jobject obj, jint track) {
-    AudioEngineImpl* e = getEngine(env, obj);
-    if (!e || track < 0 || track >= AudioEngineImpl::MAX_REC_TRACKS) return 0;
-    return (jint)e->recLen[(int)track];
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedSamples(
-        JNIEnv* env, jobject obj, jint track) {
-    AudioEngineImpl* e = getEngine(env, obj);
-    if (!e || track < 0 || track >= AudioEngineImpl::MAX_REC_TRACKS) return nullptr;
-    int len = e->recLen[(int)track];
-    if (len <= 0) return nullptr;
-    jfloatArray arr = env->NewFloatArray(len);
-    if (!arr) return nullptr;
-    env->SetFloatArrayRegion(arr, 0, len, e->recTrack[(int)track].data());
-    return arr;
-}
-
-JNIEXPORT void JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeStartTrackPlayback(
-        JNIEnv* env, jobject obj, jint track, jfloat vol, jboolean loop) {
-    AudioEngineImpl* e = getEngine(env, obj);
-    if (!e) return;
-    Cmd cmd{};
-    cmd.type      = CMD_PLAY_TRACK;
-    cmd.recTrack  = (int)track;
-    cmd.trackVol  = (float)vol;
-    cmd.trackLoop = (bool)loop;
-    e->cmdQ.push(cmd);
-}
-
-JNIEXPORT void JNICALL
-Java_com_pramod_loopmidi_AudioEngine_nativeStopTrackPlayback(
-        JNIEnv* env, jobject obj, jint track) {
-    AudioEngineImpl* e = getEngine(env, obj);
-    if (!e) return;
-    Cmd cmd{};
-    cmd.type     = CMD_STOP_TRACK;
-    cmd.recTrack = (int)track;
-    e->cmdQ.push(cmd);
-}
-'''
-          if 'nativeStartRecord' not in src and JNI_INSERT_BEFORE in src:
-              src = src.replace(JNI_INSERT_BEFORE, RECORDING_JNI + JNI_INSERT_BEFORE)
-              print('OK: recording JNI methods added')
-          elif 'nativeStartRecord' in src:
-              print('INFO: recording JNI already present')
-          else:
-              print('WARN: JNI anchor not found')
-
-          # Fix the broken env usage in nativeStartRecord (env arrives as first param already)
-          src = src.replace(
-              'JNIEXPORT void JNICALL\nJava_com_pramod_loopmidi_AudioEngine_nativeStartRecord(\n        JNIEnv*, jobject obj, jint track) {\n    // getEngine needs env but obj carries the handle field\n    JNIEnv* env = nullptr; // will use global trick\n    // Use the global engine handle directly via nativeHandle field\n    jclass   cls = nullptr;\n    jfieldID fid = nullptr;\n    // We need env — Oboe callback is on RT thread; JNI calls are on Java thread.\n    // Re-acquire env via JavaVM (not needed here — this IS called from Java thread).\n    // For simplicity: re-use getEngine with a valid env pointer trick.\n    // Since this JNI function receives env as first param, we use it:\n    {\n        jclass   c2  = env->GetObjectClass(obj);\n        jfieldID f2  = env->GetFieldID(c2, "nativeHandle", "J");\n        if (!f2) return;\n        AudioEngineImpl* e = reinterpret_cast<AudioEngineImpl*>(env->GetLongField(obj, f2));\n        if (!e) return;\n        Cmd cmd{};\n        cmd.type     = CMD_REC_START;\n        cmd.recTrack = (int)track;\n        e->cmdQ.push(cmd);\n    }\n}',
-              'JNIEXPORT void JNICALL\nJava_com_pramod_loopmidi_AudioEngine_nativeStartRecord(\n        JNIEnv* env, jobject obj, jint track) {\n    AudioEngineImpl* e = getEngine(env, obj);\n    if (!e) return;\n    Cmd cmd{};\n    cmd.type     = CMD_REC_START;\n    cmd.recTrack = (int)track;\n    e->cmdQ.push(cmd);\n}'
-          )
-
-          with open(CPP, 'w') as f:
-              f.write(src)
-          print('audio_engine.cpp: all recording patches applied')
-          PYEOF
-
-      - name: Add recording JNI declarations and methods to AudioEngine.java
-        run: |
-          python3 << 'PYEOF'
-          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java'
-          with open(JAVA) as f:
-              src = f.read()
-
-          # ── Add native method declarations ───────────────────────────────────
-          DECL_ANCHOR = '    private native void nativeReinitStream(int nativeSR, int nativeBurst);'
-          RECORDING_DECLS = '''
-    // ── Multi-track recording JNI ────────────────────────────────────────────
-    private native void    nativeStartRecord(int track);
-    private native void    nativeStopRecord();
-    private native int     nativeGetRecordedFrameCount(int track);
-    private native float[] nativeGetRecordedSamples(int track);
-    private native void    nativeStartTrackPlayback(int track, float vol, boolean loop);
-    private native void    nativeStopTrackPlayback(int track);'''
-
-          if DECL_ANCHOR in src and 'nativeStartRecord' not in src:
-              src = src.replace(DECL_ANCHOR, DECL_ANCHOR + RECORDING_DECLS)
-              print('OK: recording JNI declarations added')
-          elif 'nativeStartRecord' in src:
-              print('INFO: recording decls already present')
-          else:
-              print('WARN: native decl anchor not found')
-
-          # ── Add Java wrapper methods + WAV writer before closing brace ────────
-          RECORDING_METHODS = '''
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Multi-track recorder — Java wrappers over native recording JNI
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    public static final int REC_TRACKS = 4;
-
-    /** Start recording mixed output into the given track slot (0-3). */
-    public void startRecording(int track) {
-        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
-        try { nativeStartRecord(track); }
-        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStartRecord missing", e); }
-    }
-
-    /** Stop the active recording. */
-    public void stopRecording() {
-        if (!nativeAvailable) return;
-        try { nativeStopRecord(); }
-        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopRecord missing", e); }
-    }
-
-    /** Number of PCM frames captured in the given track (0 if nothing recorded). */
-    public int getRecordedFrameCount(int track) {
-        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return 0;
-        try { return nativeGetRecordedFrameCount(track); }
-        catch (UnsatisfiedLinkError e) { return 0; }
-    }
-
-    /** Start playing back a recorded track. looping=true repeats infinitely. */
-    public void startTrackPlayback(int track, float vol, boolean looping) {
-        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
-        try { nativeStartTrackPlayback(track, vol, looping); }
-        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStartTrackPlayback missing", e); }
-    }
-
-    /** Stop playback of the given track. */
-    public void stopTrackPlayback(int track) {
-        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
-        try { nativeStopTrackPlayback(track); }
-        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopTrackPlayback missing", e); }
-    }
-
-    /**
-     * Export a recorded track to a WAV file at the given path.
-     * Returns the number of frames written, or -1 on failure.
-     */
-    public int saveTrackToWav(int track, String filePath) {
-        if (!nativeAvailable) return -1;
-        int frameCount;
-        float[] samples;
-        try {
-            frameCount = nativeGetRecordedFrameCount(track);
-            if (frameCount <= 0) return 0;
-            samples = nativeGetRecordedSamples(track);
-        } catch (UnsatisfiedLinkError e) { return -1; }
-        if (samples == null || samples.length == 0) return -1;
-        try {
-            short[] pcm = new short[samples.length];
-            for (int i = 0; i < samples.length; i++)
-                pcm[i] = (short)(Math.max(-1f, Math.min(1f, samples[i])) * 32767f);
-            writeWavFile(filePath, pcm, targetSampleRate, 1);
-            Log.i(TAG, "Saved track " + track + " → " + filePath + " (" + frameCount + " frames)");
-            return frameCount;
-        } catch (Exception e) {
-            Log.e(TAG, "saveTrackToWav failed: " + e.getMessage(), e);
-            return -1;
-        }
-    }
-
-    // ── WAV file writer ────────────────────────────────────────────────────────
-    private void writeWavFile(String path, short[] pcm, int sr, int channels) throws java.io.IOException {
-        int dataLen = pcm.length * 2;
-        java.io.FileOutputStream fos = new java.io.FileOutputStream(path);
-        java.io.DataOutputStream dos = new java.io.DataOutputStream(
-                new java.io.BufferedOutputStream(fos));
-        // RIFF header
-        dos.writeBytes("RIFF");
-        writeLittleInt(dos, 36 + dataLen);
-        dos.writeBytes("WAVE");
-        // fmt chunk
-        dos.writeBytes("fmt ");
-        writeLittleInt(dos, 16);
-        writeLittleShort(dos, (short) 1);          // PCM
-        writeLittleShort(dos, (short) channels);
-        writeLittleInt(dos, sr);
-        writeLittleInt(dos, sr * channels * 2);    // byte rate
-        writeLittleShort(dos, (short)(channels * 2)); // block align
-        writeLittleShort(dos, (short) 16);         // bits per sample
-        // data chunk
-        dos.writeBytes("data");
-        writeLittleInt(dos, dataLen);
-        for (short s : pcm) writeLittleShort(dos, s);
-        dos.close();
-    }
-
-    private static void writeLittleInt(java.io.DataOutputStream d, int v) throws java.io.IOException {
-        d.write(v & 0xFF); d.write((v >> 8) & 0xFF);
-        d.write((v >> 16) & 0xFF); d.write((v >> 24) & 0xFF);
-    }
-    private static void writeLittleShort(java.io.DataOutputStream d, short v) throws java.io.IOException {
-        d.write(v & 0xFF); d.write((v >> 8) & 0xFF);
-    }
-'''
-          CLOSE_BRACE = '\n}'  # last line of AudioEngine.java
-          if 'startRecording' not in src:
-              # Insert before the last closing brace
-              last_brace = src.rfind('\n}')
-              src = src[:last_brace] + RECORDING_METHODS + src[last_brace:]
-              print('OK: recording Java methods added to AudioEngine')
-          else:
-              print('INFO: recording methods already present')
-
-          with open(JAVA, 'w') as f:
-              f.write(src)
-          print('AudioEngine.java: recording patch complete')
-          PYEOF
-
-      - name: Add multi-track recording UI to LoopsActivity.java
-        run: |
-          python3 << 'PYEOF'
-          import re
-          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          with open(JAVA) as f:
-              src = f.read()
-
-          if 'recTrackCount' in src or 'btnRecordStart' in src:
-              print('INFO: recording UI already patched')
-              import sys; sys.exit(0)
-
-          # ── 1. Add import for MediaScannerConnection and Environment ──────────
-          IMPORT_ANCHOR = 'import android.os.Bundle;'
-          EXTRA_IMPORTS = '''import android.Manifest;
-import android.content.pm.PackageManager;
-import android.os.Environment;
-import android.media.MediaScannerConnection;
-import java.io.File;'''
-          if IMPORT_ANCHOR in src and 'android.Manifest' not in src:
-              src = src.replace(IMPORT_ANCHOR, EXTRA_IMPORTS + '\n' + IMPORT_ANCHOR)
-              print('OK: imports added')
-
-          # ── 2. Add recording state fields after existing fields ───────────────
-          FIELD_ANCHOR = '    private Button[] loopPads = new Button[8];'
-          REC_FIELDS = '''
-    // ── Multi-track recorder state ────────────────────────────────────────────
-    private static final int REC_TRACKS = 4;
-    private boolean   isRecording       = false;
-    private int       activeRecTrack    = 0;        // 0-3
-    private boolean[] trackHasData      = new boolean[REC_TRACKS];
-    private boolean[] trackPlaying      = new boolean[REC_TRACKS];
-    private Button    btnRecordStart;
-    private Button    btnRecordStop;
-    private Button[]  btnTrackPlay      = new Button[REC_TRACKS];
-    private Button    btnSaveRecording;
-    private TextView  txtRecStatus;
-'''
-          if FIELD_ANCHOR in src and 'isRecording' not in src:
-              src = src.replace(FIELD_ANCHOR, REC_FIELDS + '\n' + FIELD_ANCHOR)
-              print('OK: recording fields added')
-
-          # ── 3. Add recording wiring in onCreate (after btnDrumOctapad wiring) ─
-          ONCREATE_ANCHOR = 'this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);'
-          REC_WIRING = '''
-        // ── Multi-track recording controls ────────────────────────────────────
-        this.btnRecordStart  = (Button) findViewById(R.id.btnRecordStart);
-        this.btnRecordStop   = (Button) findViewById(R.id.btnRecordStop);
-        this.btnSaveRecording= (Button) findViewById(R.id.btnSaveRecording);
-        this.txtRecStatus    = (TextView) findViewById(R.id.txtRecStatus);
-        for (int ri = 0; ri < REC_TRACKS; ri++) {
-            final int rIdx = ri;
-            int btnId = getResources().getIdentifier("btnPlayTrack" + (ri + 1), "id", getPackageName());
-            if (btnId != 0) {
-                this.btnTrackPlay[ri] = (Button) findViewById(btnId);
-                if (this.btnTrackPlay[ri] != null) {
-                    this.btnTrackPlay[ri].setOnClickListener(v -> onPlayTrackClick(rIdx));
-                }
-            }
-        }
-        if (this.btnRecordStart != null) {
-            this.btnRecordStart.setOnClickListener(v -> onRecordStartClick());
-        }
-        if (this.btnRecordStop != null) {
-            this.btnRecordStop.setOnClickListener(v -> onRecordStopClick());
-        }
-        if (this.btnSaveRecording != null) {
-            this.btnSaveRecording.setOnClickListener(v -> onSaveRecordingClick());
-        }
-'''
-          if ONCREATE_ANCHOR in src and 'btnRecordStart' not in src:
-              src = src.replace(ONCREATE_ANCHOR, ONCREATE_ANCHOR + REC_WIRING)
-              print('OK: recording wiring added to onCreate')
-
-          # ── 4. Add recording methods before the final closing brace ───────────
-          RECORDING_METHODS = '''
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Multi-track recording UI handlers
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private void onRecordStartClick() {
-        if (this.audioEngine == null) {
-            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (this.isRecording) {
-            // Switch to next track
-            this.audioEngine.stopRecording();
-            this.isRecording = false;
-        }
-        // Find first empty track, or cycle over activeRecTrack
-        this.trackHasData[this.activeRecTrack] = false;
-        this.audioEngine.startRecording(this.activeRecTrack);
-        this.isRecording = true;
-        updateRecUI();
-        if (this.txtRecStatus != null) {
-            this.txtRecStatus.setText("● REC T" + (this.activeRecTrack + 1));
-        }
-    }
-
-    private void onRecordStopClick() {
-        if (this.audioEngine == null) return;
-        if (this.isRecording) {
-            this.audioEngine.stopRecording();
-            this.isRecording = false;
-            int fc = this.audioEngine.getRecordedFrameCount(this.activeRecTrack);
-            if (fc > 0) {
-                this.trackHasData[this.activeRecTrack] = true;
-                float secs = fc / (float) this.audioEngine.getSampleRate();
-                if (this.txtRecStatus != null) {
-                    this.txtRecStatus.setText("T" + (this.activeRecTrack + 1) + " " +
-                            String.format("%.1f", secs) + "s saved");
-                }
-                // Auto-advance to next empty track slot
-                for (int i = 1; i <= REC_TRACKS; i++) {
-                    int next = (this.activeRecTrack + i) % REC_TRACKS;
-                    if (!this.trackHasData[next]) { this.activeRecTrack = next; break; }
-                }
-            } else {
-                if (this.txtRecStatus != null) this.txtRecStatus.setText("Stopped (empty)");
-            }
-        }
-        // Stop all track playbacks too
-        for (int i = 0; i < REC_TRACKS; i++) {
-            if (this.trackPlaying[i] && this.audioEngine != null) {
-                this.audioEngine.stopTrackPlayback(i);
-                this.trackPlaying[i] = false;
-            }
-        }
-        updateRecUI();
-    }
-
-    private void onPlayTrackClick(int track) {
-        if (this.audioEngine == null) return;
-        if (!this.trackHasData[track]) {
-            Toast.makeText(this, "T" + (track+1) + ": nothing recorded yet", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (this.trackPlaying[track]) {
-            this.audioEngine.stopTrackPlayback(track);
-            this.trackPlaying[track] = false;
-            if (this.btnTrackPlay[track] != null)
-                this.btnTrackPlay[track].setText("▶ T" + (track + 1));
-        } else {
-            this.audioEngine.startTrackPlayback(track, 1.0f, false);
-            this.trackPlaying[track] = true;
-            if (this.btnTrackPlay[track] != null)
-                this.btnTrackPlay[track].setText("■ T" + (track + 1));
-        }
-    }
-
-    private void onSaveRecordingClick() {
-        if (this.audioEngine == null) return;
-        // Find a track with data
-        int saveTrack = -1;
-        for (int i = 0; i < REC_TRACKS; i++) {
-            if (this.trackHasData[i]) { saveTrack = i; break; }
-        }
-        if (saveTrack < 0) {
-            Toast.makeText(this, "No recording to save!", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 23 &&
-                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 9001);
-            return;
-        }
-        final int track = saveTrack;
-        new Thread(() -> {
-            try {
-                File dir = new File(Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_MUSIC), "OctapadLoops");
-                if (!dir.exists()) dir.mkdirs();
-                String fname = "recording_T" + (track + 1) + "_" + System.currentTimeMillis() + ".wav";
-                File out = new File(dir, fname);
-                int frames = this.audioEngine.saveTrackToWav(track, out.getAbsolutePath());
-                MediaScannerConnection.scanFile(this, new String[]{out.getAbsolutePath()},
-                        new String[]{"audio/wav"}, null);
-                runOnUiThread(() -> Toast.makeText(this,
-                        frames > 0 ? "Saved: " + fname : "Save failed!", Toast.LENGTH_LONG).show());
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
-            }
-        }).start();
-    }
-
-    private void updateRecUI() {
-        if (this.btnRecordStart != null)
-            this.btnRecordStart.setBackgroundResource(
-                    this.isRecording ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
-        if (this.btnRecordStop != null)
-            this.btnRecordStop.setEnabled(!this.isRecording ||
-                    this.audioEngine != null);
-        for (int i = 0; i < REC_TRACKS; i++) {
-            if (this.btnTrackPlay[i] != null) {
-                this.btnTrackPlay[i].setEnabled(this.trackHasData[i]);
-                this.btnTrackPlay[i].setAlpha(this.trackHasData[i] ? 1.0f : 0.4f);
-            }
-        }
-    }
-'''
-          last_brace = src.rfind('\n}')
-          if 'onRecordStartClick' not in src:
-              src = src[:last_brace] + RECORDING_METHODS + src[last_brace:]
-              print('OK: recording methods added to LoopsActivity')
-
-          with open(JAVA, 'w') as f:
-              f.write(src)
-          print('LoopsActivity.java: recording UI patch complete')
-          PYEOF
-
-      - name: Add recording control row to activity_loops.xml
-        run: |
-          python3 << 'PYEOF'
-          import re
-          XML = 'gradle_build/app/src/main/res/layout/activity_loops.xml'
-          with open(XML) as f:
-              content = f.read()
-
-          if 'btnRecordStart' in content:
-              print('INFO: recording row already present')
-              import sys; sys.exit(0)
-
-          # Recording control row — insert just before the loopPadArea
-          REC_ROW = '''
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent"
-        android:layout_height="44dp" android:layout_marginTop="2dp" android:layout_marginBottom="2dp"
-        android:background="#ff0a0a0a" android:padding="2dp">
-        <Button android:id="@+id/btnRecordStart"
-            android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_dark"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1.4" android:layout_marginEnd="2dp" android:text="● REC"/>
-        <Button android:id="@+id/btnRecordStop"
-            android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_red"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="■ STOP"/>
-        <Button android:id="@+id/btnPlayTrack1"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_blue"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T1" android:alpha="0.4"/>
-        <Button android:id="@+id/btnPlayTrack2"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_blue"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T2" android:alpha="0.4"/>
-        <Button android:id="@+id/btnPlayTrack3"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_blue"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T3" android:alpha="0.4"/>
-        <Button android:id="@+id/btnPlayTrack4"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_3d_blue"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T4" android:alpha="0.4"/>
-        <Button android:id="@+id/btnSaveRecording"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
-            android:background="@drawable/btn_glossy_3d"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1.2" android:layout_marginEnd="2dp" android:text="💾 SAVE"/>
-        <TextView android:id="@+id/txtRecStatus"
-            android:textSize="8sp" android:textColor="#ff00ff88" android:gravity="center"
-            android:background="#ff111111"
-            android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="1.6" android:text="READY" android:padding="2dp"/>
-    </LinearLayout>
-'''
-          # Insert before <LinearLayout ... id="@+id/loopPadArea"
-          PAD_AREA = '<LinearLayout android:orientation="vertical" android:id="@+id/loopPadArea"'
-          if PAD_AREA in content:
-              content = content.replace(PAD_AREA, REC_ROW.strip() + '\n    ' + PAD_AREA)
-              print('OK: recording row inserted before loopPadArea')
-          else:
-              # fallback: insert before closing root LinearLayout
-              content = content.rstrip()
-              if content.endswith('</LinearLayout>'):
-                  content = content[:-len('</LinearLayout>')] + REC_ROW + '\n</LinearLayout>'
-                  print('OK: recording row appended via fallback')
-
-          with open(XML, 'w') as f:
-              f.write(content)
-          print('activity_loops.xml: recording row added')
-          PYEOF
-
-      - name: Verify drum + recording patches compile (quick symbol check)
-        run: |
-          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
           CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
-          echo "=== C++ recording symbols ==="
-          grep -c "CMD_REC_START\|CMD_PLAY_TRACK\|nativeStartRecord\|recActiveTrack" "$CPP" || true
-          echo "=== AudioEngine.java recording ==="
-          grep -c "startRecording\|stopRecording\|saveTrackToWav" "$JAVA_DIR/AudioEngine.java" || true
-          echo "=== LoopsActivity recording UI ==="
-          grep -c "btnRecordStart\|onRecordStartClick\|trackHasData" "$JAVA_DIR/LoopsActivity.java" || true
+          grep -q 'setAudioApi' "$CPP" && { echo "already patched"; exit 0; }
+          sed -i '/->setBufferCapacityInFrames/a\            ->setAudioApi(oboe::AudioApi::AAudio)\n            ->setContentType(oboe::ContentType::Sonification)\n            ->setUsage(oboe::Usage::Game)' "$CPP"
+          sed -i 's/setBufferCapacityInFrames(framesPerBurst \* 3)/setBufferCapacityInFrames(framesPerBurst * 2)/' "$CPP"
+          grep -n 'setAudioApi\|Sonification' "$CPP" | head -3
+          echo "OK: latency fix done"
+
+      - name: Decode recording patch sources and helper scripts
+        run: |
+          echo 'ZW51bSBDbWRUeXBlIHsgQ01EX1BMQVksIENNRF9TVE9QX1BBRCwgQ01EX1NUT1BfQUxMLCBDTURfVVBEQVRFX1NQRUVEX1BJVENILAogICAgICAgICAgICAgICBDTURfUkVDX1NUQVJULCBDTURfUkVDX1NUT1AsIENNRF9QTEFZX1RSQUNLLCBDTURfU1RPUF9UUkFDSyB9Owo='     | base64 -d > /tmp/src_rec_enum.txt
+          echo 'ICAgIGludCAgICAgcmVjVHJhY2sgPSAwOwogICAgZmxvYXQgICB0cmFja1ZvbCA9IDEuZjsKICAgIGJvb2wgICAgdHJhY2tMb29wPSBmYWxzZTsK'      | base64 -d > /tmp/src_rec_cmd.txt
+          echo 'CiAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkZXIgKDQgdHJhY2tzIHggOTAgc2VjIG1heCBhdCBkZXZpY2UgU1IpIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgc3RhdGljIGNvbnN0IGludCBNQVhfUkVDX1RSQUNLUyA9IDQ7CiAgICBzdGF0aWMgY29uc3QgaW50IFJFQ19NQVhfU0VDICAgID0gOTA7CgogICAgc3RkOjp2ZWN0b3I8ZmxvYXQ+IHJlY1RyYWNrW01BWF9SRUNfVFJBQ0tTXTsgIC8vIHBlci10cmFjayBQQ00KICAgIGludCAgICAgICAgICAgICAgICByZWNMZW4gIFtNQVhfUkVDX1RSQUNLU10gPSB7fTsKCiAgICBzdGQ6OmF0b21pYzxpbnQ+ICByZWNBY3RpdmVUcmFjazsgICAvLyAtMSA9IGlkbGUKICAgIHN0ZDo6YXRvbWljPGJvb2w+IHJlY1J1bm5pbmc7CiAgICBpbnQgICAgICAgICAgICAgICByZWNXcml0ZVBvcyAgPSAwOwogICAgaW50ICAgICAgICAgICAgICAgcmVjTWF4RnJhbWVzID0gNDgwMDAgKiA5MDsKCiAgICBzdHJ1Y3QgUmVjUGxheVN0YXRlIHsKICAgICAgICBzdGQ6OmF0b21pYzxib29sPiAgYWN0aXZlOwogICAgICAgIGludCAgICAgICAgICAgICAgICByZWFkUG9zID0gMDsKICAgICAgICBzdGQ6OmF0b21pYzxmbG9hdD4gdm9sOwogICAgICAgIGJvb2wgICAgICAgICAgICAgICBsb29waW5nID0gZmFsc2U7CiAgICAgICAgUmVjUGxheVN0YXRlKCkgOiBhY3RpdmUoZmFsc2UpLCB2b2woMS5mKSB7fQogICAgfTsKICAgIFJlY1BsYXlTdGF0ZSByZWNQbGF5W01BWF9SRUNfVFJBQ0tTXTsKCiAgICBBdWRpb0VuZ2luZUltcGwoKSA6IHJlY0FjdGl2ZVRyYWNrKC0xKSwgcmVjUnVubmluZyhmYWxzZSkge30K'   | base64 -d > /tmp/src_rec_fields.txt
+          echo 'ICAgICAgICAvLyBQcmUtYWxsb2NhdGUgcmVjb3JkaW5nIHRyYWNrIGJ1ZmZlcnMgKGNhbGxlZCBvbiBpbml0L3JlaW5pdCkKICAgICAgICByZWNNYXhGcmFtZXMgPSBzYW1wbGVSYXRlICogUkVDX01BWF9TRUM7CiAgICAgICAgZm9yIChpbnQgdGkgPSAwOyB0aSA8IE1BWF9SRUNfVFJBQ0tTOyB0aSsrKQogICAgICAgICAgICByZWNUcmFja1t0aV0uYXNzaWduKHJlY01heEZyYW1lcywgMC5mKTsK'     | base64 -d > /tmp/src_rec_init.txt
+          echo 'ICAgICAgICAvLyDilIDilIAgTWl4IHBsYXlpbmcgcmVjb3JkZWQgdHJhY2tzIGludG8gb3V0cHV0IOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIGZvciAoaW50IHQgPSAwOyB0IDwgTUFYX1JFQ19UUkFDS1M7IHQrKykgewogICAgICAgICAgICBSZWNQbGF5U3RhdGUmIHJwID0gcmVjUGxheVt0XTsKICAgICAgICAgICAgaWYgKCFycC5hY3RpdmUubG9hZChzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKSkgY29udGludWU7CiAgICAgICAgICAgIGludCAgdGxlbiA9IHJlY0xlblt0XTsKICAgICAgICAgICAgaWYgKHRsZW4gPD0gMCkgeyBycC5hY3RpdmUuc3RvcmUoZmFsc2UpOyBjb250aW51ZTsgfQogICAgICAgICAgICBmbG9hdCBydiA9IHJwLnZvbC5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IG51bUZyYW1lczsgaSsrKSB7CiAgICAgICAgICAgICAgICBpZiAocnAucmVhZFBvcyA8IHRsZW4pIHsKICAgICAgICAgICAgICAgICAgICBvdXRbaV0gKz0gcmVjVHJhY2tbdF1bcnAucmVhZFBvcysrXSAqIHJ2OwogICAgICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgICAgICBpZiAocnAubG9vcGluZykgcnAucmVhZFBvcyA9IDA7CiAgICAgICAgICAgICAgICAgICAgZWxzZSB7IHJwLmFjdGl2ZS5zdG9yZShmYWxzZSwgc3RkOjptZW1vcnlfb3JkZXJfcmVsYXhlZCk7IGJyZWFrOyB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIC8vIOKUgOKUgCBDYXB0dXJlIG1peGVkIG91dHB1dCB0byBhY3RpdmUgcmVjb3JkaW5nIHRyYWNrIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIGludCBydHJhY2sgPSByZWNBY3RpdmVUcmFjay5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgIGlmIChydHJhY2sgPj0gMCAmJiBydHJhY2sgPCBNQVhfUkVDX1RSQUNLUyAmJiByZWNSdW5uaW5nLmxvYWQoKSkgewogICAgICAgICAgICBpbnQgcm1heCA9IHJlY01heEZyYW1lczsKICAgICAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBudW1GcmFtZXM7IGkrKykgewogICAgICAgICAgICAgICAgaWYgKHJlY1dyaXRlUG9zIDwgcm1heCkgewogICAgICAgICAgICAgICAgICAgIHJlY1RyYWNrW3J0cmFja11bcmVjV3JpdGVQb3MrK10gPSBvdXRbaV07CiAgICAgICAgICAgICAgICB9IGVsc2UgewogICAgICAgICAgICAgICAgICAgIHJlY1J1bm5pbmcuc3RvcmUoZmFsc2UsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICAgICAgICAgIHJlY0FjdGl2ZVRyYWNrLnN0b3JlKC0xLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKTsKICAgICAgICAgICAgICAgICAgICBicmVhazsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgICByZWNMZW5bcnRyYWNrXSA9IHJlY1dyaXRlUG9zOwogICAgICAgIH0KCg==' | base64 -d > /tmp/src_rec_callback.txt
+          echo 'CiAgICAgICAgY2FzZSBDTURfUkVDX1NUQVJUOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUykgewogICAgICAgICAgICAgICAgcmVjV3JpdGVQb3MgPSAwOwogICAgICAgICAgICAgICAgcmVjTGVuW2MucmVjVHJhY2tdID0gMDsKICAgICAgICAgICAgICAgIHN0ZDo6ZmlsbChyZWNUcmFja1tjLnJlY1RyYWNrXS5iZWdpbigpLCByZWNUcmFja1tjLnJlY1RyYWNrXS5lbmQoKSwgMC5mKTsKICAgICAgICAgICAgICAgIHJlY0FjdGl2ZVRyYWNrLnN0b3JlKGMucmVjVHJhY2ssIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGVhc2UpOwogICAgICAgICAgICAgICAgcmVjUnVubmluZy5zdG9yZSh0cnVlLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxlYXNlKTsKICAgICAgICAgICAgfQogICAgICAgICAgICBicmVhazsKCiAgICAgICAgY2FzZSBDTURfUkVDX1NUT1A6CiAgICAgICAgICAgIHJlY1J1bm5pbmcuc3RvcmUoZmFsc2UsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICByZWNBY3RpdmVUcmFjay5zdG9yZSgtMSwgc3RkOjptZW1vcnlfb3JkZXJfcmVsYXhlZCk7CiAgICAgICAgICAgIGJyZWFrOwoKICAgICAgICBjYXNlIENNRF9QTEFZX1RSQUNLOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUyAmJiByZWNMZW5bYy5yZWNUcmFja10gPiAwKSB7CiAgICAgICAgICAgICAgICBSZWNQbGF5U3RhdGUmIHJwID0gcmVjUGxheVtjLnJlY1RyYWNrXTsKICAgICAgICAgICAgICAgIHJwLnJlYWRQb3MgPSAwOwogICAgICAgICAgICAgICAgcnAudm9sLnN0b3JlKGMudHJhY2tWb2wsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICAgICAgcnAubG9vcGluZyA9IGMudHJhY2tMb29wOwogICAgICAgICAgICAgICAgcnAuYWN0aXZlLnN0b3JlKHRydWUsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGVhc2UpOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGJyZWFrOwoKICAgICAgICBjYXNlIENNRF9TVE9QX1RSQUNLOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUykKICAgICAgICAgICAgICAgIHJlY1BsYXlbYy5yZWNUcmFja10uYWN0aXZlLnN0b3JlKGZhbHNlLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKTsKICAgICAgICAgICAgYnJlYWs7Cg=='     | base64 -d > /tmp/src_rec_cmds.txt
+          echo 'CkpOSUVYUE9SVCB2b2lkIEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZVN0YXJ0UmVjb3JkKAogICAgICAgIEpOSUVudiogZW52LCBqb2JqZWN0IG9iaiwgamludCB0cmFjaykgewogICAgQXVkaW9FbmdpbmVJbXBsKiBlID0gZ2V0RW5naW5lKGVudiwgb2JqKTsKICAgIGlmICghZSkgcmV0dXJuOwogICAgQ21kIGNtZHt9OwogICAgY21kLnR5cGUgICAgID0gQ01EX1JFQ19TVEFSVDsKICAgIGNtZC5yZWNUcmFjayA9IChpbnQpdHJhY2s7CiAgICBlLT5jbWRRLnB1c2goY21kKTsKfQoKSk5JRVhQT1JUIHZvaWQgSk5JQ0FMTApKYXZhX2NvbV9wcmFtb2RfbG9vcG1pZGlfQXVkaW9FbmdpbmVfbmF0aXZlU3RvcFJlY29yZChKTklFbnYqIGVudiwgam9iamVjdCBvYmopIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlID0gQ01EX1JFQ19TVE9QOwogICAgZS0+Y21kUS5wdXNoKGNtZCk7Cn0KCkpOSUVYUE9SVCBqaW50IEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCgKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IEF1ZGlvRW5naW5lSW1wbDo6TUFYX1JFQ19UUkFDS1MpIHJldHVybiAwOwogICAgcmV0dXJuIChqaW50KWUtPnJlY0xlblsoaW50KXRyYWNrXTsKfQoKSk5JRVhQT1JUIGpmbG9hdEFycmF5IEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZUdldFJlY29yZGVkU2FtcGxlcygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IEF1ZGlvRW5naW5lSW1wbDo6TUFYX1JFQ19UUkFDS1MpIHJldHVybiBudWxscHRyOwogICAgaW50IGxlbiA9IGUtPnJlY0xlblsoaW50KXRyYWNrXTsKICAgIGlmIChsZW4gPD0gMCkgcmV0dXJuIG51bGxwdHI7CiAgICBqZmxvYXRBcnJheSBhcnIgPSBlbnYtPk5ld0Zsb2F0QXJyYXkobGVuKTsKICAgIGlmICghYXJyKSByZXR1cm4gbnVsbHB0cjsKICAgIGVudi0+U2V0RmxvYXRBcnJheVJlZ2lvbihhcnIsIDAsIGxlbiwgZS0+cmVjVHJhY2tbKGludCl0cmFja10uZGF0YSgpKTsKICAgIHJldHVybiBhcnI7Cn0KCkpOSUVYUE9SVCB2b2lkIEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZVN0YXJ0VHJhY2tQbGF5YmFjaygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2ssIGpmbG9hdCB2b2wsIGpib29sZWFuIGxvb3ApIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlICAgICAgPSBDTURfUExBWV9UUkFDSzsKICAgIGNtZC5yZWNUcmFjayAgPSAoaW50KXRyYWNrOwogICAgY21kLnRyYWNrVm9sICA9IChmbG9hdCl2b2w7CiAgICBjbWQudHJhY2tMb29wID0gKGJvb2wpbG9vcDsKICAgIGUtPmNtZFEucHVzaChjbWQpOwp9CgpKTklFWFBPUlQgdm9pZCBKTklDQUxMCkphdmFfY29tX3ByYW1vZF9sb29wbWlkaV9BdWRpb0VuZ2luZV9uYXRpdmVTdG9wVHJhY2tQbGF5YmFjaygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlICAgICA9IENNRF9TVE9QX1RSQUNLOwogICAgY21kLnJlY1RyYWNrID0gKGludCl0cmFjazsKICAgIGUtPmNtZFEucHVzaChjbWQpOwp9Cg=='      | base64 -d > /tmp/src_rec_jni.txt
+          echo 'CiAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkaW5nIEpOSSBkZWNsYXJhdGlvbnMg4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0YXJ0UmVjb3JkKGludCB0cmFjayk7CiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0b3BSZWNvcmQoKTsKICAgIHByaXZhdGUgbmF0aXZlIGludCAgICAgbmF0aXZlR2V0UmVjb3JkZWRGcmFtZUNvdW50KGludCB0cmFjayk7CiAgICBwcml2YXRlIG5hdGl2ZSBmbG9hdFtdIG5hdGl2ZUdldFJlY29yZGVkU2FtcGxlcyhpbnQgdHJhY2spOwogICAgcHJpdmF0ZSBuYXRpdmUgdm9pZCAgICBuYXRpdmVTdGFydFRyYWNrUGxheWJhY2soaW50IHRyYWNrLCBmbG9hdCB2b2wsIGJvb2xlYW4gbG9vcCk7CiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0b3BUcmFja1BsYXliYWNrKGludCB0cmFjayk7CgogICAgcHVibGljIHN0YXRpYyBmaW5hbCBpbnQgUkVDX1RSQUNLUyA9IDQ7CgogICAgcHVibGljIHZvaWQgc3RhcnRSZWNvcmRpbmcoaW50IHRyYWNrKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdGFydFJlY29yZCh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdGFydFJlY29yZCBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgdm9pZCBzdG9wUmVjb3JkaW5nKCkgewogICAgICAgIGlmICghbmF0aXZlQXZhaWxhYmxlKSByZXR1cm47CiAgICAgICAgdHJ5IHsgbmF0aXZlU3RvcFJlY29yZCgpOyB9CiAgICAgICAgY2F0Y2ggKFVuc2F0aXNmaWVkTGlua0Vycm9yIGUpIHsgTG9nLmUoVEFHLCAibmF0aXZlU3RvcFJlY29yZCBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgaW50IGdldFJlY29yZGVkRnJhbWVDb3VudChpbnQgdHJhY2spIHsKICAgICAgICBpZiAoIW5hdGl2ZUF2YWlsYWJsZSB8fCB0cmFjayA8IDAgfHwgdHJhY2sgPj0gUkVDX1RSQUNLUykgcmV0dXJuIDA7CiAgICAgICAgdHJ5IHsgcmV0dXJuIG5hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyByZXR1cm4gMDsgfQogICAgfQoKICAgIHB1YmxpYyB2b2lkIHN0YXJ0VHJhY2tQbGF5YmFjayhpbnQgdHJhY2ssIGZsb2F0IHZvbCwgYm9vbGVhbiBsb29waW5nKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdGFydFRyYWNrUGxheWJhY2sodHJhY2ssIHZvbCwgbG9vcGluZyk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdGFydFRyYWNrUGxheWJhY2sgbWlzc2luZyIsIGUpOyB9CiAgICB9CgogICAgcHVibGljIHZvaWQgc3RvcFRyYWNrUGxheWJhY2soaW50IHRyYWNrKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdG9wVHJhY2tQbGF5YmFjayh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdG9wVHJhY2tQbGF5YmFjayBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgaW50IHNhdmVUcmFja1RvV2F2KGludCB0cmFjaywgU3RyaW5nIGZpbGVQYXRoKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUpIHJldHVybiAtMTsKICAgICAgICB0cnkgewogICAgICAgICAgICBpbnQgZnJhbWVDb3VudCA9IG5hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCh0cmFjayk7CiAgICAgICAgICAgIGlmIChmcmFtZUNvdW50IDw9IDApIHJldHVybiAwOwogICAgICAgICAgICBmbG9hdFtdIHNhbXBsZXMgPSBuYXRpdmVHZXRSZWNvcmRlZFNhbXBsZXModHJhY2spOwogICAgICAgICAgICBpZiAoc2FtcGxlcyA9PSBudWxsIHx8IHNhbXBsZXMubGVuZ3RoID09IDApIHJldHVybiAtMTsKICAgICAgICAgICAgc2hvcnRbXSBwY20gPSBuZXcgc2hvcnRbc2FtcGxlcy5sZW5ndGhdOwogICAgICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IHNhbXBsZXMubGVuZ3RoOyBpKyspCiAgICAgICAgICAgICAgICBwY21baV0gPSAoc2hvcnQpKE1hdGgubWF4KC0xZiwgTWF0aC5taW4oMWYsIHNhbXBsZXNbaV0pKSAqIDMyNzY3Zik7CiAgICAgICAgICAgIHdyaXRlV2F2RmlsZShmaWxlUGF0aCwgcGNtLCB0YXJnZXRTYW1wbGVSYXRlLCAxKTsKICAgICAgICAgICAgTG9nLmkoVEFHLCAiU2F2ZWQgdHJhY2sgIiArIHRyYWNrICsgIiA9PiAiICsgZmlsZVBhdGggKyAiICgiICsgZnJhbWVDb3VudCArICIgZnJhbWVzKSIpOwogICAgICAgICAgICByZXR1cm4gZnJhbWVDb3VudDsKICAgICAgICB9IGNhdGNoIChFeGNlcHRpb24gZSkgewogICAgICAgICAgICBMb2cuZShUQUcsICJzYXZlVHJhY2tUb1dhdiBmYWlsZWQiLCBlKTsKICAgICAgICAgICAgcmV0dXJuIC0xOwogICAgICAgIH0KICAgIH0KCiAgICBwcml2YXRlIHZvaWQgd3JpdGVXYXZGaWxlKFN0cmluZyBwYXRoLCBzaG9ydFtdIHBjbSwgaW50IHNyLCBpbnQgY2hhbm5lbHMpIHRocm93cyBqYXZhLmlvLklPRXhjZXB0aW9uIHsKICAgICAgICBpbnQgZGF0YUxlbiA9IHBjbS5sZW5ndGggKiAyOwogICAgICAgIGphdmEuaW8uRmlsZU91dHB1dFN0cmVhbSBmb3MgPSBuZXcgamF2YS5pby5GaWxlT3V0cHV0U3RyZWFtKHBhdGgpOwogICAgICAgIGphdmEuaW8uRGF0YU91dHB1dFN0cmVhbSBkb3MgPSBuZXcgamF2YS5pby5EYXRhT3V0cHV0U3RyZWFtKG5ldyBqYXZhLmlvLkJ1ZmZlcmVkT3V0cHV0U3RyZWFtKGZvcykpOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJSSUZGIik7ICB3cml0ZUxFMzIoZG9zLCAzNiArIGRhdGFMZW4pOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJXQVZFIik7CiAgICAgICAgZG9zLndyaXRlQnl0ZXMoImZtdCAiKTsgIHdyaXRlTEUzMihkb3MsIDE2KTsKICAgICAgICB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpMSk7IHdyaXRlTEUxNihkb3MsIChzaG9ydCljaGFubmVscyk7CiAgICAgICAgd3JpdGVMRTMyKGRvcywgc3IpOyAgICAgIHdyaXRlTEUzMihkb3MsIHNyICogY2hhbm5lbHMgKiAyKTsKICAgICAgICB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpKGNoYW5uZWxzICogMikpOyB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpMTYpOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJkYXRhIik7ICB3cml0ZUxFMzIoZG9zLCBkYXRhTGVuKTsKICAgICAgICBmb3IgKHNob3J0IHMgOiBwY20pIHdyaXRlTEUxNihkb3MsIHMpOwogICAgICAgIGRvcy5jbG9zZSgpOwogICAgfQogICAgcHJpdmF0ZSBzdGF0aWMgdm9pZCB3cml0ZUxFMzIoamF2YS5pby5EYXRhT3V0cHV0U3RyZWFtIGQsIGludCB2KSB0aHJvd3MgamF2YS5pby5JT0V4Y2VwdGlvbiB7CiAgICAgICAgZC53cml0ZSh2ICYgMHhGRik7IGQud3JpdGUoKHY+PjgpICYgMHhGRik7IGQud3JpdGUoKHY+PjE2KSAmIDB4RkYpOyBkLndyaXRlKCh2Pj4yNCkgJiAweEZGKTsKICAgIH0KICAgIHByaXZhdGUgc3RhdGljIHZvaWQgd3JpdGVMRTE2KGphdmEuaW8uRGF0YU91dHB1dFN0cmVhbSBkLCBzaG9ydCB2KSB0aHJvd3MgamF2YS5pby5JT0V4Y2VwdGlvbiB7CiAgICAgICAgZC53cml0ZSh2ICYgMHhGRik7IGQud3JpdGUoKHY+PjgpICYgMHhGRik7CiAgICB9Cg=='       | base64 -d > /tmp/src_ae_rec.java
+          echo 'ICAgIC8vIOKUgOKUgCBNdWx0aS10cmFjayByZWNvcmRlciBzdGF0ZSDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKICAgIHByaXZhdGUgc3RhdGljIGZpbmFsIGludCBSRUNfVFJBQ0tTICAgID0gNDsKICAgIHByaXZhdGUgYm9vbGVhbiAgIGlzUmVjb3JkaW5nICAgICAgICAgID0gZmFsc2U7CiAgICBwcml2YXRlIGludCAgICAgICBhY3RpdmVSZWNUcmFjayAgICAgICA9IDA7CiAgICBwcml2YXRlIGJvb2xlYW5bXSB0cmFja0hhc0RhdGEgICAgICAgICA9IG5ldyBib29sZWFuW1JFQ19UUkFDS1NdOwogICAgcHJpdmF0ZSBib29sZWFuW10gdHJhY2tQbGF5aW5nICAgICAgICAgPSBuZXcgYm9vbGVhbltSRUNfVFJBQ0tTXTsKICAgIHByaXZhdGUgQnV0dG9uICAgYnRuUmVjb3JkU3RhcnQ7CiAgICBwcml2YXRlIEJ1dHRvbiAgIGJ0blJlY29yZFN0b3A7CiAgICBwcml2YXRlIEJ1dHRvbltdIGJ0blRyYWNrUGxheSAgICAgICAgICA9IG5ldyBCdXR0b25bUkVDX1RSQUNLU107CiAgICBwcml2YXRlIEJ1dHRvbiAgIGJ0blNhdmVSZWNvcmRpbmc7CiAgICBwcml2YXRlIFRleHRWaWV3IHR4dFJlY1N0YXR1czsK'    | base64 -d > /tmp/src_la_fields.java
+          echo 'ICAgICAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkaW5nIGNvbnRyb2xzIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIHRoaXMuYnRuUmVjb3JkU3RhcnQgICA9IChCdXR0b24pICAgZmluZFZpZXdCeUlkKFIuaWQuYnRuUmVjb3JkU3RhcnQpOwogICAgICAgIHRoaXMuYnRuUmVjb3JkU3RvcCAgICA9IChCdXR0b24pICAgZmluZFZpZXdCeUlkKFIuaWQuYnRuUmVjb3JkU3RvcCk7CiAgICAgICAgdGhpcy5idG5TYXZlUmVjb3JkaW5nID0gKEJ1dHRvbikgICBmaW5kVmlld0J5SWQoUi5pZC5idG5TYXZlUmVjb3JkaW5nKTsKICAgICAgICB0aGlzLnR4dFJlY1N0YXR1cyAgICAgPSAoVGV4dFZpZXcpIGZpbmRWaWV3QnlJZChSLmlkLnR4dFJlY1N0YXR1cyk7CiAgICAgICAgZm9yIChpbnQgcmkgPSAwOyByaSA8IFJFQ19UUkFDS1M7IHJpKyspIHsKICAgICAgICAgICAgZmluYWwgaW50IHJJZHggPSByaTsKICAgICAgICAgICAgaW50IGJ0blJlc0lkID0gZ2V0UmVzb3VyY2VzKCkuZ2V0SWRlbnRpZmllcigiYnRuUGxheVRyYWNrIiArIChyaSArIDEpLCAiaWQiLCBnZXRQYWNrYWdlTmFtZSgpKTsKICAgICAgICAgICAgaWYgKGJ0blJlc0lkICE9IDApIHsKICAgICAgICAgICAgICAgIHRoaXMuYnRuVHJhY2tQbGF5W3JpXSA9IChCdXR0b24pIGZpbmRWaWV3QnlJZChidG5SZXNJZCk7CiAgICAgICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbcmldICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbcmldLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IG9uUGxheVRyYWNrQ2xpY2socklkeCkpOwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgICAgIGlmICh0aGlzLmJ0blJlY29yZFN0YXJ0ICAhPSBudWxsKSB0aGlzLmJ0blJlY29yZFN0YXJ0LnNldE9uQ2xpY2tMaXN0ZW5lcih2ICAtPiBvblJlY29yZFN0YXJ0Q2xpY2soKSk7CiAgICAgICAgaWYgKHRoaXMuYnRuUmVjb3JkU3RvcCAgICE9IG51bGwpIHRoaXMuYnRuUmVjb3JkU3RvcC5zZXRPbkNsaWNrTGlzdGVuZXIodiAgIC0+IG9uUmVjb3JkU3RvcENsaWNrKCkpOwogICAgICAgIGlmICh0aGlzLmJ0blNhdmVSZWNvcmRpbmchPSBudWxsKSB0aGlzLmJ0blNhdmVSZWNvcmRpbmcuc2V0T25DbGlja0xpc3RlbmVyKHYtPiBvblNhdmVSZWNvcmRpbmdDbGljaygpKTsK'    | base64 -d > /tmp/src_la_wiring.java
+          echo 'CiAgICAvLyDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZAKICAgIC8vIE11bHRpLXRyYWNrIHJlY29yZGluZyBVSSBoYW5kbGVycwogICAgLy8g4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQCgogICAgcHJpdmF0ZSB2b2lkIG9uUmVjb3JkU3RhcnRDbGljaygpIHsKICAgICAgICBpZiAodGhpcy5hdWRpb0VuZ2luZSA9PSBudWxsKSB7CiAgICAgICAgICAgIFRvYXN0Lm1ha2VUZXh0KHRoaXMsICJBdWRpbyBlbmdpbmUgbm90IHJlYWR5IiwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCk7IHJldHVybjsKICAgICAgICB9CiAgICAgICAgaWYgKHRoaXMuaXNSZWNvcmRpbmcpIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdG9wUmVjb3JkaW5nKCk7CiAgICAgICAgICAgIHRoaXMuaXNSZWNvcmRpbmcgPSBmYWxzZTsKICAgICAgICB9CiAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdGFydFJlY29yZGluZyh0aGlzLmFjdGl2ZVJlY1RyYWNrKTsKICAgICAgICB0aGlzLmlzUmVjb3JkaW5nID0gdHJ1ZTsKICAgICAgICB1cGRhdGVSZWNVSSgpOwogICAgICAgIGlmICh0aGlzLnR4dFJlY1N0YXR1cyAhPSBudWxsKQogICAgICAgICAgICB0aGlzLnR4dFJlY1N0YXR1cy5zZXRUZXh0KCJSRUMgVCIgKyAodGhpcy5hY3RpdmVSZWNUcmFjayArIDEpKTsKICAgIH0KCiAgICBwcml2YXRlIHZvaWQgb25SZWNvcmRTdG9wQ2xpY2soKSB7CiAgICAgICAgaWYgKHRoaXMuYXVkaW9FbmdpbmUgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgIGlmICh0aGlzLmlzUmVjb3JkaW5nKSB7CiAgICAgICAgICAgIHRoaXMuYXVkaW9FbmdpbmUuc3RvcFJlY29yZGluZygpOwogICAgICAgICAgICB0aGlzLmlzUmVjb3JkaW5nID0gZmFsc2U7CiAgICAgICAgICAgIGludCBmYyA9IHRoaXMuYXVkaW9FbmdpbmUuZ2V0UmVjb3JkZWRGcmFtZUNvdW50KHRoaXMuYWN0aXZlUmVjVHJhY2spOwogICAgICAgICAgICBpZiAoZmMgPiAwKSB7CiAgICAgICAgICAgICAgICB0aGlzLnRyYWNrSGFzRGF0YVt0aGlzLmFjdGl2ZVJlY1RyYWNrXSA9IHRydWU7CiAgICAgICAgICAgICAgICBmbG9hdCBzZWNzID0gZmMgLyAoZmxvYXQpIHRoaXMuYXVkaW9FbmdpbmUuZ2V0U2FtcGxlUmF0ZSgpOwogICAgICAgICAgICAgICAgaWYgKHRoaXMudHh0UmVjU3RhdHVzICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgdGhpcy50eHRSZWNTdGF0dXMuc2V0VGV4dCgiVCIgKyAodGhpcy5hY3RpdmVSZWNUcmFjayArIDEpICsgIiAiICsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIFN0cmluZy5mb3JtYXQoIiUuMWYiLCBzZWNzKSArICJzIik7CiAgICAgICAgICAgICAgICBmb3IgKGludCBpID0gMTsgaSA8PSBSRUNfVFJBQ0tTOyBpKyspIHsKICAgICAgICAgICAgICAgICAgICBpbnQgbmV4dCA9ICh0aGlzLmFjdGl2ZVJlY1RyYWNrICsgaSkgJSBSRUNfVFJBQ0tTOwogICAgICAgICAgICAgICAgICAgIGlmICghdGhpcy50cmFja0hhc0RhdGFbbmV4dF0pIHsgdGhpcy5hY3RpdmVSZWNUcmFjayA9IG5leHQ7IGJyZWFrOyB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgICAgICBpZiAodGhpcy50eHRSZWNTdGF0dXMgIT0gbnVsbCkgdGhpcy50eHRSZWNTdGF0dXMuc2V0VGV4dCgiRW1wdHkiKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IFJFQ19UUkFDS1M7IGkrKykgewogICAgICAgICAgICBpZiAodGhpcy50cmFja1BsYXlpbmdbaV0gJiYgdGhpcy5hdWRpb0VuZ2luZSAhPSBudWxsKSB7CiAgICAgICAgICAgICAgICB0aGlzLmF1ZGlvRW5naW5lLnN0b3BUcmFja1BsYXliYWNrKGkpOwogICAgICAgICAgICAgICAgdGhpcy50cmFja1BsYXlpbmdbaV0gPSBmYWxzZTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICB1cGRhdGVSZWNVSSgpOwogICAgfQoKICAgIHByaXZhdGUgdm9pZCBvblBsYXlUcmFja0NsaWNrKGludCB0cmFjaykgewogICAgICAgIGlmICh0aGlzLmF1ZGlvRW5naW5lID09IG51bGwgfHwgIXRoaXMudHJhY2tIYXNEYXRhW3RyYWNrXSkgewogICAgICAgICAgICBUb2FzdC5tYWtlVGV4dCh0aGlzLCAiVCIgKyAodHJhY2sgKyAxKSArICI6IG5vdGhpbmcgcmVjb3JkZWQiLAogICAgICAgICAgICAgICAgICAgIFRvYXN0LkxFTkdUSF9TSE9SVCkuc2hvdygpOyByZXR1cm47CiAgICAgICAgfQogICAgICAgIGlmICh0aGlzLnRyYWNrUGxheWluZ1t0cmFja10pIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdG9wVHJhY2tQbGF5YmFjayh0cmFjayk7CiAgICAgICAgICAgIHRoaXMudHJhY2tQbGF5aW5nW3RyYWNrXSA9IGZhbHNlOwogICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbdHJhY2tdICE9IG51bGwpCiAgICAgICAgICAgICAgICB0aGlzLmJ0blRyYWNrUGxheVt0cmFja10uc2V0VGV4dCgiVCIgKyAodHJhY2sgKyAxKSk7CiAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdGFydFRyYWNrUGxheWJhY2sodHJhY2ssIDEuMGYsIGZhbHNlKTsKICAgICAgICAgICAgdGhpcy50cmFja1BsYXlpbmdbdHJhY2tdID0gdHJ1ZTsKICAgICAgICAgICAgaWYgKHRoaXMuYnRuVHJhY2tQbGF5W3RyYWNrXSAhPSBudWxsKQogICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbdHJhY2tdLnNldFRleHQoIlQiICsgKHRyYWNrICsgMSkgKyAiIFAiKTsKICAgICAgICB9CiAgICB9CgogICAgcHJpdmF0ZSB2b2lkIG9uU2F2ZVJlY29yZGluZ0NsaWNrKCkgewogICAgICAgIGlmICh0aGlzLmF1ZGlvRW5naW5lID09IG51bGwpIHJldHVybjsKICAgICAgICBpbnQgc2F2ZVRyYWNrID0gLTE7CiAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBSRUNfVFJBQ0tTOyBpKyspIGlmICh0aGlzLnRyYWNrSGFzRGF0YVtpXSkgeyBzYXZlVHJhY2sgPSBpOyBicmVhazsgfQogICAgICAgIGlmIChzYXZlVHJhY2sgPCAwKSB7CiAgICAgICAgICAgIFRvYXN0Lm1ha2VUZXh0KHRoaXMsICJOb3RoaW5nIHRvIHNhdmUhIiwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCk7IHJldHVybjsKICAgICAgICB9CiAgICAgICAgZmluYWwgaW50IHRyYWNrID0gc2F2ZVRyYWNrOwogICAgICAgIG5ldyBUaHJlYWQoKCkgLT4gewogICAgICAgICAgICB0cnkgewogICAgICAgICAgICAgICAgamF2YS5pby5GaWxlIGRpciA9IG5ldyBqYXZhLmlvLkZpbGUoCiAgICAgICAgICAgICAgICAgICAgYW5kcm9pZC5vcy5FbnZpcm9ubWVudC5nZXRFeHRlcm5hbFN0b3JhZ2VQdWJsaWNEaXJlY3RvcnkoCiAgICAgICAgICAgICAgICAgICAgICAgIGFuZHJvaWQub3MuRW52aXJvbm1lbnQuRElSRUNUT1JZX01VU0lDKSwgIk9jdGFwYWRMb29wcyIpOwogICAgICAgICAgICAgICAgaWYgKCFkaXIuZXhpc3RzKCkpIGRpci5ta2RpcnMoKTsKICAgICAgICAgICAgICAgIFN0cmluZyBmbmFtZSA9ICJyZWNvcmRpbmdfVCIgKyAodHJhY2sgKyAxKSArICJfIiArIFN5c3RlbS5jdXJyZW50VGltZU1pbGxpcygpICsgIi53YXYiOwogICAgICAgICAgICAgICAgamF2YS5pby5GaWxlIG91dCA9IG5ldyBqYXZhLmlvLkZpbGUoZGlyLCBmbmFtZSk7CiAgICAgICAgICAgICAgICBpbnQgZnJhbWVzID0gdGhpcy5hdWRpb0VuZ2luZS5zYXZlVHJhY2tUb1dhdih0cmFjaywgb3V0LmdldEFic29sdXRlUGF0aCgpKTsKICAgICAgICAgICAgICAgIGFuZHJvaWQubWVkaWEuTWVkaWFTY2FubmVyQ29ubmVjdGlvbi5zY2FuRmlsZSh0aGlzLAogICAgICAgICAgICAgICAgICAgIG5ldyBTdHJpbmdbXXtvdXQuZ2V0QWJzb2x1dGVQYXRoKCl9LCBuZXcgU3RyaW5nW117ImF1ZGlvL3dhdiJ9LCBudWxsKTsKICAgICAgICAgICAgICAgIHJ1bk9uVWlUaHJlYWQoKCkgLT4gVG9hc3QubWFrZVRleHQodGhpcywKICAgICAgICAgICAgICAgICAgICBmcmFtZXMgPiAwID8gIlNhdmVkOiAiICsgZm5hbWUgOiAiU2F2ZSBmYWlsZWQhIiwKICAgICAgICAgICAgICAgICAgICBUb2FzdC5MRU5HVEhfTE9ORykuc2hvdygpKTsKICAgICAgICAgICAgfSBjYXRjaCAoRXhjZXB0aW9uIGUpIHsKICAgICAgICAgICAgICAgIHJ1bk9uVWlUaHJlYWQoKCkgLT4gVG9hc3QubWFrZVRleHQodGhpcywKICAgICAgICAgICAgICAgICAgICAiRXJyb3I6ICIgKyBlLmdldE1lc3NhZ2UoKSwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCkpOwogICAgICAgICAgICB9CiAgICAgICAgfSkuc3RhcnQoKTsKICAgIH0KCiAgICBwcml2YXRlIHZvaWQgdXBkYXRlUmVjVUkoKSB7CiAgICAgICAgaWYgKHRoaXMuYnRuUmVjb3JkU3RhcnQgIT0gbnVsbCkKICAgICAgICAgICAgdGhpcy5idG5SZWNvcmRTdGFydC5zZXRUZXh0KHRoaXMuaXNSZWNvcmRpbmcgPyAiUkVDLi4uIiA6ICJSRUMiKTsKICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IFJFQ19UUkFDS1M7IGkrKykgewogICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbaV0gIT0gbnVsbCkgewogICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbaV0uc2V0RW5hYmxlZCh0aGlzLnRyYWNrSGFzRGF0YVtpXSk7CiAgICAgICAgICAgICAgICB0aGlzLmJ0blRyYWNrUGxheVtpXS5zZXRBbHBoYSh0aGlzLnRyYWNrSGFzRGF0YVtpXSA/IDEuMGYgOiAwLjRmKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0K'   | base64 -d > /tmp/src_la_methods.java
+          echo 'ICAgIDxMaW5lYXJMYXlvdXQgYW5kcm9pZDpvcmllbnRhdGlvbj0iaG9yaXpvbnRhbCIgYW5kcm9pZDpsYXlvdXRfd2lkdGg9Im1hdGNoX3BhcmVudCIKICAgICAgICBhbmRyb2lkOmxheW91dF9oZWlnaHQ9IjQ0ZHAiIGFuZHJvaWQ6bGF5b3V0X21hcmdpblRvcD0iMmRwIiBhbmRyb2lkOmxheW91dF9tYXJnaW5Cb3R0b209IjJkcCIKICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IiNmZjBhMGEwYSIgYW5kcm9pZDpwYWRkaW5nPSIyZHAiPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5SZWNvcmRTdGFydCIKICAgICAgICAgICAgYW5kcm9pZDp0ZXh0U2l6ZT0iOXNwIiBhbmRyb2lkOnRleHRTdHlsZT0iYm9sZCIgYW5kcm9pZDp0ZXh0Q29sb3I9IiNmZmZmZmZmZiIKICAgICAgICAgICAgYW5kcm9pZDpiYWNrZ3JvdW5kPSJAZHJhd2FibGUvYnRuXzNkX2RhcmsiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dpZHRoPSIwZHAiIGFuZHJvaWQ6bGF5b3V0X2hlaWdodD0ibWF0Y2hfcGFyZW50IgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93ZWlnaHQ9IjEuMyIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiIGFuZHJvaWQ6dGV4dD0iUkVDIi8+CiAgICAgICAgPEJ1dHRvbiBhbmRyb2lkOmlkPSJAK2lkL2J0blJlY29yZFN0b3AiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dFNpemU9IjlzcCIgYW5kcm9pZDp0ZXh0U3R5bGU9ImJvbGQiIGFuZHJvaWQ6dGV4dENvbG9yPSIjZmZmZmZmZmYiCiAgICAgICAgICAgIGFuZHJvaWQ6YmFja2dyb3VuZD0iQGRyYXdhYmxlL2J0bl8zZF9yZWQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dpZHRoPSIwZHAiIGFuZHJvaWQ6bGF5b3V0X2hlaWdodD0ibWF0Y2hfcGFyZW50IgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93ZWlnaHQ9IjEuMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiIGFuZHJvaWQ6dGV4dD0iU1RPUCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2sxIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDEiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2syIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDIiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2szIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDMiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2s0IgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDQiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5TYXZlUmVjb3JkaW5nIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fZ2xvc3N5XzNkIgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93aWR0aD0iMGRwIiBhbmRyb2lkOmxheW91dF9oZWlnaHQ9Im1hdGNoX3BhcmVudCIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2VpZ2h0PSIxLjMiIGFuZHJvaWQ6bGF5b3V0X21hcmdpbkVuZD0iMmRwIiBhbmRyb2lkOnRleHQ9IlNBVkUiLz4KICAgICAgICA8VGV4dFZpZXcgYW5kcm9pZDppZD0iQCtpZC90eHRSZWNTdGF0dXMiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dFNpemU9IjhzcCIgYW5kcm9pZDp0ZXh0Q29sb3I9IiNmZjAwZmY4OCIgYW5kcm9pZDpncmF2aXR5PSJjZW50ZXIiCiAgICAgICAgICAgIGFuZHJvaWQ6YmFja2dyb3VuZD0iI2ZmMTExMTExIgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93aWR0aD0iMGRwIiBhbmRyb2lkOmxheW91dF9oZWlnaHQ9Im1hdGNoX3BhcmVudCIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2VpZ2h0PSIxLjUiIGFuZHJvaWQ6dGV4dD0iUkVBRFkiIGFuZHJvaWQ6cGFkZGluZz0iMmRwIi8+CiAgICA8L0xpbmVhckxheW91dD4K'      | base64 -d > /tmp/src_xml_row.xml
+          echo 'aW1wb3J0IHN5cywgcmUKcGF0aCA9IHN5cy5hcmd2WzFdCndpdGggb3BlbihwYXRoKSBhcyBmOiBzcmMgPSBmLnJlYWQoKQoKIyAyLiBFeHRlbmQgQ21kIHN0cnVjdCB3aXRoIHJlY29yZGluZyBmaWVsZHMKY21kX2ZpZWxkcyA9IG9wZW4oJy90bXAvc3JjX3JlY19jbWQudHh0JykucmVhZCgpCm1hcmtlciA9ICcgICAgYm9vbCAgICBpc0xvb3A7JwppZHggPSBzcmMuZmluZChtYXJrZXIpCmlmIGlkeCA+PSAwOgogICAgZW5kID0gc3JjLmZpbmQoJ307JywgaWR4KQogICAgaWYgZW5kID49IDAgYW5kICdyZWNUcmFjaycgbm90IGluIHNyYzoKICAgICAgICBzcmMgPSBzcmNbOmVuZF0gKyBjbWRfZmllbGRzICsgc3JjW2VuZDpdCiAgICAgICAgcHJpbnQoJzIuIENtZCBzdHJ1Y3QgZXh0ZW5kZWQnKQogICAgZWxzZTogcHJpbnQoJ1dBUk4gMicpCmVsc2U6IHByaW50KCdXQVJOIDJiJykKCiMgMy4gQWRkIHJlY29yZGluZyBmaWVsZHMgdG8gQXVkaW9FbmdpbmVJbXBsCnJlY19maWVsZHMgPSBvcGVuKCcvdG1wL3NyY19yZWNfZmllbGRzLnR4dCcpLnJlYWQoKQpTQ1JBVENIID0gJyAgICBmbG9hdCBmZWVkQnVmW1NDUkFUQ0hfU0laRV07JwppZiBTQ1JBVENIIGluIHNyYyBhbmQgJ01BWF9SRUNfVFJBQ0tTJyBub3QgaW4gc3JjOgogICAgc3JjID0gc3JjLnJlcGxhY2UoU0NSQVRDSCwgU0NSQVRDSCArIHJlY19maWVsZHMsIDEpCiAgICBwcmludCgnMy4gcmVjb3JkaW5nIGZpZWxkcyBhZGRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDMnKQoKIyA0LiBBZGQgaW5pdCBjb2RlIGZvciByZWNvcmRpbmcgYnVmZmVycwpyZWNfaW5pdCA9IG9wZW4oJy90bXAvc3JjX3JlY19pbml0LnR4dCcpLnJlYWQoKQpMT09QX0lOSVQgPSAnZm9yIChpbnQgaSA9IDA7IGkgPCBMT09QX1ZPSUNFUzsgaSsrKSB7JwppZiBMT09QX0lOSVQgaW4gc3JjIGFuZCAncmVjTWF4RnJhbWVzID0gc2FtcGxlUmF0ZScgbm90IGluIHNyYzoKICAgIHBvcyA9IHNyYy5maW5kKExPT1BfSU5JVCkKICAgIHNyYyA9IHNyY1s6cG9zXSArIHJlY19pbml0ICsgJ1xuJyArIHNyY1twb3M6XQogICAgcHJpbnQoJzQuIGluaXQgY29kZSBpbnNlcnRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDQnKQoKIyA1LiBBZGQgcmVjb3JkaW5nIG1peCtjYXB0dXJlIGluIG9uQXVkaW9SZWFkeSAoYmVmb3JlIGRlbGF5IHdyaXRlKQpyZWNfY2IgPSBvcGVuKCcvdG1wL3NyY19yZWNfY2FsbGJhY2sudHh0JykucmVhZCgpCkRFTEFZX1dSSVRFID0gJyAgICAgICAgLy8gV3JpdGUgdG8gZGVsYXkgYnVmZmVyJwppZiBERUxBWV9XUklURSBpbiBzcmMgYW5kICdydHJhY2snIG5vdCBpbiBzcmM6CiAgICBzcmMgPSBzcmMucmVwbGFjZShERUxBWV9XUklURSwgcmVjX2NiICsgREVMQVlfV1JJVEUsIDEpCiAgICBwcmludCgnNS4gY2FsbGJhY2sgYWRkZWQnKQplbHNlOiBwcmludCgnV0FSTiA1JykKCiMgNi4gQWRkIHByb2Nlc3NDbWQgcmVjb3JkaW5nIGNhc2VzIGJlZm9yZSBDTURfU1RPUF9QQUQKcmVjX2NtZHMgPSBvcGVuKCcvdG1wL3NyY19yZWNfY21kcy50eHQnKS5yZWFkKCkKQ01EX1NUT1AgPSAnICAgICAgICBjYXNlIENNRF9TVE9QX1BBRDonCmlmICdDTURfUkVDX1NUQVJUJyBub3QgaW4gc3JjIGFuZCBDTURfU1RPUCBpbiBzcmM6CiAgICBzcmMgPSBzcmMucmVwbGFjZShDTURfU1RPUCwgcmVjX2NtZHMgKyBDTURfU1RPUCwgMSkKICAgIHByaW50KCc2LiBwcm9jZXNzQ21kIGNhc2VzIGFkZGVkJykKZWxzZTogcHJpbnQoJ1dBUk4gNicpCgojIDcuIEFkZCBKTkkgbWV0aG9kcyBiZWZvcmUgZXh0ZXJuIEMgY2xvc2luZyBicmFjZQpyZWNfam5pID0gb3BlbignL3RtcC9zcmNfcmVjX2puaS50eHQnKS5yZWFkKCkKRVhURVJOX0MgPSAnfSAvLyBleHRlcm4gIkMiJwppZiAnbmF0aXZlU3RhcnRSZWNvcmQnIG5vdCBpbiBzcmMgYW5kIEVYVEVSTl9DIGluIHNyYzoKICAgIHNyYyA9IHNyYy5yZXBsYWNlKEVYVEVSTl9DLCByZWNfam5pICsgRVhURVJOX0MpCiAgICBwcmludCgnNy4gSk5JIGFkZGVkJykKZWxzZTogcHJpbnQoJ1dBUk4gNycpCgp3aXRoIG9wZW4ocGF0aCwgJ3cnKSBhcyBmOiBmLndyaXRlKHNyYykKcHJpbnQoJ0RvbmUuIFN5bWJvbHM6JykKZm9yIHN5bSBpbiBbJ0NNRF9SRUNfU1RBUlQnLCdyZWNBY3RpdmVUcmFjaycsJ25hdGl2ZVN0YXJ0UmVjb3JkJywnUmVjUGxheVN0YXRlJ106CiAgICBwcmludChmJyAge3N5bX06IHtzcmMuY291bnQoc3ltKX14JykK'   | base64 -d > /tmp/apply_cpp_patches.py
+          echo 'aW1wb3J0IHN5cwpwYXRoID0gc3lzLmFyZ3ZbMV0Kd2l0aCBvcGVuKHBhdGgpIGFzIGY6IHNyYyA9IGYucmVhZCgpCgojIDEuIEFkZCBzdGF0ZSBmaWVsZHMgYmVmb3JlIGxvb3BQYWRzIGFycmF5CmZpZWxkcyA9IG9wZW4oJy90bXAvc3JjX2xhX2ZpZWxkcy5qYXZhJykucmVhZCgpClBBRFMgPSAnICAgIHByaXZhdGUgQnV0dG9uW10gbG9vcFBhZHMgPSBuZXcgQnV0dG9uWzhdOycKaWYgUEFEUyBpbiBzcmMgYW5kICdpc1JlY29yZGluZycgbm90IGluIHNyYzoKICAgIHNyYyA9IHNyYy5yZXBsYWNlKFBBRFMsIGZpZWxkcyArIFBBRFMpCiAgICBwcmludCgnMS4gc3RhdGUgZmllbGRzIGFkZGVkJykKZWxzZTogcHJpbnQoJ1dBUk4gMScpCgojIDIuIEFkZCB3aXJpbmcgdG8gb25DcmVhdGUgYWZ0ZXIgYnRuRHJ1bU9jdGFwYWQKd2lyaW5nID0gb3BlbignL3RtcC9zcmNfbGFfd2lyaW5nLmphdmEnKS5yZWFkKCkKRFJVTV9CVE4gPSAndGhpcy5idG5EcnVtT2N0YXBhZCA9IChCdXR0b24pIGZpbmRWaWV3QnlJZChSLmlkLmJ0bkRydW1PY3RhcGFkKTsnCmlmIERSVU1fQlROIGluIHNyYyBhbmQgJ2J0blJlY29yZFN0YXJ0JyBub3QgaW4gc3JjOgogICAgc3JjID0gc3JjLnJlcGxhY2UoRFJVTV9CVE4sIERSVU1fQlROICsgd2lyaW5nKQogICAgcHJpbnQoJzIuIHdpcmluZyBhZGRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDInKQoKIyAzLiBBZGQgaGFuZGxlciBtZXRob2RzIGJlZm9yZSBsYXN0IGNsb3NpbmcgYnJhY2UKbWV0aG9kcyA9IG9wZW4oJy90bXAvc3JjX2xhX21ldGhvZHMuamF2YScpLnJlYWQoKQppZiAnb25SZWNvcmRTdGFydENsaWNrJyBub3QgaW4gc3JjOgogICAgbGFzdCA9IHNyYy5yZmluZChjaHIoMTApICsgJ30nKQogICAgc3JjID0gc3JjWzpsYXN0XSArIG1ldGhvZHMgKyBzcmNbbGFzdDpdCiAgICBwcmludCgnMy4gbWV0aG9kcyBhZGRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDMnKQoKd2l0aCBvcGVuKHBhdGgsICd3JykgYXMgZjogZi53cml0ZShzcmMpCnByaW50KCdMb29wc0FjdGl2aXR5IHBhdGNoaW5nIGNvbXBsZXRlJykK'    | base64 -d > /tmp/apply_la_patches.py
+          ls -lh /tmp/src_* /tmp/apply_*.py
+          echo "All patch sources decoded"
+
+      - name: Apply multi-track recording to audio_engine.cpp
+        run: |
+          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
+          grep -q 'CMD_REC_START' "$CPP" && { echo "already patched"; exit 0; }
+          # 1. Expand CmdType enum via Python (sed can't reliably handle multi-line replacement)
+          python3 -c "
+          import sys
+          with open('$CPP') as f: s=f.read()
+          old='enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH };'
+          new=open('/tmp/src_rec_enum.txt').read().strip()
+          if old in s: s=s.replace(old,new); print('1. enum expanded')
+          else: print('WARN 1: enum not found')
+          with open('$CPP','w') as f: f.write(s)"
+          # 2-7. Apply remaining patches
+          python3 /tmp/apply_cpp_patches.py "$CPP"
+
+      - name: Apply recording API to AudioEngine.java
+        run: |
+          AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
+          grep -q 'nativeStartRecord' "$AE" && { echo "skip"; exit 0; }
+          python3 -c "
+          with open('$AE') as f: s=f.read()
+          ins=open('/tmp/src_ae_rec.java').read()
+          a='    private native void nativeReinitStream(int nativeSR, int nativeBurst);'
+          if a in s: s=s.replace(a,a+ins); print('OK: recording API added')
+          else: print('WARN: anchor not found')
+          with open('$AE','w') as f: f.write(s)"
+
+      - name: Apply recording UI to LoopsActivity.java
+        run: |
+          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
+          grep -q 'btnRecordStart' "$LA" && { echo "skip"; exit 0; }
+          python3 /tmp/apply_la_patches.py "$LA"
+
+      - name: Add recording row to activity_loops.xml
+        run: |
+          XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
+          grep -q 'btnRecordStart' "$XML" && { echo "skip"; exit 0; }
+          python3 -c "
+          with open('$XML') as f: c=f.read()
+          row=open('/tmp/src_xml_row.xml').read()
+          anchor='<LinearLayout android:orientation=\"vertical\" android:id=\"@+id/loopPadArea\"'
+          if anchor in c: c=c.replace(anchor,row.rstrip()+chr(10)+'    '+anchor); print('OK: before loopPadArea')
+          else:
+            last=c.rfind('</LinearLayout>'); c=c[:last]+row+'</LinearLayout>'; print('OK: fallback')
+          with open('$XML','w') as f: f.write(c)"
+
+      - name: Verify all feature patches
+        run: |
+          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
+          AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
+          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
+          XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
           echo "=== Drum rolling fix (chokeGroup=0) ==="
-          grep "chokeGroup=0\|chokeGroup = 0" "$JAVA_DIR/LoopsActivity.java" | head -3
-          echo "=== activity_loops.xml recording row ==="
-          grep -c "btnRecordStart\|btnPlayTrack" "gradle_build/app/src/main/res/layout/activity_loops.xml" || true
-          echo "All checks done"
+          grep -n 'chokeGroup' "$LA" | head -2 || echo "not found"
+          echo "=== Latency (AAudio) ==="
+          grep -n 'setAudioApi' "$CPP" | head -2 || echo "not found"
+          echo "=== C++ recording symbols ==="
+          for s in CMD_REC_START recActiveTrack nativeStartRecord; do
+            echo "  $s: $(grep -c $s $CPP || echo 0) occurrences"
+          done
+          echo "=== AudioEngine.java ==="
+          grep -c 'startRecording' "$AE" || echo 0
+          echo "=== LoopsActivity.java ==="
+          grep -c 'btnRecordStart' "$LA" || echo 0
+          echo "=== activity_loops.xml ==="
+          grep -c 'btnRecordStart' "$XML" || echo 0
+          echo "All feature verifications done"
 
       - name: Build Debug APK
         working-directory: gradle_build
