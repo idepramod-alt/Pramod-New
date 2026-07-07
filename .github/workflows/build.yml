@@ -617,20 +617,37 @@ jobs:
         run: |
           CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
           grep -q 'recActiveTrack' "$CPP" || { echo "skip: recording not patched yet"; exit 0; }
-          python3 -c "
-          with open('$CPP') as f: s = f.read()
-          # The recording patch inserts a new empty ctor before the existing ctor,
-          # creating two AudioEngineImpl() definitions which fails to compile.
-          # Fix: merge them into one ctor that has the initializer list AND the body.
-          dup = '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {}\n    AudioEngineImpl() {'
-          fix = '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {'
-          if dup in s:
-              s = s.replace(dup, fix)
-              print('Fixed: merged duplicate AudioEngineImpl constructors into one')
+          python3 - "$CPP" << 'PYEOF'
+          import sys, re
+          with open(sys.argv[1]) as f:
+              src = f.read()
+          # The recording patch (step 3) inserts rec_fields immediately after
+          # "float feedBuf[SCRATCH_SIZE];" via str.replace. rec_fields ends with
+          # a new empty AudioEngineImpl() ctor. readBuf declaration that was
+          # originally just after feedBuf is now sandwiched between the two ctors:
+          #   AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {}  <- empty dup
+          #   float readBuf[SCRATCH_SIZE];                                  <- misplaced
+          #   <blank line>
+          #   AudioEngineImpl() {                                           <- real ctor
+          # Fix: remove the empty dup ctor line, keep everything in between
+          # (readBuf + blank line), and add the initializer list to the real ctor.
+          pat = re.compile(
+              r'    AudioEngineImpl\(\) : recActiveTrack\(-1\), recRunning\(false\) \{\}\n'
+              r'(.*?)'
+              r'    AudioEngineImpl\(\) \{',
+              re.DOTALL
+          )
+          m = pat.search(src)
+          if m:
+              between = m.group(1)  # readBuf line + blank line
+              replacement = between + '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {'
+              src = src[:m.start()] + replacement + src[m.end():]
+              print('Fixed: removed empty ctor, kept readBuf, merged init-list into real ctor')
           else:
-              print('OK: no duplicate constructor found')
-          with open('$CPP', 'w') as f: f.write(s)
-          "
+              print('OK: no duplicate constructor pattern found')
+          with open(sys.argv[1], 'w') as f:
+              f.write(src)
+          PYEOF
 
       - name: Apply recording API to AudioEngine.java
         run: |
