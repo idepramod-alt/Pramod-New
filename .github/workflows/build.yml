@@ -565,7 +565,7 @@ jobs:
         run: |
           JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           grep -q 'chokeGroup=0.*drum\|chokeGroup = 0.*drum' "$JAVA" 2>/dev/null && { echo "already patched"; exit 0; }
-          sed -i 's/playSample(index, sampleData, effectiveVolume(index), this\.currentSpeed, this\.currentPitch, 0, false, 0\.0f, 0\.0f, 0\.0f, 0\.0f, 0\.0f, index + 1, 0\.0f, 0\.0f)/playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f) \/\/ chokeGroup=0: drum rolls/g' "$JAVA"
+          sed -i 's/playSample(index, sampleData, effectiveVolume(index), this\.currentSpeed, this\.currentPitch, 0, false, 0\.0f, 0\.0f, 0\.0f, 0\.0f, 0\.0f, index + 1, 0\.0f, 0\.0f);/playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f); \/\/ chokeGroup=0: drum rolls/g' "$JAVA"
           grep -n 'chokeGroup' "$JAVA" | head -3 || true
           echo "OK: drum rolling fix done"
 
