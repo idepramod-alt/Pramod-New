@@ -892,7 +892,7 @@ jobs:
               print('2. isAddMode / btnAddMode / btnDrumModeAdv fields added')
 
           # 3. Wire btnAddMode + btnDrumModeAdv in onCreate
-          if 'btnAddMode' not in src or 'toggleAddMode' not in src:
+          if 'void toggleAddMode()' not in src:
               wire_anchor = '                    LoopsActivity.this.toggleDrumOctapadMode();'
               idx = src.find(wire_anchor)
               if idx < 0:
@@ -929,7 +929,7 @@ jobs:
               print('WARN 4: handlePadClick anchor not found - skipping intercept')
 
           # 5. Add toggleAddMode + showPadConfigDialog methods
-          if 'toggleAddMode' not in src:
+          if 'void toggleAddMode()' not in src:
               methods = (
                   '\n'
                   '    // ADD MODE: tap a pad to configure it as LOOP or DRUM\n'
