@@ -35,9 +35,14 @@ import android.widget.Toast;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.documentfile.provider.DocumentFile;
 import com.pramod.loopmidi.AudioEngine;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.AudioTrack;
 import android.media.MediaPlayer;
-import android.media.MediaRecorder;
 import android.util.Log;
+import java.io.DataOutputStream;
+import java.io.FileOutputStream;
+import java.io.RandomAccessFile;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -136,17 +141,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private boolean savedMultiMode    = false;
     private boolean savedOneShotMode  = false;
 
-    // ── Recording system ──────────────────────────────────────────────────────
-    private Button btnRecordStart   = null;
-    private Button btnRecordStop    = null;
-    private Button btnPlayRecording = null;
-    private Button btnStopPlayRec   = null;
-    private TextView txtRecStatus   = null;
-    private MediaRecorder mediaRecorder  = null;
-    private MediaPlayer   mediaPlayer    = null;
-    private boolean isRecording         = false;
-    private boolean hasRecording        = false;
-    private String  recFilePath         = null;
+    // ── Multi-track Recording system ─────────────────────────────────────────
+    private Button   btnRec        = null;  // in Mode Bar, opens dialog
+    private Button   btnAddLoop    = null;  // in Mode Bar, loads audio into selected pad
+    private android.media.AudioRecord audioRecord     = null;
+    private MediaPlayer              mediaPlayer      = null;
+    private volatile boolean         isRecordingTrack = false;
+    private Thread                   recordThread     = null;
+    private java.util.ArrayList<String> trackPaths   = new java.util.ArrayList<>();
+    private int                      trackCount       = 0;
+    private static final int         REC_SAMPLE_RATE  = 44100;
+    // Dialog reference so we can refresh its UI from background threads
+    private android.app.AlertDialog  recDialog        = null;
     // Debounce handler: prevents flooding the native command queue when sliders
     // are dragged (onProgressChanged fires 60+ times/sec). Audio update fires
     // 40ms after the last slider move; UI labels update immediately as before.
@@ -509,13 +515,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     protected void onDestroy() {
         super.onDestroy();
         teardownAudioRouting();
-        // Stop recorder/player cleanly
-        stopMicRecording();
-        stopPlayback();
-        if (this.mediaRecorder != null) {
-            try { this.mediaRecorder.release(); } catch (Exception ignored) {}
-            this.mediaRecorder = null;
-        }
+        // Stop any active track recording
+        stopTrackRecording();
         if (this.mediaPlayer != null) {
             try { this.mediaPlayer.release(); } catch (Exception ignored) {}
             this.mediaPlayer = null;
@@ -700,12 +701,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Loop Mode / Drum Mode toggle buttons
         this.btnLoopMode = (Button) findViewById(R.id.btnLoopMode);
         this.btnDrumMode = (Button) findViewById(R.id.btnDrumMode);
-        // Recording panel buttons
-        this.btnRecordStart   = (Button)   findViewById(R.id.btnRecordStart);
-        this.btnRecordStop    = (Button)   findViewById(R.id.btnRecordStop);
-        this.btnPlayRecording = (Button)   findViewById(R.id.btnPlayRecording);
-        this.btnStopPlayRec   = (Button)   findViewById(R.id.btnStopPlayRec);
-        this.txtRecStatus     = (TextView) findViewById(R.id.txtRecStatus);
+        // ADD + REC buttons in Mode Bar
+        this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
+        this.btnRec     = (Button) findViewById(R.id.btnRec);
         // Restore global drum mode from prefs
         this.isGlobalDrumMode = this.prefs.getBoolean("global_drum_mode", false);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
@@ -907,39 +905,44 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
-        // ── Recording buttons ─────────────────────────────────────────────────
-        if (this.btnRecordStart != null) {
-            this.btnRecordStart.setOnClickListener(new View.OnClickListener() {
+        // ── ADD button: load audio into currently selected pad ────────────────
+        if (this.btnAddLoop != null) {
+            this.btnAddLoop.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    LoopsActivity.this.startMicRecording();
+                    // Show a quick picker: which pad to load into?
+                    String[] padNames = new String[8];
+                    for (int i = 0; i < 8; i++) padNames[i] = "PAD " + (i + 1);
+                    new android.app.AlertDialog.Builder(LoopsActivity.this)
+                        .setTitle("Add Audio — Select Pad")
+                        .setItems(padNames, new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int which) {
+                                LoopsActivity.this.selectedPad = which;
+                                android.content.Intent intent = new android.content.Intent(
+                                    android.content.Intent.ACTION_OPEN_DOCUMENT);
+                                intent.setType("audio/*");
+                                intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                intent.addFlags(android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                                LoopsActivity.this.startActivityForResult(intent, REQ_PICK_LOOP_WAV);
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
                 }
             });
         }
-        if (this.btnRecordStop != null) {
-            this.btnRecordStop.setOnClickListener(new View.OnClickListener() {
+
+        // ── REC button: opens multi-track recording dialog ────────────────────
+        if (this.btnRec != null) {
+            this.btnRec.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    LoopsActivity.this.stopMicRecording();
+                    LoopsActivity.this.showMultiTrackRecDialog();
                 }
             });
         }
-        if (this.btnPlayRecording != null) {
-            this.btnPlayRecording.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    LoopsActivity.this.playRecording();
-                }
-            });
-        }
-        if (this.btnStopPlayRec != null) {
-            this.btnStopPlayRec.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    LoopsActivity.this.stopPlayback();
-                }
-            });
-        }
+
         // Apply initial mode UI state
         updateModeButtonsUI();
     }
@@ -1974,124 +1977,399 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    //  Recording system  (MediaRecorder — mic input)
+    //  Multi-Track Recording system  (AudioRecord — PCM → WAV)
     // ═════════════════════════════════════════════════════════════════════════
 
-    /** Start recording from the microphone. */
-    public void startMicRecording() {
-        if (this.isRecording) {
-            Toast.makeText(this, "Already recording!", Toast.LENGTH_SHORT).show();
+    /** Show the multi-track recording dialog. */
+    public void showMultiTrackRecDialog() {
+        // Check RECORD_AUDIO permission at runtime (required Android 6+)
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 9001);
             return;
         }
-        // Stop any currently playing recording first
-        stopPlayback();
-        try {
-            // Build output path in app's files dir (no external storage permission needed)
-            File recFile = new File(getFilesDir(), "recording.aac");
-            this.recFilePath = recFile.getAbsolutePath();
 
-            if (this.mediaRecorder != null) {
-                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
-            }
-            this.mediaRecorder = new MediaRecorder();
-            this.mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            this.mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.AAC_ADTS);
-            this.mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-            this.mediaRecorder.setAudioSamplingRate(44100);
-            this.mediaRecorder.setAudioEncodingBitRate(192000);
-            this.mediaRecorder.setOutputFile(this.recFilePath);
-            this.mediaRecorder.prepare();
-            this.mediaRecorder.start();
-            this.isRecording = true;
-            this.hasRecording = false;
+        android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(24, 16, 24, 8);
+        root.setBackgroundColor(0xFF1a1a2e);
 
-            // Visual feedback
-            if (this.btnRecordStart   != null) this.btnRecordStart.setBackgroundColor(0xFFFF0000);
-            if (this.btnRecordStart   != null) this.btnRecordStart.setText("⏺ RECORDING...");
-            if (this.txtRecStatus     != null) this.txtRecStatus.setText("🔴 RECORDING — tap ⏹ STOP when done");
-            Log.i("LoopsActivity", "Recording started → " + this.recFilePath);
-        } catch (Exception e) {
-            Log.e("LoopsActivity", "startMicRecording failed", e);
-            this.isRecording = false;
-            if (this.mediaRecorder != null) {
-                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
-                this.mediaRecorder = null;
+        // ── Status label ──────────────────────────────────────────────────────
+        final android.widget.TextView tvStatus = new android.widget.TextView(this);
+        tvStatus.setTextColor(0xFFFF8800);
+        tvStatus.setTextSize(13f);
+        tvStatus.setPadding(0, 0, 0, 10);
+        tvStatus.setText(trackPaths.isEmpty()
+            ? "Koi track nahi hai — 🔴 REC dabao"
+            : trackCount + " track(s) recorded");
+        root.addView(tvStatus);
+
+        // ── Track list ────────────────────────────────────────────────────────
+        final android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        final android.widget.LinearLayout trackList = new android.widget.LinearLayout(this);
+        trackList.setOrientation(android.widget.LinearLayout.VERTICAL);
+        sv.addView(trackList);
+        android.view.ViewGroup.LayoutParams svLP =
+            new android.view.ViewGroup.LayoutParams(-1, android.util.TypedValue.applyDimension(
+                android.util.TypedValue.COMPLEX_UNIT_DIP, 120,
+                getResources().getDisplayMetrics()) > 0
+                ? (int) android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_DIP, 120,
+                    getResources().getDisplayMetrics())
+                : 300);
+        sv.setLayoutParams(svLP);
+        root.addView(sv);
+
+        // Populate track rows
+        refreshTrackList(trackList, tvStatus);
+
+        // ── Control buttons row ───────────────────────────────────────────────
+        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
+        btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        btnRow.setPadding(0, 12, 0, 0);
+
+        final Button btnRecStart = new Button(this);
+        btnRecStart.setText(isRecordingTrack ? "⏺ RECORDING..." : "🔴 REC");
+        btnRecStart.setBackgroundColor(isRecordingTrack ? 0xFFFF0000 : 0xFFCC0000);
+        btnRecStart.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams btnLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        btnLP.setMargins(0, 0, 6, 0);
+        btnRecStart.setLayoutParams(btnLP);
+
+        final Button btnRecStop = new Button(this);
+        btnRecStop.setText("⏹ STOP");
+        btnRecStop.setBackgroundColor(0xFF333333);
+        btnRecStop.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams stopLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        stopLP.setMargins(0, 0, 6, 0);
+        btnRecStop.setLayoutParams(stopLP);
+
+        final Button btnPlayAll = new Button(this);
+        btnPlayAll.setText("▶ PLAY ALL");
+        btnPlayAll.setBackgroundColor(0xFF006600);
+        btnPlayAll.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams playLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        playLP.setMargins(0, 0, 6, 0);
+        btnPlayAll.setLayoutParams(playLP);
+
+        final Button btnClear = new Button(this);
+        btnClear.setText("🗑 CLEAR ALL");
+        btnClear.setBackgroundColor(0xFF550000);
+        btnClear.setTextColor(0xFFFFFFFF);
+        btnClear.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        btnRow.addView(btnRecStart);
+        btnRow.addView(btnRecStop);
+        btnRow.addView(btnPlayAll);
+        btnRow.addView(btnClear);
+        root.addView(btnRow);
+
+        // ── Build dialog ──────────────────────────────────────────────────────
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+            .setTitle("🎙 Multi-Track Recorder")
+            .setView(root)
+            .setNegativeButton("CLOSE", null);
+        recDialog = builder.create();
+
+        // Listeners
+        btnRecStart.setOnClickListener(v -> {
+            if (isRecordingTrack) {
+                Toast.makeText(this, "Pehle STOP karo!", Toast.LENGTH_SHORT).show();
+                return;
             }
-            Toast.makeText(this, "Recording failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            if (this.txtRecStatus != null) this.txtRecStatus.setText("❌ Recording failed — check mic permission");
-        }
+            startTrackRecording(btnRecStart, tvStatus);
+        });
+
+        btnRecStop.setOnClickListener(v -> {
+            if (!isRecordingTrack) {
+                stopMediaPlayer();
+                tvStatus.setText("⏹ Playback rokha");
+                return;
+            }
+            stopTrackRecording();
+            btnRecStart.setText("🔴 REC");
+            btnRecStart.setBackgroundColor(0xFFCC0000);
+            tvStatus.setText("✅ Track " + trackCount + " save ho gaya! Aur tracks record karo ya ▶ PLAY ALL karo.");
+            refreshTrackList(trackList, tvStatus);
+        });
+
+        btnPlayAll.setOnClickListener(v -> {
+            if (isRecordingTrack) {
+                Toast.makeText(this, "Pehle recording STOP karo!", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (trackPaths.isEmpty()) {
+                Toast.makeText(this, "Koi track nahi! Pehle 🔴 REC karo.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            playTrack(trackPaths.get(trackPaths.size() - 1), tvStatus);
+        });
+
+        btnClear.setOnClickListener(v -> {
+            if (isRecordingTrack) stopTrackRecording();
+            stopMediaPlayer();
+            for (String p : trackPaths) new File(p).delete();
+            trackPaths.clear();
+            trackCount = 0;
+            refreshTrackList(trackList, tvStatus);
+            tvStatus.setText("Sab tracks delete ho gaye.");
+            Toast.makeText(this, "All tracks cleared!", Toast.LENGTH_SHORT).show();
+        });
+
+        recDialog.show();
     }
 
-    /** Stop an active recording. */
-    public void stopMicRecording() {
-        if (!this.isRecording || this.mediaRecorder == null) return;
-        try {
-            this.mediaRecorder.stop();
-            this.mediaRecorder.release();
-            this.mediaRecorder = null;
-            this.isRecording   = false;
-            this.hasRecording  = true;
-
-            if (this.btnRecordStart != null) {
-                this.btnRecordStart.setBackgroundColor(0xFFCC0000);
-                this.btnRecordStart.setText("🔴 REC");
-            }
-            if (this.txtRecStatus != null)
-                this.txtRecStatus.setText("✅ Recording saved — tap ▶ PLAY to listen");
-            Log.i("LoopsActivity", "Recording stopped");
-        } catch (Exception e) {
-            Log.e("LoopsActivity", "stopMicRecording failed", e);
-            this.isRecording = false;
-            if (this.mediaRecorder != null) {
-                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
-                this.mediaRecorder = null;
-            }
-            if (this.btnRecordStart != null) this.btnRecordStart.setText("🔴 REC");
-        }
-    }
-
-    /** Play back the last recorded audio. */
-    public void playRecording() {
-        if (!this.hasRecording || this.recFilePath == null) {
-            Toast.makeText(this, "No recording yet — tap 🔴 REC first!", Toast.LENGTH_SHORT).show();
+    /** Refresh the track list inside the dialog. */
+    private void refreshTrackList(android.widget.LinearLayout container,
+                                  android.widget.TextView tvStatus) {
+        container.removeAllViews();
+        if (trackPaths.isEmpty()) {
+            android.widget.TextView empty = new android.widget.TextView(this);
+            empty.setText("(koi track nahi)");
+            empty.setTextColor(0xFF888888);
+            empty.setPadding(8, 8, 8, 8);
+            container.addView(empty);
             return;
         }
-        if (this.isRecording) {
-            Toast.makeText(this, "Stop recording first!", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        stopPlayback();
-        try {
-            this.mediaPlayer = new MediaPlayer();
-            this.mediaPlayer.setDataSource(this.recFilePath);
-            this.mediaPlayer.setOnPreparedListener(mp -> mp.start());
-            this.mediaPlayer.setOnCompletionListener(mp -> {
-                if (this.txtRecStatus != null)
-                    this.txtRecStatus.setText("✅ Playback finished — tap ▶ PLAY again or 🔴 REC for new recording");
-                if (this.btnPlayRecording != null)
-                    this.btnPlayRecording.setText("▶ PLAY");
+        for (int i = 0; i < trackPaths.size(); i++) {
+            final int idx = i;
+            final String path = trackPaths.get(i);
+
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            row.setPadding(0, 4, 0, 4);
+
+            android.widget.TextView lbl = new android.widget.TextView(this);
+            lbl.setText("Track " + (i + 1));
+            lbl.setTextColor(0xFFCCCCCC);
+            lbl.setTextSize(12f);
+            android.widget.LinearLayout.LayoutParams lblLP =
+                new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+            lbl.setLayoutParams(lblLP);
+
+            Button btnPlay = new Button(this);
+            btnPlay.setText("▶");
+            btnPlay.setBackgroundColor(0xFF006600);
+            btnPlay.setTextColor(0xFFFFFFFF);
+            android.widget.LinearLayout.LayoutParams pbLP =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            pbLP.setMargins(4, 0, 4, 0);
+            btnPlay.setLayoutParams(pbLP);
+            btnPlay.setOnClickListener(v -> playTrack(path, tvStatus));
+
+            // Load this track into a loop pad
+            Button btnLoad = new Button(this);
+            btnLoad.setText("→ PAD");
+            btnLoad.setBackgroundColor(0xFF003399);
+            btnLoad.setTextColor(0xFFFFFFFF);
+            android.widget.LinearLayout.LayoutParams ldLP =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            ldLP.setMargins(4, 0, 4, 0);
+            btnLoad.setLayoutParams(ldLP);
+            btnLoad.setOnClickListener(v -> {
+                String[] padNames = new String[8];
+                for (int p = 0; p < 8; p++) padNames[p] = "PAD " + (p + 1);
+                new AlertDialog.Builder(this)
+                    .setTitle("Track " + (idx + 1) + " → Pad mein load karo")
+                    .setItems(padNames, (d, which) -> loadTrackIntoPad(path, which))
+                    .setNegativeButton("Cancel", null)
+                    .show();
             });
-            this.mediaPlayer.prepareAsync();
 
-            if (this.btnPlayRecording != null) this.btnPlayRecording.setText("▶ PLAYING...");
-            if (this.txtRecStatus     != null) this.txtRecStatus.setText("▶ Playing recording...");
-        } catch (Exception e) {
-            Log.e("LoopsActivity", "playRecording failed", e);
-            Toast.makeText(this, "Playback failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Button btnDel = new Button(this);
+            btnDel.setText("🗑");
+            btnDel.setBackgroundColor(0xFF550000);
+            btnDel.setTextColor(0xFFFFFFFF);
+            android.widget.LinearLayout.LayoutParams dlLP =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            dlLP.setMargins(4, 0, 0, 0);
+            btnDel.setLayoutParams(dlLP);
+            btnDel.setOnClickListener(v -> {
+                new File(path).delete();
+                trackPaths.remove(idx);
+                refreshTrackList(container, tvStatus);
+                tvStatus.setText("Track " + (idx + 1) + " delete ho gaya.");
+            });
+
+            row.addView(lbl);
+            row.addView(btnPlay);
+            row.addView(btnLoad);
+            row.addView(btnDel);
+            container.addView(row);
         }
     }
 
-    /** Stop any active playback of the recorded audio. */
-    public void stopPlayback() {
-        if (this.mediaPlayer != null) {
-            try {
-                if (this.mediaPlayer.isPlaying()) this.mediaPlayer.stop();
-                this.mediaPlayer.release();
-            } catch (Exception ignored) {}
-            this.mediaPlayer = null;
+    /** Start recording a new track using AudioRecord (PCM → WAV). */
+    private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus) {
+        int minBuf = AudioRecord.getMinBufferSize(
+            REC_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        if (minBuf <= 0) minBuf = 4096;
+        final int bufSize = Math.max(minBuf, 8192);
+        final String outPath = new File(getFilesDir(),
+            "track_" + System.currentTimeMillis() + ".wav").getAbsolutePath();
+        try {
+            audioRecord = new AudioRecord(
+                android.media.MediaRecorder.AudioSource.MIC,
+                REC_SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufSize);
+            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                Toast.makeText(this, "AudioRecord init failed! Mic blocked?", Toast.LENGTH_LONG).show();
+                audioRecord.release(); audioRecord = null;
+                return;
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Recording start nahi hua: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
         }
-        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("▶ PLAY");
-        if (this.txtRecStatus != null && this.hasRecording)
-            this.txtRecStatus.setText("✅ Recording ready — tap ▶ PLAY to listen");
+
+        isRecordingTrack = true;
+        btnRecStart.setText("⏺ RECORDING...");
+        btnRecStart.setBackgroundColor(0xFFFF0000);
+        tvStatus.setText("🔴 Recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
+
+        final AudioRecord ar = audioRecord;
+        final int buf = bufSize;
+        recordThread = new Thread(() -> {
+            byte[] buffer = new byte[buf];
+            java.io.ByteArrayOutputStream pcmOut = new java.io.ByteArrayOutputStream();
+            ar.startRecording();
+            while (isRecordingTrack) {
+                int read = ar.read(buffer, 0, buf);
+                if (read > 0) pcmOut.write(buffer, 0, read);
+            }
+            ar.stop(); ar.release();
+            // Write WAV file
+            try {
+                byte[] pcm = pcmOut.toByteArray();
+                writeWavFile(outPath, pcm, REC_SAMPLE_RATE, 1, 16);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    trackCount++;
+                    trackPaths.add(outPath);
+                    Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM)");
+                });
+            } catch (Exception e) {
+                Log.e("LoopsRec", "WAV write failed", e);
+                new Handler(Looper.getMainLooper()).post(() ->
+                    Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+        recordThread.start();
+    }
+
+    /** Stop the current track recording. */
+    public void stopTrackRecording() {
+        isRecordingTrack = false;
+        if (audioRecord != null) {
+            try { audioRecord.stop(); } catch (Exception ignored) {}
+        }
+        audioRecord = null;
+        if (recordThread != null) {
+            try { recordThread.join(2000); } catch (InterruptedException ignored) {}
+            recordThread = null;
+        }
+    }
+
+    /** Play a single track file with MediaPlayer. */
+    private void playTrack(String path, android.widget.TextView tvStatus) {
+        stopMediaPlayer();
+        try {
+            mediaPlayer = new MediaPlayer();
+            mediaPlayer.setDataSource(path);
+            mediaPlayer.setOnPreparedListener(MediaPlayer::start);
+            mediaPlayer.setOnCompletionListener(mp -> {
+                stopMediaPlayer();
+                if (tvStatus != null)
+                    runOnUiThread(() -> tvStatus.setText("✅ Playback khatam."));
+            });
+            mediaPlayer.prepareAsync();
+            if (tvStatus != null) tvStatus.setText("▶ Chal raha hai...");
+        } catch (Exception e) {
+            Log.e("LoopsRec", "playTrack failed", e);
+            Toast.makeText(this, "Play failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Stop MediaPlayer if running. */
+    private void stopMediaPlayer() {
+        if (mediaPlayer != null) {
+            try { if (mediaPlayer.isPlaying()) mediaPlayer.stop(); } catch (Exception ignored) {}
+            try { mediaPlayer.release(); } catch (Exception ignored) {}
+            mediaPlayer = null;
+        }
+    }
+
+    /** Load a recorded WAV track into a loop pad so it plays like a loop. */
+    private void loadTrackIntoPad(String wavPath, int padIndex) {
+        try {
+            Uri uri = Uri.fromFile(new File(wavPath));
+            AudioEngine.SampleData sd = audioEngine.loadWavFromUri(padIndex, uri);
+            loopSamples[padIndex] = sd;
+            loopUris[padIndex] = uri;
+            if (sd != null && sd.loaded) {
+                updatePadLabel(padIndex);
+                saveLoopsToMemory();
+                Toast.makeText(this, "Track → PAD " + (padIndex + 1) + " loaded!", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Load failed — WAV not ready yet.", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e("LoopsRec", "loadTrackIntoPad failed", e);
+            Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * Write raw PCM bytes as a standard WAV file.
+     * @param path       output file path
+     * @param pcm        raw 16-bit PCM bytes (little-endian)
+     * @param sampleRate e.g. 44100
+     * @param channels   1 = mono, 2 = stereo
+     * @param bitDepth   16
+     */
+    private void writeWavFile(String path, byte[] pcm, int sampleRate,
+                               int channels, int bitDepth) throws IOException {
+        int byteRate = sampleRate * channels * bitDepth / 8;
+        int blockAlign = channels * bitDepth / 8;
+        RandomAccessFile raf = new RandomAccessFile(path, "rw");
+        raf.setLength(0);
+        // RIFF header
+        raf.write("RIFF".getBytes()); raf.writeInt(0); // placeholder for file size
+        raf.write("WAVE".getBytes());
+        // fmt  chunk
+        raf.write("fmt ".getBytes());
+        writeIntLE(raf, 16);          // chunk size
+        writeShortLE(raf, (short) 1); // PCM
+        writeShortLE(raf, (short) channels);
+        writeIntLE(raf, sampleRate);
+        writeIntLE(raf, byteRate);
+        writeShortLE(raf, (short) blockAlign);
+        writeShortLE(raf, (short) bitDepth);
+        // data chunk
+        raf.write("data".getBytes());
+        writeIntLE(raf, pcm.length);
+        raf.write(pcm);
+        // patch RIFF file size
+        long totalSize = raf.length();
+        raf.seek(4);
+        writeIntLE(raf, (int)(totalSize - 8));
+        raf.close();
+    }
+
+    private void writeIntLE(RandomAccessFile raf, int val) throws IOException {
+        raf.write(val & 0xFF);
+        raf.write((val >> 8) & 0xFF);
+        raf.write((val >> 16) & 0xFF);
+        raf.write((val >> 24) & 0xFF);
+    }
+
+    private void writeShortLE(RandomAccessFile raf, short val) throws IOException {
+        raf.write(val & 0xFF);
+        raf.write((val >> 8) & 0xFF);
     }
 }
