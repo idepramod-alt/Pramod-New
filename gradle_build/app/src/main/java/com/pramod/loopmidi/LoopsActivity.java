@@ -35,7 +35,11 @@ import android.widget.Toast;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.documentfile.provider.DocumentFile;
 import com.pramod.loopmidi.AudioEngine;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.util.Log;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -121,6 +125,28 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // true  = DRUM mode  (one-shot hit on every tap, like a real drum pad)
     // Long-press any pad to toggle its mode.
     private boolean[] padDrumMode = new boolean[8];  // default all LOOP
+
+    // ── Loop Mode / Drum Mode (Roland SPD-SX Pro style) ──────────────────────
+    // LOOP MODE (default): pads continuously loop their sample, tap again to stop
+    // DRUM MODE: pads play one-shot on every hit, ALL pads can fire simultaneously
+    private boolean isGlobalDrumMode = false;
+    private Button btnLoopMode = null;
+    private Button btnDrumMode = null;
+    // Saved pre-drum-mode values so switching back to Loop Mode truly restores them
+    private boolean savedMultiMode    = false;
+    private boolean savedOneShotMode  = false;
+
+    // ── Recording system ──────────────────────────────────────────────────────
+    private Button btnRecordStart   = null;
+    private Button btnRecordStop    = null;
+    private Button btnPlayRecording = null;
+    private Button btnStopPlayRec   = null;
+    private TextView txtRecStatus   = null;
+    private MediaRecorder mediaRecorder  = null;
+    private MediaPlayer   mediaPlayer    = null;
+    private boolean isRecording         = false;
+    private boolean hasRecording        = false;
+    private String  recFilePath         = null;
     // Debounce handler: prevents flooding the native command queue when sliders
     // are dragged (onProgressChanged fires 60+ times/sec). Audio update fires
     // 40ms after the last slider move; UI labels update immediately as before.
@@ -197,7 +223,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
         // Per-pad mode: DRUM mode acts like one-shot (global isOneShotMode is an override too)
-        boolean isDrumPad = this.padDrumMode[index] || this.isOneShotMode;
+        boolean isDrumPad = this.isGlobalDrumMode || this.padDrumMode[index] || this.isOneShotMode;
         if (isDrumPad) {
             // DRUM / ONE-SHOT: play once on each tap, no auto-repeat.
             if (this.loopPlaying[index]) {
@@ -483,6 +509,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     protected void onDestroy() {
         super.onDestroy();
         teardownAudioRouting();
+        // Stop recorder/player cleanly
+        stopMicRecording();
+        stopPlayback();
+        if (this.mediaRecorder != null) {
+            try { this.mediaRecorder.release(); } catch (Exception ignored) {}
+            this.mediaRecorder = null;
+        }
+        if (this.mediaPlayer != null) {
+            try { this.mediaPlayer.release(); } catch (Exception ignored) {}
+            this.mediaPlayer = null;
+        }
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
@@ -660,6 +697,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
         this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);
         this.btnResetSpeedPitch = (Button) findViewById(R.id.btnResetSpeedPitch);
+        // Loop Mode / Drum Mode toggle buttons
+        this.btnLoopMode = (Button) findViewById(R.id.btnLoopMode);
+        this.btnDrumMode = (Button) findViewById(R.id.btnDrumMode);
+        // Recording panel buttons
+        this.btnRecordStart   = (Button)   findViewById(R.id.btnRecordStart);
+        this.btnRecordStop    = (Button)   findViewById(R.id.btnRecordStop);
+        this.btnPlayRecording = (Button)   findViewById(R.id.btnPlayRecording);
+        this.btnStopPlayRec   = (Button)   findViewById(R.id.btnStopPlayRec);
+        this.txtRecStatus     = (TextView) findViewById(R.id.txtRecStatus);
+        // Restore global drum mode from prefs
+        this.isGlobalDrumMode = this.prefs.getBoolean("global_drum_mode", false);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
@@ -841,6 +889,59 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
+        // ── Loop Mode button ──────────────────────────────────────────────────
+        if (this.btnLoopMode != null) {
+            this.btnLoopMode.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.setGlobalDrumMode(false);
+                }
+            });
+        }
+        // ── Drum Mode button (Roland SPD-SX Pro style) ────────────────────────
+        if (this.btnDrumMode != null) {
+            this.btnDrumMode.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.setGlobalDrumMode(true);
+                }
+            });
+        }
+        // ── Recording buttons ─────────────────────────────────────────────────
+        if (this.btnRecordStart != null) {
+            this.btnRecordStart.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.startMicRecording();
+                }
+            });
+        }
+        if (this.btnRecordStop != null) {
+            this.btnRecordStop.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.stopMicRecording();
+                }
+            });
+        }
+        if (this.btnPlayRecording != null) {
+            this.btnPlayRecording.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.playRecording();
+                }
+            });
+        }
+        if (this.btnStopPlayRec != null) {
+            this.btnStopPlayRec.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.stopPlayback();
+                }
+            });
+        }
+        // Apply initial mode UI state
+        updateModeButtonsUI();
     }
 
     /** Toggle Drum Octapad mode: one-shot + multi-play both on/off together.
@@ -1794,5 +1895,203 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         } catch (Exception e) {
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Global Loop Mode / Drum Mode  (Roland SPD-SX Pro style)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Switch between global LOOP MODE and global DRUM MODE.
+     *
+     * LOOP MODE (isDrum=false):
+     *   Each pad loops its sample continuously. Tap again to stop.
+     *   This is the factory default — one pad plays at a time unless MULTI-PLAY is on.
+     *
+     * DRUM MODE (isDrum=true):
+     *   Every pad behaves like a Roland SPD-SX Pro drum pad:
+     *   - One-shot hit on every tap (no looping)
+     *   - All 8 pads can fire simultaneously (independent voices)
+     *   - Retapping the same pad cuts off its own previous ring (choke)
+     *   - Long-pressing a pad still works to override its individual mode
+     */
+    public void setGlobalDrumMode(boolean isDrum) {
+        if (isDrum == this.isGlobalDrumMode) return;  // already in this mode
+        if (isDrum) {
+            // Save current Loop Mode options before overwriting them
+            this.savedMultiMode   = this.isMultiMode;
+            this.savedOneShotMode = this.isOneShotMode;
+            // Drum Mode: all pads independent one-shot, no looping
+            this.isOneShotMode = false;   // choke handled per-hit, not globally
+            this.isMultiMode   = true;    // all pads play simultaneously
+        } else {
+            // Restore the user's Loop Mode settings from before Drum Mode was enabled
+            this.isOneShotMode = this.savedOneShotMode;
+            this.isMultiMode   = this.savedMultiMode;
+        }
+        this.isGlobalDrumMode = isDrum;
+        // Keep isDrumOctapadMode in sync so ADV panel reflects state correctly
+        this.isDrumOctapadMode = isDrum;
+        // Sync checkboxes
+        if (this.chkMultiMode   != null) this.chkMultiMode.setChecked(this.isMultiMode);
+        if (this.chkOneShotMode != null) this.chkOneShotMode.setChecked(this.isOneShotMode);
+        // Stop all active pads so mode change takes effect cleanly
+        if (this.audioEngine != null) {
+            this.audioEngine.stopAll();
+            for (int i = 0; i < 8; i++) {
+                this.loopPlaying[i] = false;
+                updatePadLabel(i);
+            }
+        }
+        this.prefs.edit()
+            .putBoolean("global_drum_mode",   this.isGlobalDrumMode)
+            .putBoolean("loop_multi_mode",    this.isMultiMode)
+            .putBoolean("loop_one_shot_mode", this.isOneShotMode)
+            .apply();
+        updateModeButtonsUI();
+        if (this.txtLoopStatus != null) {
+            this.txtLoopStatus.setText(isDrum
+                ? "🥁 DRUM MODE — tap any pad to hit (Roland SPD-SX Pro style)"
+                : "🔁 LOOP MODE — tap pad to start/stop loop");
+        }
+    }
+
+    /** Update button backgrounds to reflect the current mode. */
+    private void updateModeButtonsUI() {
+        if (this.btnLoopMode != null) {
+            this.btnLoopMode.setBackgroundResource(
+                this.isGlobalDrumMode ? R.drawable.btn_3d_dark : R.drawable.btn_3d_blue);
+        }
+        if (this.btnDrumMode != null) {
+            this.btnDrumMode.setBackgroundResource(
+                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        }
+        // Keep ADV panel's btnDrumOctapad in sync
+        if (this.btnDrumOctapad != null) {
+            this.btnDrumOctapad.setBackgroundResource(
+                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Recording system  (MediaRecorder — mic input)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Start recording from the microphone. */
+    public void startMicRecording() {
+        if (this.isRecording) {
+            Toast.makeText(this, "Already recording!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Stop any currently playing recording first
+        stopPlayback();
+        try {
+            // Build output path in app's files dir (no external storage permission needed)
+            File recFile = new File(getFilesDir(), "recording.aac");
+            this.recFilePath = recFile.getAbsolutePath();
+
+            if (this.mediaRecorder != null) {
+                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
+            }
+            this.mediaRecorder = new MediaRecorder();
+            this.mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            this.mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.AAC_ADTS);
+            this.mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            this.mediaRecorder.setAudioSamplingRate(44100);
+            this.mediaRecorder.setAudioEncodingBitRate(192000);
+            this.mediaRecorder.setOutputFile(this.recFilePath);
+            this.mediaRecorder.prepare();
+            this.mediaRecorder.start();
+            this.isRecording = true;
+            this.hasRecording = false;
+
+            // Visual feedback
+            if (this.btnRecordStart   != null) this.btnRecordStart.setBackgroundColor(0xFFFF0000);
+            if (this.btnRecordStart   != null) this.btnRecordStart.setText("⏺ RECORDING...");
+            if (this.txtRecStatus     != null) this.txtRecStatus.setText("🔴 RECORDING — tap ⏹ STOP when done");
+            Log.i("LoopsActivity", "Recording started → " + this.recFilePath);
+        } catch (Exception e) {
+            Log.e("LoopsActivity", "startMicRecording failed", e);
+            this.isRecording = false;
+            if (this.mediaRecorder != null) {
+                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
+                this.mediaRecorder = null;
+            }
+            Toast.makeText(this, "Recording failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            if (this.txtRecStatus != null) this.txtRecStatus.setText("❌ Recording failed — check mic permission");
+        }
+    }
+
+    /** Stop an active recording. */
+    public void stopMicRecording() {
+        if (!this.isRecording || this.mediaRecorder == null) return;
+        try {
+            this.mediaRecorder.stop();
+            this.mediaRecorder.release();
+            this.mediaRecorder = null;
+            this.isRecording   = false;
+            this.hasRecording  = true;
+
+            if (this.btnRecordStart != null) {
+                this.btnRecordStart.setBackgroundColor(0xFFCC0000);
+                this.btnRecordStart.setText("🔴 REC");
+            }
+            if (this.txtRecStatus != null)
+                this.txtRecStatus.setText("✅ Recording saved — tap ▶ PLAY to listen");
+            Log.i("LoopsActivity", "Recording stopped");
+        } catch (Exception e) {
+            Log.e("LoopsActivity", "stopMicRecording failed", e);
+            this.isRecording = false;
+            if (this.mediaRecorder != null) {
+                try { this.mediaRecorder.release(); } catch (Exception ignored) {}
+                this.mediaRecorder = null;
+            }
+            if (this.btnRecordStart != null) this.btnRecordStart.setText("🔴 REC");
+        }
+    }
+
+    /** Play back the last recorded audio. */
+    public void playRecording() {
+        if (!this.hasRecording || this.recFilePath == null) {
+            Toast.makeText(this, "No recording yet — tap 🔴 REC first!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (this.isRecording) {
+            Toast.makeText(this, "Stop recording first!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        stopPlayback();
+        try {
+            this.mediaPlayer = new MediaPlayer();
+            this.mediaPlayer.setDataSource(this.recFilePath);
+            this.mediaPlayer.setOnPreparedListener(mp -> mp.start());
+            this.mediaPlayer.setOnCompletionListener(mp -> {
+                if (this.txtRecStatus != null)
+                    this.txtRecStatus.setText("✅ Playback finished — tap ▶ PLAY again or 🔴 REC for new recording");
+                if (this.btnPlayRecording != null)
+                    this.btnPlayRecording.setText("▶ PLAY");
+            });
+            this.mediaPlayer.prepareAsync();
+
+            if (this.btnPlayRecording != null) this.btnPlayRecording.setText("▶ PLAYING...");
+            if (this.txtRecStatus     != null) this.txtRecStatus.setText("▶ Playing recording...");
+        } catch (Exception e) {
+            Log.e("LoopsActivity", "playRecording failed", e);
+            Toast.makeText(this, "Playback failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Stop any active playback of the recorded audio. */
+    public void stopPlayback() {
+        if (this.mediaPlayer != null) {
+            try {
+                if (this.mediaPlayer.isPlaying()) this.mediaPlayer.stop();
+                this.mediaPlayer.release();
+            } catch (Exception ignored) {}
+            this.mediaPlayer = null;
+        }
+        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("▶ PLAY");
+        if (this.txtRecStatus != null && this.hasRecording)
+            this.txtRecStatus.setText("✅ Recording ready — tap ▶ PLAY to listen");
     }
 }
