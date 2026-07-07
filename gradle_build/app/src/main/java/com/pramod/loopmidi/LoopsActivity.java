@@ -2241,9 +2241,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             ar.startRecording();
             while (isRecordingTrack) {
                 int read = ar.read(buffer, 0, buf);
+                // Skip error codes (negative values) — only write valid PCM data
                 if (read > 0) pcmOut.write(buffer, 0, read);
+                else if (read < 0) break; // AudioRecord error, stop cleanly
             }
-            ar.stop(); ar.release();
+            isRecordingTrack = false;
+            try { ar.stop(); } catch (Exception ignored) {}
+            try { ar.release(); } catch (Exception ignored) {}
             // Write WAV file
             try {
                 byte[] pcm = pcmOut.toByteArray();
