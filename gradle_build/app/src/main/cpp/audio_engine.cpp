@@ -425,8 +425,24 @@ public:
     }
 
     void onErrorAfterClose(oboe::AudioStream*, oboe::Result r) override {
-        LOGE("Oboe error: %s — restarting", oboe::convertToText(r));
-        // Re-init using the same native SR/burst that were set at startup
+        LOGE("Oboe stream error: %s", oboe::convertToText(r));
+        // ERROR_DISCONNECTED means the audio output device changed
+        // (earphone/BT plug or unplug). The Java AudioDeviceCallback in
+        // LoopsActivity handles this case: it re-queries the device-native
+        // SR/burst from AudioManager and calls nativeReinitStream() from
+        // the main thread, then re-triggers any loops that were playing.
+        //
+        // Calling init() here too would race with that Java callback:
+        //   1. Java reinits stream → loops re-queued → playing
+        //   2. This callback fires ~ms later → init() stops the stream again
+        // So for device-change errors, we let Java own the recovery.
+        if (r == oboe::Result::ErrorDisconnected) {
+            LOGI("Device disconnected — Java AudioDeviceCallback will reinit stream");
+            return;
+        }
+        // For non-routing errors (underrun turned fatal, driver crash, etc.)
+        // there is no Java callback, so we restart here as a best-effort recovery.
+        LOGI("Non-routing error — restarting stream with current params");
         init(sampleRate, framesPerBurst);
     }
 
@@ -685,6 +701,18 @@ JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeStopPad(JNIEnv* env, jobject obj, jint padIdx) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->stopPad((int)padIdx);
+}
+
+// Called from Java AudioDeviceCallback when the audio output device changes
+// (earphone plug/unplug, Bluetooth connect/disconnect, etc.).
+// Re-opens the Oboe stream with the new device's native SR and burst size.
+// All sample data and voice active-flags are preserved so loops resume
+// seamlessly on the new output device.
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeReinitStream(
+        JNIEnv* env, jobject obj, jint nativeSR, jint nativeBurst) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->init((int)nativeSR, (int)nativeBurst);
 }
 
 } // extern "C"

@@ -71,6 +71,10 @@ public class AudioEngine {
     private native void nativePlayLoopSP(int padIndex, float volume, float speed, float pitch);
     private native void nativeStopAll();
     private native void nativeStopPad(int padIndex);
+    // Restart the Oboe stream with new device-native parameters (called when
+    // the audio output device changes, e.g. earphone plug/unplug).
+    // Preserves all loaded sample data and active voice state.
+    private native void nativeReinitStream(int nativeSR, int nativeBurst);
 
     // Whether each optional JNI symbol is actually present in the .so
     private boolean hasNativePlayLoop             = false;
@@ -358,6 +362,22 @@ public class AudioEngine {
         if (!nativeAvailable) return;
         try { nativeStopAll(); }
         catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopAll missing", e); }
+    }
+
+    /**
+     * Restart the Oboe audio stream with fresh device-native parameters.
+     * Called when the audio output device changes (earphone plug/unplug).
+     * All loaded sample data and loop voice states are preserved — playing
+     * loops continue seamlessly on the new device.
+     */
+    public void reinitStream(int nativeSR, int nativeBurst) {
+        if (!nativeAvailable) return;
+        try {
+            nativeReinitStream(nativeSR, nativeBurst);
+            Log.i(TAG, "Audio stream reinitialized for new device — SR=" + nativeSR + " burst=" + nativeBurst);
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeReinitStream unavailable", e);
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════

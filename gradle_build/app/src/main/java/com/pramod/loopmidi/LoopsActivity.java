@@ -2,10 +2,16 @@ package com.pramod.loopmidi;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.AssetFileDescriptor;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.media.audiofx.Equalizer;
 import android.media.audiofx.PresetReverb;
 import android.media.midi.MidiDevice;
@@ -105,6 +111,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // 40ms after the last slider move; UI labels update immediately as before.
     private final Handler speedPitchHandler = new Handler(Looper.getMainLooper());
     private Runnable speedPitchRunnable = null;
+
+    // ── Audio routing ─────────────────────────────────────────────────────────
+    // Handles earphone/BT plug & unplug so the Oboe stream restarts on the
+    // correct output device without losing the currently playing loops.
+    private AudioDeviceCallback audioDeviceCallback = null;
+    private BroadcastReceiver   noisyReceiver       = null;
     // Load-generation token: incremented on every kit/channel change.
     // Background threads capture the value at start and discard results if it changed.
     private volatile int loadGeneration = 0;
@@ -422,6 +434,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     @Override // android.app.Activity
     protected void onDestroy() {
         super.onDestroy();
+        teardownAudioRouting();
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
@@ -623,6 +636,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         initPads();
         this.audioEngine = new AudioEngine(this);
         this.audioEngine.start();
+        setupAudioRouting();
         loadCurrentKit();
         this.btnBack.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.1
             @Override // android.view.View.OnClickListener
@@ -776,7 +790,139 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     /** Toggle Drum Octapad mode: one-shot + multi-play both on/off together.
-     *  In Drum Octapad mode every pad tap plays the sample once (one-shot)
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Audio routing: handle earphone / BT plug-unplug without losing loops
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Register callbacks so the Oboe stream is restarted whenever the audio
+     * output device changes (earphone plug/unplug, BT connect/disconnect).
+     *
+     * Two listeners are registered:
+     *   1. AudioDeviceCallback — fires on the main thread when any audio
+     *      device is added or removed. We filter to output devices and
+     *      reinit the native stream with fresh AudioManager params so Oboe
+     *      opens on the correct device at its native SR / burst size.
+     *      Any loops that were playing are re-triggered after the stream
+     *      comes back up.
+     *
+     *   2. ACTION_AUDIO_BECOMING_NOISY receiver — fires when the user
+     *      unplugs earphones and sound would otherwise blast from the speaker
+     *      unexpectedly. We stop all active loops cleanly in that case.
+     */
+    private void setupAudioRouting() {
+        final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+
+        // ── 1. Device-change callback (earphone plug-in / BT connect) ────────
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                for (AudioDeviceInfo d : addedDevices) {
+                    if (d.isSink()) {          // output device appeared
+                        reinitAudioForNewDevice(am);
+                        return;
+                    }
+                }
+            }
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                for (AudioDeviceInfo d : removedDevices) {
+                    if (d.isSink()) {          // output device removed
+                        // ACTION_AUDIO_BECOMING_NOISY handles the "stop loops"
+                        // case for earphone removal; here we just reinit the
+                        // stream so it falls back to the next available device.
+                        reinitAudioForNewDevice(am);
+                        return;
+                    }
+                }
+            }
+        };
+        am.registerAudioDeviceCallback(audioDeviceCallback, new Handler(Looper.getMainLooper()));
+
+        // ── 2. Becoming-noisy receiver (earphone suddenly unplugged) ─────────
+        noisyReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                    // Stop all active loops so they don't blast from speaker
+                    final AudioEngine engine = LoopsActivity.this.audioEngine;
+                    if (engine == null) return;
+                    for (int i = 0; i < 8; i++) {
+                        if (LoopsActivity.this.loopPlaying[i]) {
+                            engine.stopPad(i);
+                            LoopsActivity.this.loopPlaying[i] = false;
+                            if (LoopsActivity.this.loopPads[i] != null) {
+                                LoopsActivity.this.loopPads[i].setBackgroundResource(
+                                    R.drawable.pad_black_selector);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        registerReceiver(noisyReceiver,
+            new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+    }
+
+    /**
+     * Reinit the Oboe stream with fresh AudioManager properties for the
+     * currently active output device, then re-trigger any loops that were
+     * playing before the device change.
+     */
+    private void reinitAudioForNewDevice(AudioManager am) {
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+
+        // Re-query device-native parameters (they may differ for the new device)
+        int nativeSR    = 48000;
+        int nativeBurst = 256;
+        try {
+            String srStr    = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+            String burstStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+            if (srStr    != null && !srStr.isEmpty())    nativeSR    = Integer.parseInt(srStr);
+            if (burstStr != null && !burstStr.isEmpty()) nativeBurst = Integer.parseInt(burstStr);
+            if (nativeSR    < 8000  || nativeSR    > 192000) nativeSR    = 48000;
+            if (nativeBurst < 32    || nativeBurst > 8192)   nativeBurst = 256;
+        } catch (NumberFormatException ignored) {}
+
+        // Snapshot which pads were playing before the stream reinit
+        final boolean[] wasPlaying = new boolean[8];
+        for (int i = 0; i < 8; i++) wasPlaying[i] = this.loopPlaying[i];
+
+        // Restart the Oboe stream on the new device.
+        // Native voices (sample data + active flags) are preserved inside
+        // the C++ engine; only the stream itself is recreated.
+        engine.reinitStream(nativeSR, nativeBurst);
+
+        // Re-trigger loop voices so they audibly resume on the new device.
+        // (The native engine may have kept voice state, but re-issuing
+        // playLoopSP ensures the loop is definitely running post-reinit.)
+        for (int i = 0; i < 8; i++) {
+            if (wasPlaying[i] && this.loopSamples[i] != null && this.loopSamples[i].loaded) {
+                engine.playLoopSP(i, this.masterVolume, this.currentSpeed, this.currentPitch);
+            }
+        }
+    }
+
+    /** Unregister audio routing callbacks — called from onDestroy(). */
+    private void teardownAudioRouting() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null && audioDeviceCallback != null) {
+                am.unregisterAudioDeviceCallback(audioDeviceCallback);
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (noisyReceiver != null) unregisterReceiver(noisyReceiver);
+        } catch (Exception ignored) {}
+        audioDeviceCallback = null;
+        noisyReceiver       = null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+     /*  In Drum Octapad mode every pad tap plays the sample once (one-shot)
      *  and all 8 pads can play simultaneously — exactly like a real drum kit.
      *  Speed + pitch sliders apply to each new hit when it is triggered. */
     public void toggleDrumOctapadMode() {
