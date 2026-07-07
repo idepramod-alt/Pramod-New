@@ -106,6 +106,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private AudioEngine audioEngine;
     private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
     private boolean[] loopPlaying = new boolean[8];
+
+    // ── Master Volume Mode ────────────────────────────────────────────────────
+    // true  = slider controls ALL pads simultaneously (original behaviour)
+    // false = slider controls only the most-recently tapped pad individually
+    private boolean isMasterVolumeMode = true;
+    private Button    btnMasterVolMode  = null;
+    private android.widget.TextView txtMasterVolLabel = null;
+    // Per-pad volumes — active when isMasterVolumeMode == false
+    private float[] padVolume = new float[]{1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f};
+
+    // ── Per-pad Loop / Drum mode ──────────────────────────────────────────────
+    // false = LOOP mode  (continuous loop, tap again to stop)
+    // true  = DRUM mode  (one-shot hit on every tap, like a real drum pad)
+    // Long-press any pad to toggle its mode.
+    private boolean[] padDrumMode = new boolean[8];  // default all LOOP
     // Debounce handler: prevents flooding the native command queue when sliders
     // are dragged (onProgressChanged fires 60+ times/sec). Audio update fires
     // 40ms after the last slider move; UI labels update immediately as before.
@@ -181,19 +196,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }).start();
             return;
         }
-        if (this.isOneShotMode) {
-            // ONE-SHOT: play once on each tap, no auto-repeat.
+        // Per-pad mode: DRUM mode acts like one-shot (global isOneShotMode is an override too)
+        boolean isDrumPad = this.padDrumMode[index] || this.isOneShotMode;
+        if (isDrumPad) {
+            // DRUM / ONE-SHOT: play once on each tap, no auto-repeat.
             if (this.loopPlaying[index]) {
                 this.loopPlaying[index] = false;
-                this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
+                updatePadLabel(index);
             }
             // chokeGroup = index+1 (unique per pad) so retapping the SAME pad cuts off
             // its previous still-playing instance before starting the new one. Without
             // this, every tap grabbed a brand-new drum voice while the earlier instance
             // kept ringing out, so repeated taps piled up overlapping copies of the same
             // sample — the "mix-up"/garbled sound instead of a clean one-shot retrigger.
-            this.audioEngine.playSample(index, sampleData, this.masterVolume, this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
-            this.txtLoopStatus.setText("ONE-SHOT: LOOP " + (index + 1));
+            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
+            this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
             if (!this.isMultiMode) {
                 // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
                 // one-shot hits never set loopPlaying=true, so gating this on that flag
@@ -205,20 +222,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         this.audioEngine.stopPad(i);
                         if (this.loopPlaying[i]) {
                             this.loopPlaying[i] = false;
-                            this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                            updatePadLabel(i);
                         }
                     }
                 }
             }
             return;
         }
-        // AUTO-REPEAT mode: loopMode=1 tells the native engine to loop the sample
-        // continuously until stopPad() is called. Tapping the pad again stops it.
+        // LOOP mode: loops the sample continuously until pad is tapped again.
         if (this.loopPlaying[index]) {
             this.audioEngine.stopPad(index);
             this.loopPlaying[index] = false;
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
-            this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
+            updatePadLabel(index);
             return;
         }
         // Start the loop via playLoopSP only. Previously this ALSO called
@@ -227,7 +243,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // so the second call immediately tore down and recreated the Sonic
         // stream the first call had just set up, causing an audible restart
         // click at the moment playback began.
-        this.audioEngine.playLoopSP(index, this.masterVolume, this.currentSpeed, this.currentPitch);
+        this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, this.currentPitch);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -239,8 +255,40 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (i != index && this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
                 this.loopPlaying[i] = false;
-                this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                updatePadLabel(i);
             }
+        }
+    }
+
+    /**
+     * Returns the volume to use when triggering pad {@code padIndex}.
+     * <ul>
+     *   <li>Master mode ON  → global {@link #masterVolume} applies to all pads</li>
+     *   <li>Master mode OFF → per-pad {@link #padVolume}[padIndex] applies only
+     *       to that pad (volume slider controls the last-tapped pad)</li>
+     * </ul>
+     */
+    private float effectiveVolume(int padIndex) {
+        return isMasterVolumeMode ? masterVolume : padVolume[padIndex];
+    }
+
+    /**
+     * Refresh the visual state of a pad button:
+     * <ul>
+     *   <li>Playing + loop  → blue glow background</li>
+     *   <li>Idle   + drum   → orange border (signals one-shot/drum mode)</li>
+     *   <li>Idle   + loop   → dark background (default)</li>
+     * </ul>
+     * Call whenever {@code loopPlaying[i]} or {@code padDrumMode[i]} changes.
+     */
+    private void updatePadLabel(int index) {
+        if (this.loopPads[index] == null) return;
+        if (this.loopPlaying[index]) {
+            // Playing state handled by the caller (blue glow already set on play)
+        } else if (this.padDrumMode[index]) {
+            this.loopPads[index].setBackgroundResource(R.drawable.pad_orange_selector);
+        } else {
+            this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
         }
     }
 
@@ -607,7 +655,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.editCustomBpm = (EditText) findViewById(R.id.editCustomBpm);
         this.btnSetBpm = (Button) findViewById(R.id.btnSetBpm);
         this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
-        this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
+        this.txtMasterVolVal  = (TextView) findViewById(R.id.txtMasterVolVal);
+        this.txtMasterVolLabel = (android.widget.TextView) findViewById(R.id.txtMasterVolLabel);
+        this.btnMasterVolMode  = (Button) findViewById(R.id.btnMasterVolMode);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
         this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);
@@ -616,9 +666,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
         this.masterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
-        this.reverbLevel = this.prefs.getInt("loop_reverb_level", 0);
-        this.isMultiMode = this.prefs.getBoolean("loop_multi_mode", false);
+        this.reverbLevel  = this.prefs.getInt("loop_reverb_level", 0);
+        this.isMultiMode  = this.prefs.getBoolean("loop_multi_mode", false);
         this.isOneShotMode = this.prefs.getBoolean("loop_one_shot_mode", false);
+        // Restore per-pad volumes and per-pad drum/loop mode
+        for (int i = 0; i < 8; i++) {
+            this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
+            this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_" + i, false);
+        }
+        this.isMasterVolumeMode = this.prefs.getBoolean("master_vol_mode", true);
         SeekBar seekBar = this.seekMasterVolume;
         if (seekBar != null) {
             seekBar.setProgress((int) (this.masterVolume * 100.0f));
@@ -900,7 +956,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // playLoopSP ensures the loop is definitely running post-reinit.)
         for (int i = 0; i < 8; i++) {
             if (wasPlaying[i] && this.loopSamples[i] != null && this.loopSamples[i].loaded) {
-                engine.playLoopSP(i, this.masterVolume, this.currentSpeed, this.currentPitch);
+                engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, this.currentPitch);
             }
         }
     }
@@ -1037,11 +1093,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         LoopsActivity.this.txtPitchVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentPitch)));
                     }
                 } else if (seekBar.getId() == R.id.seekMasterVolume) {
-                    LoopsActivity.this.masterVolume = progress / 100.0f;
+                    float vol = progress / 100.0f;
+                    if (LoopsActivity.this.isMasterVolumeMode) {
+                        // ALL mode — move master volume, affects every pad
+                        LoopsActivity.this.masterVolume = vol;
+                        LoopsActivity.this.prefs.edit().putFloat("loop_master_volume", vol).apply();
+                    } else {
+                        // PAD mode — move only the selected pad's volume
+                        int pad = LoopsActivity.this.selectedPad;
+                        LoopsActivity.this.padVolume[pad] = vol;
+                        LoopsActivity.this.prefs.edit().putFloat("pad_volume_" + pad, vol).apply();
+                    }
                     if (LoopsActivity.this.txtMasterVolVal != null) {
                         LoopsActivity.this.txtMasterVolVal.setText(progress + "%");
                     }
-                    LoopsActivity.this.prefs.edit().putFloat("loop_master_volume", LoopsActivity.this.masterVolume).apply();
                 }
                 // Debounce: cancel any pending audio update and reschedule.
                 // Fires 40ms after the last slider movement — prevents flooding
@@ -1110,6 +1175,39 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (checkBox2 != null) {
             checkBox2.setOnCheckedChangeListener(checkListener);
         }
+
+        // ── Master Volume Mode toggle button ──────────────────────────────────
+        // ALL → slider controls every pad at once
+        // PAD → slider controls only the last-tapped pad individually
+        applyMasterVolModeUI();
+        if (this.btnMasterVolMode != null) {
+            this.btnMasterVolMode.setOnClickListener(v -> {
+                isMasterVolumeMode = !isMasterVolumeMode;
+                prefs.edit().putBoolean("master_vol_mode", isMasterVolumeMode).apply();
+                applyMasterVolModeUI();
+                // Show the selected pad's volume in the slider when switching to PAD mode
+                if (!isMasterVolumeMode && seekMasterVolume != null) {
+                    seekMasterVolume.setProgress((int)(padVolume[selectedPad] * 100f));
+                } else if (seekMasterVolume != null) {
+                    seekMasterVolume.setProgress((int)(masterVolume * 100f));
+                }
+            });
+        }
+    }
+
+    /**
+     * Sync the master-volume mode button and label text to {@link #isMasterVolumeMode}.
+     * ALL (blue) = slider moves all pads | PAD (orange) = slider moves selected pad only.
+     */
+    private void applyMasterVolModeUI() {
+        if (btnMasterVolMode != null) {
+            btnMasterVolMode.setText(isMasterVolumeMode ? "ALL" : "PAD");
+            btnMasterVolMode.setBackgroundResource(
+                isMasterVolumeMode ? R.drawable.btn_3d_blue : R.drawable.btn_3d_orange);
+        }
+        if (txtMasterVolLabel != null) {
+            txtMasterVolLabel.setText(isMasterVolumeMode ? "MASTER VOL" : "PAD VOL");
+        }
     }
 
     public void updateAllActiveLoops() {
@@ -1119,7 +1217,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // the audible "cut" every time speed/pitch was dragged.
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
-                this.audioEngine.updateLoopSpeedPitch(i, this.masterVolume, this.currentSpeed, this.currentPitch);
+                this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, this.currentPitch);
             }
         }
     }
@@ -1133,27 +1231,43 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.loopPads[i] = (Button) findViewById(padIds[i]);
             this.loopPads[i].setSoundEffectsEnabled(false);
             final int index = i;
-            this.loopPads[i].setOnTouchListener(new View.OnTouchListener(this) { // from class: com.pramod.loopmidi.LoopsActivity.15
-                final /* synthetic */ LoopsActivity this$0;
 
-                {
-                    this.this$0 = this;
-                }
+            // Touch listener: ACTION_DOWN = play, UP/CANCEL = release press visual
+            this.loopPads[i].setOnTouchListener(new View.OnTouchListener(this) {
+                final LoopsActivity this$0 = LoopsActivity.this;
 
-                @Override // android.view.View.OnTouchListener
+                @Override
                 public boolean onTouch(View v, MotionEvent event) throws IllegalStateException {
-                    if (event.getAction() == 0) {
+                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
                         v.setPressed(true);
                         this.this$0.handlePadClick(index);
                         return true;
-                    } else if (event.getAction() == 1 || event.getAction() == 3) {
+                    } else if (event.getAction() == MotionEvent.ACTION_UP
+                            || event.getAction() == MotionEvent.ACTION_CANCEL) {
                         v.setPressed(false);
                         return true;
-                    } else {
-                        return false;
                     }
+                    return false;
                 }
             });
+
+            // Long-press: toggle this pad between LOOP mode and DRUM mode
+            this.loopPads[i].setOnLongClickListener(v -> {
+                padDrumMode[index] = !padDrumMode[index];
+                // Stop the pad if it was looping — drum mode is one-shot only
+                if (padDrumMode[index] && loopPlaying[index]) {
+                    if (audioEngine != null) audioEngine.stopPad(index);
+                    loopPlaying[index] = false;
+                }
+                updatePadLabel(index);
+                prefs.edit().putBoolean("pad_drum_mode_" + index, padDrumMode[index]).apply();
+                String modeStr = padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
+                txtLoopStatus.setText("PAD " + (index + 1) + " → " + modeStr + " MODE (long-press to toggle)");
+                return true;   // consume the long-press (don't fire the tap handler)
+            });
+
+            // Apply initial visual state (orange border for drum mode, dark for loop mode)
+            updatePadLabel(index);
         }
     }
 
@@ -1162,6 +1276,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.editMode) {
             showEditOptions(index);
         } else {
+            // In PAD volume mode: update the slider to reflect this pad's individual volume
+            // so the user immediately sees and can adjust this pad's level on tap.
+            if (!isMasterVolumeMode && seekMasterVolume != null) {
+                seekMasterVolume.setProgress((int)(padVolume[index] * 100f));
+                if (txtMasterVolVal != null)
+                    txtMasterVolVal.setText((int)(padVolume[index] * 100f) + "%");
+            }
             toggleLoop(index);
         }
     }

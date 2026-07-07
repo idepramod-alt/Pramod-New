@@ -495,8 +495,10 @@ public:
             if (r != oboe::Result::OK) { LOGE("openStream shared also failed"); return false; }
         }
 
-        // 2 bursts = lowest stable latency on most devices
-        stream->setBufferSizeInFrames(framesPerBurst * 2);
+        // 1 burst = minimum latency for real-time drum triggers.
+        // 2-burst "safe" default was adding ~5–10ms of unnecessary output
+        // latency; hardware glitch-guard is the driver's job in Exclusive+LowLatency.
+        stream->setBufferSizeInFrames(framesPerBurst * 1);
 
         r = stream->start();
         if (r != oboe::Result::OK) { LOGE("stream start: %s", oboe::convertToText(r)); return false; }
