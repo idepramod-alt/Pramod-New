@@ -613,6 +613,25 @@ jobs:
           # 2-7. Apply remaining patches
           python3 /tmp/apply_cpp_patches.py "$CPP"
 
+      - name: Fix duplicate AudioEngineImpl constructor
+        run: |
+          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
+          grep -q 'recActiveTrack' "$CPP" || { echo "skip: recording not patched yet"; exit 0; }
+          python3 -c "
+          with open('$CPP') as f: s = f.read()
+          # The recording patch inserts a new empty ctor before the existing ctor,
+          # creating two AudioEngineImpl() definitions which fails to compile.
+          # Fix: merge them into one ctor that has the initializer list AND the body.
+          dup = '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {}\n    AudioEngineImpl() {'
+          fix = '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {'
+          if dup in s:
+              s = s.replace(dup, fix)
+              print('Fixed: merged duplicate AudioEngineImpl constructors into one')
+          else:
+              print('OK: no duplicate constructor found')
+          with open('$CPP', 'w') as f: f.write(s)
+          "
+
       - name: Apply recording API to AudioEngine.java
         run: |
           AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
