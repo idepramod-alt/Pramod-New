@@ -146,11 +146,7 @@
                 android:id="@+id/chkOneShotMode" android:layout_width="0dp"
                 android:layout_height="wrap_content" android:text="ONE-SHOT"
                 android:layout_weight="1" android:buttonTint="#ff00afff"/>
-            <Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"
-                android:id="@+id/btnDrumOctapad" android:background="@drawable/btn_3d_dark"
-                android:layout_width="0dp" android:layout_height="36dp"
-                android:layout_marginStart="6dp" android:text="🥁 DRUM PAD"
-                android:layout_weight="1.2"/>
+            <Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnDrumOctapad" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="36dp" android:layout_marginStart="6dp" android:text="&#x1F941; DRUM PAD" android:layout_weight="1.2"/>
         </LinearLayout>
 
         <!-- EQ row -->
