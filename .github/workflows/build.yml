@@ -685,343 +685,328 @@ jobs:
         run: |
           LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           grep -q 'audioEngine.startRecording' "$LA" && { echo "already patched"; exit 0; }
-          python3 - << 'INNEREOF'
-import re, sys
+          python3 - << 'PYEOF'
+          import re, sys
 
-LA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-with open(LA) as f: src = f.read()
+          LA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+          with open(LA) as f: src = f.read()
 
-# 1. Add internal-audio state fields after isRecording field
-field_anchor = '    private boolean isRecording         = false;'
-new_fields = (
-    '    private int       activeRecTrack   = 0;\n'
-    '    private boolean[] trackHasData     = new boolean[4];\n'
-    '    private boolean[] trackPlaying     = new boolean[4];\n'
-)
-if field_anchor in src and 'activeRecTrack' not in src:
-    src = src.replace(field_anchor, field_anchor + '\n' + new_fields, 1)
-    print('1. internal-audio fields added')
-elif 'activeRecTrack' in src:
-    print('1. fields already present')
-else:
-    print('FATAL: isRecording field anchor not found'); sys.exit(1)
+          # 1. Add internal-audio state fields after isRecording field
+          field_anchor = '    private boolean isRecording         = false;'
+          new_fields = (
+              '    private int       activeRecTrack   = 0;\n'
+              '    private boolean[] trackHasData     = new boolean[4];\n'
+              '    private boolean[] trackPlaying     = new boolean[4];\n'
+          )
+          if field_anchor in src and 'activeRecTrack' not in src:
+              src = src.replace(field_anchor, field_anchor + '\n' + new_fields, 1)
+              print('1. internal-audio fields added')
+          elif 'activeRecTrack' in src:
+              print('1. fields already present')
+          else:
+              print('FATAL: isRecording field anchor not found'); sys.exit(1)
 
-# Helper: replace method from its signature to its matching closing brace
-def replace_method(src, sig, new_body):
-    m = re.search(re.escape(sig), src)
-    if not m:
-        print('FATAL: method not found: ' + sig[:70]); sys.exit(1)
-    start = m.start()
-    try:
-        brace_i = src.index('{', start)
-    except ValueError:
-        print('FATAL: no opening brace after: ' + sig[:70]); sys.exit(1)
-    depth = 0; i = brace_i; end = -1
-    while i < len(src):
-        if src[i] == '{': depth += 1
-        elif src[i] == '}':
-            depth -= 1
-            if depth == 0: end = i + 1; break
-        i += 1
-    if end == -1:
-        print('FATAL: matching brace not found for: ' + sig[:70]); sys.exit(1)
-    src = src[:start] + new_body + '\n' + src[end:]
-    print('OK replaced: ' + sig[:65])
-    return src
+          def replace_method(src, sig, new_body):
+              m = re.search(re.escape(sig), src)
+              if not m:
+                  print('FATAL: method not found: ' + sig[:70]); sys.exit(1)
+              start = m.start()
+              try:
+                  brace_i = src.index('{', start)
+              except ValueError:
+                  print('FATAL: no opening brace after: ' + sig[:70]); sys.exit(1)
+              depth = 0; i = brace_i; end = -1
+              while i < len(src):
+                  if src[i] == '{': depth += 1
+                  elif src[i] == '}':
+                      depth -= 1
+                      if depth == 0: end = i + 1; break
+                  i += 1
+              if end == -1:
+                  print('FATAL: matching brace not found for: ' + sig[:70]); sys.exit(1)
+              src = src[:start] + new_body + '\n' + src[end:]
+              print('OK replaced: ' + sig[:65])
+              return src
 
-# 2. Replace startMicRecording
-src = replace_method(src, '    public void startMicRecording() {', (
-    '    /** Record engine mixed output - not the microphone. */\n'
-    '    public void startMicRecording() {\n'
-    '        if (this.audioEngine == null) {\n'
-    '            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show(); return;\n'
-    '        }\n'
-    '        if (this.isRecording) { this.audioEngine.stopRecording(); this.isRecording = false; }\n'
-    '        int t = this.activeRecTrack;\n'
-    '        for (int i = 0; i < 4; i++) { if (!this.trackHasData[i]) { t = i; break; } }\n'
-    '        this.activeRecTrack = t;\n'
-    '        this.audioEngine.startRecording(this.activeRecTrack);\n'
-    '        this.isRecording = true;\n'
-    '        this.hasRecording = false;\n'
-    '        if (this.btnRecordStart != null) {\n'
-    '            this.btnRecordStart.setBackgroundColor(0xFFFF0000);\n'
-    '            this.btnRecordStart.setText("REC T" + (this.activeRecTrack + 1));\n'
-    '        }\n'
-    '        if (this.txtRecStatus != null)\n'
-    '            this.txtRecStatus.setText("RECORDING TRACK " + (this.activeRecTrack + 1) + " - tap STOP when done");\n'
-    '    }'
-))
+          src = replace_method(src, '    public void startMicRecording() {', (
+              '    /** Record engine mixed output - not the microphone. */\n'
+              '    public void startMicRecording() {\n'
+              '        if (this.audioEngine == null) {\n'
+              '            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show(); return;\n'
+              '        }\n'
+              '        if (this.isRecording) { this.audioEngine.stopRecording(); this.isRecording = false; }\n'
+              '        int t = this.activeRecTrack;\n'
+              '        for (int i = 0; i < 4; i++) { if (!this.trackHasData[i]) { t = i; break; } }\n'
+              '        this.activeRecTrack = t;\n'
+              '        this.audioEngine.startRecording(this.activeRecTrack);\n'
+              '        this.isRecording = true;\n'
+              '        this.hasRecording = false;\n'
+              '        if (this.btnRecordStart != null) {\n'
+              '            this.btnRecordStart.setBackgroundColor(0xFFFF0000);\n'
+              '            this.btnRecordStart.setText("REC T" + (this.activeRecTrack + 1));\n'
+              '        }\n'
+              '        if (this.txtRecStatus != null)\n'
+              '            this.txtRecStatus.setText("RECORDING TRACK " + (this.activeRecTrack + 1) + " - tap STOP when done");\n'
+              '    }'
+          ))
 
-# 3. Replace stopMicRecording
-src = replace_method(src, '    public void stopMicRecording() {', (
-    '    /** Stop engine-level recording and advance to next track. */\n'
-    '    public void stopMicRecording() {\n'
-    '        if (!this.isRecording || this.audioEngine == null) return;\n'
-    '        this.audioEngine.stopRecording();\n'
-    '        this.isRecording = false;\n'
-    '        int frames = this.audioEngine.getRecordedFrameCount(this.activeRecTrack);\n'
-    '        if (frames > 0) {\n'
-    '            this.trackHasData[this.activeRecTrack] = true;\n'
-    '            this.hasRecording = true;\n'
-    '            float secs = frames / 44100.0f;\n'
-    '            if (this.btnRecordStart != null) {\n'
-    '                this.btnRecordStart.setBackgroundColor(0xFFCC0000);\n'
-    '                this.btnRecordStart.setText("REC");\n'
-    '            }\n'
-    '            if (this.txtRecStatus != null)\n'
-    '                this.txtRecStatus.setText("Track " + (this.activeRecTrack + 1) + " " +\n'
-    '                    String.format("%.1f", secs) + "s saved - tap PLAY");\n'
-    '            for (int i = 1; i <= 4; i++) {\n'
-    '                int next = (this.activeRecTrack + i) % 4;\n'
-    '                if (!this.trackHasData[next]) { this.activeRecTrack = next; break; }\n'
-    '            }\n'
-    '        } else {\n'
-    '            if (this.txtRecStatus != null) this.txtRecStatus.setText("Empty - tap REC");\n'
-    '            if (this.btnRecordStart != null) this.btnRecordStart.setText("REC");\n'
-    '        }\n'
-    '    }'
-))
+          src = replace_method(src, '    public void stopMicRecording() {', (
+              '    /** Stop engine-level recording and advance to next track. */\n'
+              '    public void stopMicRecording() {\n'
+              '        if (!this.isRecording || this.audioEngine == null) return;\n'
+              '        this.audioEngine.stopRecording();\n'
+              '        this.isRecording = false;\n'
+              '        int frames = this.audioEngine.getRecordedFrameCount(this.activeRecTrack);\n'
+              '        if (frames > 0) {\n'
+              '            this.trackHasData[this.activeRecTrack] = true;\n'
+              '            this.hasRecording = true;\n'
+              '            float secs = frames / 44100.0f;\n'
+              '            if (this.btnRecordStart != null) {\n'
+              '                this.btnRecordStart.setBackgroundColor(0xFFCC0000);\n'
+              '                this.btnRecordStart.setText("REC");\n'
+              '            }\n'
+              '            if (this.txtRecStatus != null)\n'
+              '                this.txtRecStatus.setText("Track " + (this.activeRecTrack + 1) + " " +\n'
+              '                    String.format("%.1f", secs) + "s saved - tap PLAY");\n'
+              '            for (int i = 1; i <= 4; i++) {\n'
+              '                int next = (this.activeRecTrack + i) % 4;\n'
+              '                if (!this.trackHasData[next]) { this.activeRecTrack = next; break; }\n'
+              '            }\n'
+              '        } else {\n'
+              '            if (this.txtRecStatus != null) this.txtRecStatus.setText("Empty - tap REC");\n'
+              '            if (this.btnRecordStart != null) this.btnRecordStart.setText("REC");\n'
+              '        }\n'
+              '    }'
+          ))
 
-# 4. Replace playRecording
-src = replace_method(src, '    public void playRecording() {', (
-    '    /** Play the most-recently recorded engine track. */\n'
-    '    public void playRecording() {\n'
-    '        if (this.audioEngine == null) return;\n'
-    '        if (!this.hasRecording) {\n'
-    '            Toast.makeText(this, "No recording - tap REC first!", Toast.LENGTH_SHORT).show(); return;\n'
-    '        }\n'
-    '        if (this.isRecording) {\n'
-    '            Toast.makeText(this, "Stop recording first!", Toast.LENGTH_SHORT).show(); return;\n'
-    '        }\n'
-    '        for (int i = 0; i < 4; i++) {\n'
-    '            if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
-    '        }\n'
-    '        int playTrack = 0;\n'
-    '        for (int i = 3; i >= 0; i--) { if (this.trackHasData[i]) { playTrack = i; break; } }\n'
-    '        this.audioEngine.startTrackPlayback(playTrack, 1.0f, false);\n'
-    '        this.trackPlaying[playTrack] = true;\n'
-    '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY T" + (playTrack + 1));\n'
-    '        if (this.txtRecStatus != null)\n'
-    '            this.txtRecStatus.setText("Playing Track " + (playTrack + 1) + "...");\n'
-    '    }'
-))
+          src = replace_method(src, '    public void playRecording() {', (
+              '    /** Play the most-recently recorded engine track. */\n'
+              '    public void playRecording() {\n'
+              '        if (this.audioEngine == null) return;\n'
+              '        if (!this.hasRecording) {\n'
+              '            Toast.makeText(this, "No recording - tap REC first!", Toast.LENGTH_SHORT).show(); return;\n'
+              '        }\n'
+              '        if (this.isRecording) {\n'
+              '            Toast.makeText(this, "Stop recording first!", Toast.LENGTH_SHORT).show(); return;\n'
+              '        }\n'
+              '        for (int i = 0; i < 4; i++) {\n'
+              '            if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
+              '        }\n'
+              '        int playTrack = 0;\n'
+              '        for (int i = 3; i >= 0; i--) { if (this.trackHasData[i]) { playTrack = i; break; } }\n'
+              '        this.audioEngine.startTrackPlayback(playTrack, 1.0f, false);\n'
+              '        this.trackPlaying[playTrack] = true;\n'
+              '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY T" + (playTrack + 1));\n'
+              '        if (this.txtRecStatus != null)\n'
+              '            this.txtRecStatus.setText("Playing Track " + (playTrack + 1) + "...");\n'
+              '    }'
+          ))
 
-# 5. Replace stopPlayback
-src = replace_method(src, '    public void stopPlayback() {', (
-    '    /** Stop all engine track playback. */\n'
-    '    public void stopPlayback() {\n'
-    '        if (this.audioEngine != null) {\n'
-    '            for (int i = 0; i < 4; i++) {\n'
-    '                if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
-    '            }\n'
-    '        }\n'
-    '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY");\n'
-    '        if (this.txtRecStatus != null && this.hasRecording)\n'
-    '            this.txtRecStatus.setText("Recording ready - tap PLAY to listen");\n'
-    '    }'
-))
+          src = replace_method(src, '    public void stopPlayback() {', (
+              '    /** Stop all engine track playback. */\n'
+              '    public void stopPlayback() {\n'
+              '        if (this.audioEngine != null) {\n'
+              '            for (int i = 0; i < 4; i++) {\n'
+              '                if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
+              '            }\n'
+              '        }\n'
+              '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY");\n'
+              '        if (this.txtRecStatus != null && this.hasRecording)\n'
+              '            this.txtRecStatus.setText("Recording ready - tap PLAY to listen");\n'
+              '    }'
+          ))
 
-with open(LA, 'w') as f: f.write(src)
-print('Recording methods patched to use internal engine audio')
-INNEREOF
-          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: recording patch script failed (rc=$rc)"; exit 1; }
-          echo "Recording patch done"
-          grep -c 'audioEngine.startRecording\|audioEngine.stopRecording\|audioEngine.startTrackPlayback' "$LA" || true
+          with open(LA, 'w') as f: f.write(src)
+          print('Recording methods patched to use internal engine audio')
+
+          PYEOF
+          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: recording patch failed (rc=$rc)"; exit 1; }
+          grep -c 'audioEngine.startRecording\|audioEngine.stopRecording' "$LA" || true
 
       - name: Add ADD MODE button plus Loop-Drum to ADV panel
         run: |
           LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
           grep -q 'btnAddMode' "$LA" && { echo "already patched"; exit 0; }
-          python3 - << 'INNEREOF'
-import re, sys
+          python3 - << 'PYEOF'
+          import re, sys
 
-LA  = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-XML = 'gradle_build/app/src/main/res/layout/activity_loops.xml'
+          LA  = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+          XML = 'gradle_build/app/src/main/res/layout/activity_loops.xml'
 
-# ── 1. XML: replace btnDrumOctapad button with Loop + Drum + ADD MODE ──
-with open(XML) as f: xsrc = f.read()
-if 'btnAddMode' not in xsrc:
-    if 'btnDrumOctapad' not in xsrc:
-        print('FATAL: btnDrumOctapad not found in XML'); sys.exit(1)
-    new_buttons = (
-        '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-        ' android:id="@+id/btnDrumOctapad"'
-        ' android:background="@drawable/btn_3d_blue"'
-        ' android:layout_width="0dp" android:layout_height="36dp"'
-        ' android:layout_marginStart="4dp" android:text="LOOP" android:layout_weight="1.0"/>'
-        '\n            '
-        '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-        ' android:id="@+id/btnDrumModeAdv"'
-        ' android:background="@drawable/btn_3d_dark"'
-        ' android:layout_width="0dp" android:layout_height="36dp"'
-        ' android:layout_marginStart="4dp" android:text="DRUM" android:layout_weight="1.0"/>'
-        '\n            '
-        '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-        ' android:id="@+id/btnAddMode"'
-        ' android:background="@drawable/btn_3d_purple"'
-        ' android:layout_width="0dp" android:layout_height="36dp"'
-        ' android:layout_marginStart="4dp" android:text="+ ADD MODE" android:layout_weight="1.2"/>'
-    )
-    # Replace the full btnDrumOctapad button element (one-liner)
-    lines = xsrc.split('\n')
-    new_lines = []
-    replaced = False
-    for line in lines:
-        if 'btnDrumOctapad' in line:
-            # Preserve original indent
-            indent = '            '
-            new_lines.append(indent + new_buttons)
-            replaced = True
-        else:
-            new_lines.append(line)
-    if not replaced:
-        print('FATAL: btnDrumOctapad line not replaced'); sys.exit(1)
-    xsrc = '\n'.join(new_lines)
-    with open(XML, 'w') as f: f.write(xsrc)
-    print('XML: replaced btnDrumOctapad with LOOP + DRUM + ADD MODE buttons')
-else:
-    print('XML: btnAddMode already present - skip')
+          # 1. XML: replace btnDrumOctapad with LOOP + DRUM + ADD MODE buttons
+          with open(XML) as f: xsrc = f.read()
+          if 'btnAddMode' not in xsrc:
+              if 'btnDrumOctapad' not in xsrc:
+                  print('FATAL: btnDrumOctapad not found in XML'); sys.exit(1)
+              new_buttons = (
+                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
+                  ' android:id="@+id/btnDrumOctapad"'
+                  ' android:background="@drawable/btn_3d_blue"'
+                  ' android:layout_width="0dp" android:layout_height="36dp"'
+                  ' android:layout_marginStart="4dp" android:text="LOOP" android:layout_weight="1.0"/>'
+                  '\n            '
+                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
+                  ' android:id="@+id/btnDrumModeAdv"'
+                  ' android:background="@drawable/btn_3d_dark"'
+                  ' android:layout_width="0dp" android:layout_height="36dp"'
+                  ' android:layout_marginStart="4dp" android:text="DRUM" android:layout_weight="1.0"/>'
+                  '\n            '
+                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
+                  ' android:id="@+id/btnAddMode"'
+                  ' android:background="@drawable/btn_3d_purple"'
+                  ' android:layout_width="0dp" android:layout_height="36dp"'
+                  ' android:layout_marginStart="4dp" android:text="+ ADD MODE" android:layout_weight="1.2"/>'
+              )
+              lines = xsrc.split('\n')
+              new_lines = []
+              replaced = False
+              for line in lines:
+                  if 'btnDrumOctapad' in line:
+                      indent_str = '            '
+                      new_lines.append(indent_str + new_buttons)
+                      replaced = True
+                  else:
+                      new_lines.append(line)
+              if not replaced:
+                  print('FATAL: btnDrumOctapad line not replaced'); sys.exit(1)
+              xsrc = '\n'.join(new_lines)
+              with open(XML, 'w') as f: f.write(xsrc)
+              print('XML: replaced btnDrumOctapad with LOOP + DRUM + ADD MODE buttons')
+          else:
+              print('XML: btnAddMode already present - skip')
 
-# ── 2. Java: add isAddMode, btnAddMode, btnDrumModeAdv fields ──
-with open(LA) as f: src = f.read()
+          # 2. Java: add isAddMode, btnAddMode, btnDrumModeAdv fields
+          with open(LA) as f: src = f.read()
 
-if 'isAddMode' not in src:
-    anchor = '    private Button btnDrumMode = null;'
-    if anchor not in src:
-        print('FATAL: btnDrumMode field anchor not found'); sys.exit(1)
-    new_fields = (
-        '    private boolean isAddMode      = false;\n'
-        '    private Button  btnAddMode     = null;\n'
-        '    private Button  btnDrumModeAdv = null;\n'
-    )
-    src = src.replace(anchor, anchor + '\n' + new_fields, 1)
-    print('2. isAddMode / btnAddMode / btnDrumModeAdv fields added')
+          if 'isAddMode' not in src:
+              anchor = '    private Button btnDrumMode = null;'
+              if anchor not in src:
+                  print('FATAL: btnDrumMode field anchor not found'); sys.exit(1)
+              new_fields = (
+                  '    private boolean isAddMode      = false;\n'
+                  '    private Button  btnAddMode     = null;\n'
+                  '    private Button  btnDrumModeAdv = null;\n'
+              )
+              src = src.replace(anchor, anchor + '\n' + new_fields, 1)
+              print('2. isAddMode / btnAddMode / btnDrumModeAdv fields added')
 
-# ── 3. Wire btnAddMode + btnDrumModeAdv in onCreate ──
-if 'btnAddMode' not in src or 'toggleAddMode' not in src:
-    wire_anchor = '                    LoopsActivity.this.toggleDrumOctapadMode();'
-    idx = src.find(wire_anchor)
-    if idx < 0:
-        print('FATAL: toggleDrumOctapadMode anchor not found'); sys.exit(1)
-    close = src.find('});', idx)
-    if close < 0:
-        print('FATAL: cannot find }); after toggleDrumOctapadMode'); sys.exit(1)
-    wiring = (
-        '\n        // ── ADV panel: LOOP / DRUM / ADD MODE buttons ─────────────────────\n'
-        '        this.btnDrumModeAdv = (Button) findViewById(R.id.btnDrumModeAdv);\n'
-        '        if (this.btnDrumModeAdv != null)\n'
-        '            this.btnDrumModeAdv.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(true));\n'
-        '\n'
-        '        this.btnAddMode = (Button) findViewById(R.id.btnAddMode);\n'
-        '        if (this.btnAddMode != null)\n'
-        '            this.btnAddMode.setOnClickListener(v -> LoopsActivity.this.toggleAddMode());\n'
-        '\n'
-        '        // btnDrumOctapad now acts as explicit LOOP MODE setter in ADV panel\n'
-        '        // (overwrites the existing toggle listener set above)\n'
-        '        if (this.btnDrumOctapad != null)\n'
-        '            this.btnDrumOctapad.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(false));\n'
-    )
-    src = src[:close+3] + wiring + src[close+3:]
-    print('3. btnAddMode / btnDrumModeAdv / btnDrumOctapad wired in onCreate')
+          # 3. Wire btnAddMode + btnDrumModeAdv in onCreate
+          if 'btnAddMode' not in src or 'toggleAddMode' not in src:
+              wire_anchor = '                    LoopsActivity.this.toggleDrumOctapadMode();'
+              idx = src.find(wire_anchor)
+              if idx < 0:
+                  print('FATAL: toggleDrumOctapadMode anchor not found'); sys.exit(1)
+              close = src.find('});', idx)
+              if close < 0:
+                  print('FATAL: cannot find }); after toggleDrumOctapadMode'); sys.exit(1)
+              wiring = (
+                  '\n        // ADV panel: LOOP / DRUM / ADD MODE buttons\n'
+                  '        this.btnDrumModeAdv = (Button) findViewById(R.id.btnDrumModeAdv);\n'
+                  '        if (this.btnDrumModeAdv != null)\n'
+                  '            this.btnDrumModeAdv.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(true));\n'
+                  '\n'
+                  '        this.btnAddMode = (Button) findViewById(R.id.btnAddMode);\n'
+                  '        if (this.btnAddMode != null)\n'
+                  '            this.btnAddMode.setOnClickListener(v -> LoopsActivity.this.toggleAddMode());\n'
+                  '\n'
+                  '        // btnDrumOctapad now acts as explicit LOOP MODE setter\n'
+                  '        if (this.btnDrumOctapad != null)\n'
+                  '            this.btnDrumOctapad.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(false));\n'
+              )
+              src = src[:close+3] + wiring + src[close+3:]
+              print('3. btnAddMode / btnDrumModeAdv / btnDrumOctapad wired in onCreate')
 
-# ── 4. Intercept handlePadClick when isAddMode is true ──
-pad_anchor = '        this.selectedPad = index;\n        if (this.editMode) {'
-if pad_anchor in src and 'showPadConfigDialog' not in src.split(pad_anchor)[0][-200:]:
-    intercept = '        if (this.isAddMode) { showPadConfigDialog(index); return; }\n'
-    src = src.replace(pad_anchor, intercept + pad_anchor, 1)
-    print('4. handlePadClick intercepted for ADD MODE')
-elif 'showPadConfigDialog' in src:
-    print('4. handlePadClick already intercepted')
-else:
-    print('WARN 4: handlePadClick pad_anchor not found - skipping intercept')
+          # 4. Intercept handlePadClick when isAddMode is true
+          pad_anchor = '        this.selectedPad = index;\n        if (this.editMode) {'
+          if pad_anchor in src and 'showPadConfigDialog' not in src[:src.find(pad_anchor)+20]:
+              intercept = '        if (this.isAddMode) { showPadConfigDialog(index); return; }\n'
+              src = src.replace(pad_anchor, intercept + pad_anchor, 1)
+              print('4. handlePadClick intercepted for ADD MODE')
+          elif 'showPadConfigDialog' in src:
+              print('4. handlePadClick already intercepted')
+          else:
+              print('WARN 4: handlePadClick anchor not found - skipping intercept')
 
-# ── 5. Add toggleAddMode + showPadConfigDialog methods ──
-if 'toggleAddMode' not in src:
-    methods = (
-        '\n'
-        '    // ======================================================\n'
-        '    // ADD MODE: tap a pad to configure it as LOOP or DRUM\n'
-        '    // ======================================================\n'
-        '\n'
-        '    public void toggleAddMode() {\n'
-        '        this.isAddMode = !this.isAddMode;\n'
-        '        if (this.btnAddMode != null) {\n'
-        '            this.btnAddMode.setBackgroundResource(\n'
-        '                this.isAddMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_purple);\n'
-        '            this.btnAddMode.setText(this.isAddMode ? "SET PAD" : "+ ADD MODE");\n'
-        '        }\n'
-        '        // Sync LOOP / DRUM buttons visual state\n'
-        '        if (this.btnDrumOctapad != null)\n'
-        '            this.btnDrumOctapad.setBackgroundResource(\n'
-        '                this.isGlobalDrumMode ? R.drawable.btn_3d_dark : R.drawable.btn_3d_blue);\n'
-        '        if (this.btnDrumModeAdv != null)\n'
-        '            this.btnDrumModeAdv.setBackgroundResource(\n'
-        '                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);\n'
-        '        if (this.isAddMode) {\n'
-        '            Toast.makeText(this, "Tap a pad to set it LOOP or DRUM mode", Toast.LENGTH_SHORT).show();\n'
-        '            if (this.txtLoopStatus != null)\n'
-        '                this.txtLoopStatus.setText("+ ADD MODE: tap a pad to configure");\n'
-        '            // Highlight all pads orange so user sees they are configurable\n'
-        '            for (int i = 0; i < 8; i++) {\n'
-        '                if (this.loopPads[i] != null)\n'
-        '                    this.loopPads[i].setBackgroundResource(R.drawable.pad_orange_selector);\n'
-        '            }\n'
-        '        } else {\n'
-        '            if (this.txtLoopStatus != null)\n'
-        '                this.txtLoopStatus.setText("ADD MODE off");\n'
-        '            for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-        '        }\n'
-        '    }\n'
-        '\n'
-        '    /** Show dialog to assign a pad to LOOP or DRUM mode. */\n'
-        '    private void showPadConfigDialog(final int padIndex) {\n'
-        '        final String[] options = {"LOOP MODE (continuous loop)", "DRUM MODE (one-shot hit)"};\n'
-        '        final int current = this.padDrumMode[padIndex] ? 1 : 0;\n'
-        '        new android.app.AlertDialog.Builder(this)\n'
-        '            .setTitle("Configure PAD " + (padIndex + 1))\n'
-        '            .setSingleChoiceItems(options, current, (dialog, which) -> {\n'
-        '                boolean setDrum = (which == 1);\n'
-        '                this.padDrumMode[padIndex] = setDrum;\n'
-        '                if (setDrum && this.loopPlaying[padIndex]) {\n'
-        '                    if (this.audioEngine != null) this.audioEngine.stopPad(padIndex);\n'
-        '                    this.loopPlaying[padIndex] = false;\n'
-        '                }\n'
-        '                this.prefs.edit().putBoolean("pad_drum_mode_" + padIndex, setDrum).apply();\n'
-        '                dialog.dismiss();\n'
-        '                this.isAddMode = false;\n'
-        '                if (this.btnAddMode != null) {\n'
-        '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
-        '                    this.btnAddMode.setText("+ ADD MODE");\n'
-        '                }\n'
-        '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-        '                String modeName = setDrum ? "DRUM MODE" : "LOOP MODE";\n'
-        '                Toast.makeText(this, "PAD " + (padIndex + 1) + " -> " + modeName, Toast.LENGTH_SHORT).show();\n'
-        '                if (this.txtLoopStatus != null)\n'
-        '                    this.txtLoopStatus.setText("PAD " + (padIndex + 1) + " set to " + modeName);\n'
-        '            })\n'
-        '            .setNegativeButton("Cancel", (d, w) -> {\n'
-        '                this.isAddMode = false;\n'
-        '                if (this.btnAddMode != null) {\n'
-        '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
-        '                    this.btnAddMode.setText("+ ADD MODE");\n'
-        '                }\n'
-        '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-        '            })\n'
-        '            .show();\n'
-        '    }\n'
-    )
-    last_brace = src.rfind('\n}')
-    if last_brace < 0:
-        print('FATAL: cannot find closing brace of class'); sys.exit(1)
-    src = src[:last_brace] + methods + '\n}' + src[last_brace+2:]
-    print('5. toggleAddMode + showPadConfigDialog methods added')
+          # 5. Add toggleAddMode + showPadConfigDialog methods
+          if 'toggleAddMode' not in src:
+              methods = (
+                  '\n'
+                  '    // ADD MODE: tap a pad to configure it as LOOP or DRUM\n'
+                  '    public void toggleAddMode() {\n'
+                  '        this.isAddMode = !this.isAddMode;\n'
+                  '        if (this.btnAddMode != null) {\n'
+                  '            this.btnAddMode.setBackgroundResource(\n'
+                  '                this.isAddMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_purple);\n'
+                  '            this.btnAddMode.setText(this.isAddMode ? "SET PAD" : "+ ADD MODE");\n'
+                  '        }\n'
+                  '        if (this.btnDrumOctapad != null)\n'
+                  '            this.btnDrumOctapad.setBackgroundResource(\n'
+                  '                this.isGlobalDrumMode ? R.drawable.btn_3d_dark : R.drawable.btn_3d_blue);\n'
+                  '        if (this.btnDrumModeAdv != null)\n'
+                  '            this.btnDrumModeAdv.setBackgroundResource(\n'
+                  '                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);\n'
+                  '        if (this.isAddMode) {\n'
+                  '            Toast.makeText(this, "Tap a pad to set LOOP or DRUM mode", Toast.LENGTH_SHORT).show();\n'
+                  '            if (this.txtLoopStatus != null)\n'
+                  '                this.txtLoopStatus.setText("+ ADD MODE: tap a pad to configure");\n'
+                  '            for (int i = 0; i < 8; i++) {\n'
+                  '                if (this.loopPads[i] != null)\n'
+                  '                    this.loopPads[i].setBackgroundResource(R.drawable.pad_orange_selector);\n'
+                  '            }\n'
+                  '        } else {\n'
+                  '            if (this.txtLoopStatus != null) this.txtLoopStatus.setText("ADD MODE off");\n'
+                  '            for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
+                  '        }\n'
+                  '    }\n'
+                  '\n'
+                  '    private void showPadConfigDialog(final int padIndex) {\n'
+                  '        final String[] options = {"LOOP MODE (continuous loop)", "DRUM MODE (one-shot hit)"};\n'
+                  '        final int current = this.padDrumMode[padIndex] ? 1 : 0;\n'
+                  '        new android.app.AlertDialog.Builder(this)\n'
+                  '            .setTitle("Configure PAD " + (padIndex + 1))\n'
+                  '            .setSingleChoiceItems(options, current, (dialog, which) -> {\n'
+                  '                boolean setDrum = (which == 1);\n'
+                  '                this.padDrumMode[padIndex] = setDrum;\n'
+                  '                if (setDrum && this.loopPlaying[padIndex]) {\n'
+                  '                    if (this.audioEngine != null) this.audioEngine.stopPad(padIndex);\n'
+                  '                    this.loopPlaying[padIndex] = false;\n'
+                  '                }\n'
+                  '                this.prefs.edit().putBoolean("pad_drum_mode_" + padIndex, setDrum).apply();\n'
+                  '                dialog.dismiss();\n'
+                  '                this.isAddMode = false;\n'
+                  '                if (this.btnAddMode != null) {\n'
+                  '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
+                  '                    this.btnAddMode.setText("+ ADD MODE");\n'
+                  '                }\n'
+                  '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
+                  '                String modeName = setDrum ? "DRUM MODE" : "LOOP MODE";\n'
+                  '                Toast.makeText(this, "PAD " + (padIndex + 1) + " -> " + modeName, Toast.LENGTH_SHORT).show();\n'
+                  '                if (this.txtLoopStatus != null)\n'
+                  '                    this.txtLoopStatus.setText("PAD " + (padIndex + 1) + " set to " + modeName);\n'
+                  '            })\n'
+                  '            .setNegativeButton("Cancel", (d, w) -> {\n'
+                  '                this.isAddMode = false;\n'
+                  '                if (this.btnAddMode != null) {\n'
+                  '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
+                  '                    this.btnAddMode.setText("+ ADD MODE");\n'
+                  '                }\n'
+                  '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
+                  '            })\n'
+                  '            .show();\n'
+                  '    }\n'
+              )
+              last_brace = src.rfind('\n}')
+              if last_brace < 0:
+                  print('FATAL: cannot find closing brace of class'); sys.exit(1)
+              src = src[:last_brace] + methods + '\n}' + src[last_brace+2:]
+              print('5. toggleAddMode + showPadConfigDialog methods added')
 
-with open(LA, 'w') as f: f.write(src)
-print('ADD MODE patch complete')
-INNEREOF
-          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: ADD MODE patch script failed (rc=$rc)"; exit 1; }
-          echo "ADD MODE patch done"
+          with open(LA, 'w') as f: f.write(src)
+          print('ADD MODE patch complete')
+
+          PYEOF
+          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: ADD MODE patch failed (rc=$rc)"; exit 1; }
           grep -c 'btnAddMode\|toggleAddMode\|showPadConfigDialog\|isAddMode' "$LA" || true
           grep -c 'btnAddMode' "$XML" || true
 
