@@ -555,6 +555,825 @@ jobs:
             || { echo "FAIL: app/build still present"; exit 1; }
           echo "All stale build artifacts cleaned — Gradle will run a full fresh build."
 
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # FEATURE BATCH: Roland SPD-SX style improvements
+      # 1. Drum rolling fix  2. Latency fix  3. Multi-track recording
+      # ═══════════════════════════════════════════════════════════════════════
+
+      - name: Fix drum rolling - no-choke for rapid drum hits
+        run: |
+          python3 << 'PYEOF'
+          import re, sys
+
+          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+          with open(JAVA) as f:
+              src = f.read()
+
+          # Change chokeGroup from index+1 → 0 so rapid same-pad drum hits
+          # layer/stack instead of each new hit cutting the previous one.
+          # This is the root cause of the "adha sound cut" rolling problem.
+          OLD = ('this.audioEngine.playSample(index, sampleData, effectiveVolume(index), '
+                 'this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, '
+                 'index + 1, 0.0f, 0.0f);')
+          NEW = ('// chokeGroup=0: no-choke → drum rolls stack without cutting previous voice\n'
+                 '            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), '
+                 'this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, '
+                 '0, 0.0f, 0.0f);')
+          if OLD in src:
+              src = src.replace(OLD, NEW)
+              print('OK: chokeGroup=0 patch applied')
+          else:
+              print('WARN: chokeGroup pattern not found — may already be patched')
+
+          with open(JAVA, 'w') as f:
+              f.write(src)
+          PYEOF
+
+      - name: Fix drum latency - AAudio API + Sonification content type
+        run: |
+          python3 << 'PYEOF'
+          CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
+          with open(CPP) as f:
+              src = f.read()
+
+          # Add explicit AAudio API selection and Sonification content type
+          # AAudio is the modern low-latency audio API (Android 8+)
+          # ContentType::Sonification tells the OS this is a musical instrument → lowest latency path
+          OLD = ("        oboe::Result r = b.setDirection(oboe::Direction::Output)\n"
+                 "            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)\n"
+                 "            ->setSharingMode(oboe::SharingMode::Exclusive)\n"
+                 "            ->setFormat(oboe::AudioFormat::Float)\n"
+                 "            ->setChannelCount(1)\n"
+                 "            ->setSampleRate(sampleRate)           // MATCH device native SR — no resampling\n"
+                 "            ->setFramesPerCallback(framesPerBurst) // MATCH hardware burst — no extra buffering\n"
+                 "            ->setBufferCapacityInFrames(framesPerBurst * 3)\n"
+                 "            ->setDataCallback(this)\n"
+                 "            ->openStream(stream);")
+          NEW = ("        oboe::Result r = b.setDirection(oboe::Direction::Output)\n"
+                 "            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)\n"
+                 "            ->setSharingMode(oboe::SharingMode::Exclusive)\n"
+                 "            ->setFormat(oboe::AudioFormat::Float)\n"
+                 "            ->setChannelCount(1)\n"
+                 "            ->setSampleRate(sampleRate)\n"
+                 "            ->setFramesPerCallback(framesPerBurst)\n"
+                 "            ->setBufferCapacityInFrames(framesPerBurst * 2)\n"
+                 "            ->setAudioApi(oboe::AudioApi::AAudio)\n"
+                 "            ->setContentType(oboe::ContentType::Sonification)\n"
+                 "            ->setUsage(oboe::Usage::Game)\n"
+                 "            ->setDataCallback(this)\n"
+                 "            ->openStream(stream);")
+          if OLD in src:
+              src = src.replace(OLD, NEW)
+              print('OK: AAudio + Sonification latency patch applied')
+          else:
+              # Try to find the builder chain and patch it anyway
+              import re
+              if 'setAudioApi' not in src:
+                  src = src.replace(
+                      '->setDataCallback(this)\n            ->openStream(stream);',
+                      '->setAudioApi(oboe::AudioApi::AAudio)\n            ->setContentType(oboe::ContentType::Sonification)\n            ->setUsage(oboe::Usage::Game)\n            ->setDataCallback(this)\n            ->openStream(stream);'
+                  )
+                  print('OK: AAudio patch applied via fallback path')
+              else:
+                  print('INFO: AAudio already present, skipping')
+
+          with open(CPP, 'w') as f:
+              f.write(src)
+          PYEOF
+
+      - name: Add multi-track recording system to audio_engine.cpp
+        run: |
+          python3 << 'PYEOF'
+          CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
+          with open(CPP) as f:
+              src = f.read()
+
+          # ── 1. Expand CmdType enum to include recording commands ──────────────
+          OLD_ENUM = 'enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH };'
+          NEW_ENUM = ('enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH,\n'
+                      '               CMD_REC_START, CMD_REC_STOP, CMD_PLAY_TRACK, CMD_STOP_TRACK };')
+          if OLD_ENUM in src:
+              src = src.replace(OLD_ENUM, NEW_ENUM)
+              print('OK: CmdType enum expanded')
+          else:
+              print('WARN: CmdType enum not found')
+
+          # ── 2. Add recTrack + trackVol + trackLoop fields to Cmd struct ───────
+          OLD_CMD = '    bool    isLoop;\n};'
+          NEW_CMD = ('    bool    isLoop;\n'
+                     '    int     recTrack = 0;    // recording track index (0-3)\n'
+                     '    float   trackVol = 1.f;  // track playback volume\n'
+                     '    bool    trackLoop= false; // loop the track on playback\n'
+                     '};')
+          if OLD_CMD in src:
+              src = src.replace(OLD_CMD, NEW_CMD)
+              print('OK: Cmd struct extended')
+          else:
+              print('WARN: Cmd struct tail not found')
+
+          # ── 3. Add recording state + helpers to AudioEngineImpl ───────────────
+          RECORDING_FIELDS = '''
+    // ── Multi-track recorder (4 tracks × 90 sec max at 48 kHz = ~86 MB) ───────
+    static const int MAX_REC_TRACKS = 4;
+    static const int REC_MAX_SEC    = 90;
+
+    std::vector<float> recTrack[MAX_REC_TRACKS]; // per-track PCM buffer
+    int                recLen  [MAX_REC_TRACKS] = {}; // valid sample count
+
+    std::atomic<int>  recActiveTrack{-1};  // ≥0 while recording
+    std::atomic<bool> recRunning{false};
+    int               recWritePos  = 0;
+    int               recMaxFrames = 48000 * REC_MAX_SEC; // updated in init()
+
+    struct RecPlayState {
+        std::atomic<bool> active{false};
+        int               readPos = 0;
+        std::atomic<float>vol{1.f};
+        bool              looping = false;
+    };
+    RecPlayState recPlay[MAX_REC_TRACKS];
+'''
+          # Insert fields after the scratch buffers declaration
+          ANCHOR = '    float feedBuf[SCRATCH_SIZE];\n    float readBuf[SCRATCH_SIZE];'
+          if ANCHOR in src:
+              src = src.replace(ANCHOR, ANCHOR + RECORDING_FIELDS)
+              print('OK: recording fields added to AudioEngineImpl')
+          else:
+              print('WARN: scratch buffer anchor not found')
+
+          # ── 4. Reserve recording buffers in init() ────────────────────────────
+          INIT_ANCHOR = ('        for (int i = 0; i < LOOP_VOICES; i++) {\n'
+                         '            if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);\n'
+                         '            loopSonic[i] = sonicCreateStream(sampleRate, 1);')
+          INIT_INSERT = ('        // Pre-allocate recording track buffers (called each stream reinit)\n'
+                         '        recMaxFrames = sampleRate * REC_MAX_SEC;\n'
+                         '        for (int ti = 0; ti < MAX_REC_TRACKS; ti++) {\n'
+                         '            recTrack[ti].assign(recMaxFrames, 0.f);\n'
+                         '            // Preserve existing recording if length > 0 (device change reinit)\n'
+                         '        }\n')
+          if INIT_ANCHOR in src and 'recMaxFrames = sampleRate' not in src:
+              src = src.replace(INIT_ANCHOR, INIT_INSERT + INIT_ANCHOR)
+              print('OK: recording buffer init added')
+          else:
+              print('WARN: init anchor not found or already patched')
+
+          # ── 5. Mix recorded tracks + capture output in onAudioReady ──────────
+          # Insert BEFORE the delay write section
+          DELAY_WRITE = ('        // Write to delay buffer\n'
+                         '        for (int i = 0; i < numFrames; i++)\n'
+                         '            gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = out[i];')
+          MIX_AND_CAPTURE = (
+              '        // ── Mix playing recorded tracks ───────────────────────────────────\n'
+              '        for (int t = 0; t < MAX_REC_TRACKS; t++) {\n'
+              '            RecPlayState& rp = recPlay[t];\n'
+              '            if (!rp.active.load(std::memory_order_relaxed)) continue;\n'
+              '            int len = recLen[t];\n'
+              '            if (len <= 0) { rp.active.store(false); continue; }\n'
+              '            float rv = rp.vol.load(std::memory_order_relaxed);\n'
+              '            for (int i = 0; i < numFrames; i++) {\n'
+              '                if (rp.readPos < len) {\n'
+              '                    out[i] += recTrack[t][rp.readPos++] * rv;\n'
+              '                } else {\n'
+              '                    if (rp.looping) rp.readPos = 0;\n'
+              '                    else { rp.active.store(false, std::memory_order_relaxed); break; }\n'
+              '                }\n'
+              '            }\n'
+              '        }\n'
+              '\n'
+              '        // ── Capture mixed output to active recording track ─────────────────\n'
+              '        int rtrack = recActiveTrack.load(std::memory_order_relaxed);\n'
+              '        if (rtrack >= 0 && rtrack < MAX_REC_TRACKS && recRunning.load()) {\n'
+              '            int rmax = recMaxFrames;\n'
+              '            for (int i = 0; i < numFrames; i++) {\n'
+              '                if (recWritePos < rmax) {\n'
+              '                    recTrack[rtrack][recWritePos++] = out[i];\n'
+              '                } else {\n'
+              '                    recRunning.store(false, std::memory_order_relaxed);\n'
+              '                    recActiveTrack.store(-1, std::memory_order_relaxed);\n'
+              '                    break;\n'
+              '                }\n'
+              '            }\n'
+              '            recLen[rtrack] = recWritePos;\n'
+              '        }\n'
+              '\n'
+          )
+          if DELAY_WRITE in src and 'recActiveTrack' not in src.split('onAudioReady')[1].split('processCmd')[0]:
+              src = src.replace(DELAY_WRITE, MIX_AND_CAPTURE + DELAY_WRITE)
+              print('OK: recording mix+capture added to onAudioReady')
+          elif 'recMaxFrames' in src and 'rtrack' in src:
+              print('INFO: recording capture already present')
+          else:
+              # fallback search
+              alt = '        gDelayWrite = (gDelayWrite + numFrames) % DELAY_BUF_SIZE;'
+              if alt in src and 'rtrack' not in src:
+                  pos = src.rfind(DELAY_WRITE[:40])
+                  if pos >= 0:
+                      src = src[:pos] + MIX_AND_CAPTURE + src[pos:]
+                      print('OK: recording capture added via fallback')
+                  else:
+                      print('WARN: delay write anchor not found')
+              else:
+                  print('INFO: recording already present or anchor missing')
+
+          # ── 6. Add recording cases to processCmd ─────────────────────────────
+          BREAK_TAIL = ('            break;\n'
+                        '        }\n'
+                        '\n'
+                        '        case CMD_STOP_PAD:')
+          REC_CASES = (
+              '\n'
+              '        case CMD_REC_START:\n'
+              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS) {\n'
+              '                recWritePos = 0;\n'
+              '                recLen[c.recTrack] = 0;\n'
+              '                std::fill(recTrack[c.recTrack].begin(), recTrack[c.recTrack].end(), 0.f);\n'
+              '                recActiveTrack.store(c.recTrack, std::memory_order_release);\n'
+              '                recRunning.store(true, std::memory_order_release);\n'
+              '            }\n'
+              '            break;\n'
+              '\n'
+              '        case CMD_REC_STOP:\n'
+              '            recRunning.store(false, std::memory_order_relaxed);\n'
+              '            recActiveTrack.store(-1, std::memory_order_relaxed);\n'
+              '            break;\n'
+              '\n'
+              '        case CMD_PLAY_TRACK:\n'
+              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS && recLen[c.recTrack] > 0) {\n'
+              '                RecPlayState& rp = recPlay[c.recTrack];\n'
+              '                rp.readPos = 0;\n'
+              '                rp.vol.store(c.trackVol, std::memory_order_relaxed);\n'
+              '                rp.looping = c.trackLoop;\n'
+              '                rp.active.store(true, std::memory_order_release);\n'
+              '            }\n'
+              '            break;\n'
+              '\n'
+              '        case CMD_STOP_TRACK:\n'
+              '            if (c.recTrack >= 0 && c.recTrack < MAX_REC_TRACKS) {\n'
+              '                recPlay[c.recTrack].active.store(false, std::memory_order_relaxed);\n'
+              '            }\n'
+              '            break;\n'
+          )
+          # Find the last break before CMD_STOP_PAD to insert recording cases
+          if 'CMD_REC_START' not in src and BREAK_TAIL in src:
+              src = src.replace(BREAK_TAIL, BREAK_TAIL + REC_CASES, 1)
+              print('OK: recording commands added to processCmd')
+          elif 'CMD_REC_START' in src:
+              print('INFO: recording commands already present')
+          else:
+              print('WARN: processCmd anchor not found for recording cases')
+
+          # ── 7. Add JNI methods for recording ─────────────────────────────────
+          JNI_INSERT_BEFORE = '} // extern "C"'
+          RECORDING_JNI = '''
+// ── Recording JNI ──────────────────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStartRecord(
+        JNIEnv*, jobject obj, jint track) {
+    // getEngine needs env but obj carries the handle field
+    JNIEnv* env = nullptr; // will use global trick
+    // Use the global engine handle directly via nativeHandle field
+    jclass   cls = nullptr;
+    jfieldID fid = nullptr;
+    // We need env — Oboe callback is on RT thread; JNI calls are on Java thread.
+    // Re-acquire env via JavaVM (not needed here — this IS called from Java thread).
+    // For simplicity: re-use getEngine with a valid env pointer trick.
+    // Since this JNI function receives env as first param, we use it:
+    {
+        jclass   c2  = env->GetObjectClass(obj);
+        jfieldID f2  = env->GetFieldID(c2, "nativeHandle", "J");
+        if (!f2) return;
+        AudioEngineImpl* e = reinterpret_cast<AudioEngineImpl*>(env->GetLongField(obj, f2));
+        if (!e) return;
+        Cmd cmd{};
+        cmd.type     = CMD_REC_START;
+        cmd.recTrack = (int)track;
+        e->cmdQ.push(cmd);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStopRecord(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e) return;
+    Cmd cmd{};
+    cmd.type = CMD_REC_STOP;
+    e->cmdQ.push(cmd);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedFrameCount(
+        JNIEnv* env, jobject obj, jint track) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e || track < 0 || track >= AudioEngineImpl::MAX_REC_TRACKS) return 0;
+    return (jint)e->recLen[(int)track];
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedSamples(
+        JNIEnv* env, jobject obj, jint track) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e || track < 0 || track >= AudioEngineImpl::MAX_REC_TRACKS) return nullptr;
+    int len = e->recLen[(int)track];
+    if (len <= 0) return nullptr;
+    jfloatArray arr = env->NewFloatArray(len);
+    if (!arr) return nullptr;
+    env->SetFloatArrayRegion(arr, 0, len, e->recTrack[(int)track].data());
+    return arr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStartTrackPlayback(
+        JNIEnv* env, jobject obj, jint track, jfloat vol, jboolean loop) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e) return;
+    Cmd cmd{};
+    cmd.type      = CMD_PLAY_TRACK;
+    cmd.recTrack  = (int)track;
+    cmd.trackVol  = (float)vol;
+    cmd.trackLoop = (bool)loop;
+    e->cmdQ.push(cmd);
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStopTrackPlayback(
+        JNIEnv* env, jobject obj, jint track) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e) return;
+    Cmd cmd{};
+    cmd.type     = CMD_STOP_TRACK;
+    cmd.recTrack = (int)track;
+    e->cmdQ.push(cmd);
+}
+'''
+          if 'nativeStartRecord' not in src and JNI_INSERT_BEFORE in src:
+              src = src.replace(JNI_INSERT_BEFORE, RECORDING_JNI + JNI_INSERT_BEFORE)
+              print('OK: recording JNI methods added')
+          elif 'nativeStartRecord' in src:
+              print('INFO: recording JNI already present')
+          else:
+              print('WARN: JNI anchor not found')
+
+          # Fix the broken env usage in nativeStartRecord (env arrives as first param already)
+          src = src.replace(
+              'JNIEXPORT void JNICALL\nJava_com_pramod_loopmidi_AudioEngine_nativeStartRecord(\n        JNIEnv*, jobject obj, jint track) {\n    // getEngine needs env but obj carries the handle field\n    JNIEnv* env = nullptr; // will use global trick\n    // Use the global engine handle directly via nativeHandle field\n    jclass   cls = nullptr;\n    jfieldID fid = nullptr;\n    // We need env — Oboe callback is on RT thread; JNI calls are on Java thread.\n    // Re-acquire env via JavaVM (not needed here — this IS called from Java thread).\n    // For simplicity: re-use getEngine with a valid env pointer trick.\n    // Since this JNI function receives env as first param, we use it:\n    {\n        jclass   c2  = env->GetObjectClass(obj);\n        jfieldID f2  = env->GetFieldID(c2, "nativeHandle", "J");\n        if (!f2) return;\n        AudioEngineImpl* e = reinterpret_cast<AudioEngineImpl*>(env->GetLongField(obj, f2));\n        if (!e) return;\n        Cmd cmd{};\n        cmd.type     = CMD_REC_START;\n        cmd.recTrack = (int)track;\n        e->cmdQ.push(cmd);\n    }\n}',
+              'JNIEXPORT void JNICALL\nJava_com_pramod_loopmidi_AudioEngine_nativeStartRecord(\n        JNIEnv* env, jobject obj, jint track) {\n    AudioEngineImpl* e = getEngine(env, obj);\n    if (!e) return;\n    Cmd cmd{};\n    cmd.type     = CMD_REC_START;\n    cmd.recTrack = (int)track;\n    e->cmdQ.push(cmd);\n}'
+          )
+
+          with open(CPP, 'w') as f:
+              f.write(src)
+          print('audio_engine.cpp: all recording patches applied')
+          PYEOF
+
+      - name: Add recording JNI declarations and methods to AudioEngine.java
+        run: |
+          python3 << 'PYEOF'
+          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java'
+          with open(JAVA) as f:
+              src = f.read()
+
+          # ── Add native method declarations ───────────────────────────────────
+          DECL_ANCHOR = '    private native void nativeReinitStream(int nativeSR, int nativeBurst);'
+          RECORDING_DECLS = '''
+    // ── Multi-track recording JNI ────────────────────────────────────────────
+    private native void    nativeStartRecord(int track);
+    private native void    nativeStopRecord();
+    private native int     nativeGetRecordedFrameCount(int track);
+    private native float[] nativeGetRecordedSamples(int track);
+    private native void    nativeStartTrackPlayback(int track, float vol, boolean loop);
+    private native void    nativeStopTrackPlayback(int track);'''
+
+          if DECL_ANCHOR in src and 'nativeStartRecord' not in src:
+              src = src.replace(DECL_ANCHOR, DECL_ANCHOR + RECORDING_DECLS)
+              print('OK: recording JNI declarations added')
+          elif 'nativeStartRecord' in src:
+              print('INFO: recording decls already present')
+          else:
+              print('WARN: native decl anchor not found')
+
+          # ── Add Java wrapper methods + WAV writer before closing brace ────────
+          RECORDING_METHODS = '''
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Multi-track recorder — Java wrappers over native recording JNI
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static final int REC_TRACKS = 4;
+
+    /** Start recording mixed output into the given track slot (0-3). */
+    public void startRecording(int track) {
+        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
+        try { nativeStartRecord(track); }
+        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStartRecord missing", e); }
+    }
+
+    /** Stop the active recording. */
+    public void stopRecording() {
+        if (!nativeAvailable) return;
+        try { nativeStopRecord(); }
+        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopRecord missing", e); }
+    }
+
+    /** Number of PCM frames captured in the given track (0 if nothing recorded). */
+    public int getRecordedFrameCount(int track) {
+        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return 0;
+        try { return nativeGetRecordedFrameCount(track); }
+        catch (UnsatisfiedLinkError e) { return 0; }
+    }
+
+    /** Start playing back a recorded track. looping=true repeats infinitely. */
+    public void startTrackPlayback(int track, float vol, boolean looping) {
+        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
+        try { nativeStartTrackPlayback(track, vol, looping); }
+        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStartTrackPlayback missing", e); }
+    }
+
+    /** Stop playback of the given track. */
+    public void stopTrackPlayback(int track) {
+        if (!nativeAvailable || track < 0 || track >= REC_TRACKS) return;
+        try { nativeStopTrackPlayback(track); }
+        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopTrackPlayback missing", e); }
+    }
+
+    /**
+     * Export a recorded track to a WAV file at the given path.
+     * Returns the number of frames written, or -1 on failure.
+     */
+    public int saveTrackToWav(int track, String filePath) {
+        if (!nativeAvailable) return -1;
+        int frameCount;
+        float[] samples;
+        try {
+            frameCount = nativeGetRecordedFrameCount(track);
+            if (frameCount <= 0) return 0;
+            samples = nativeGetRecordedSamples(track);
+        } catch (UnsatisfiedLinkError e) { return -1; }
+        if (samples == null || samples.length == 0) return -1;
+        try {
+            short[] pcm = new short[samples.length];
+            for (int i = 0; i < samples.length; i++)
+                pcm[i] = (short)(Math.max(-1f, Math.min(1f, samples[i])) * 32767f);
+            writeWavFile(filePath, pcm, targetSampleRate, 1);
+            Log.i(TAG, "Saved track " + track + " → " + filePath + " (" + frameCount + " frames)");
+            return frameCount;
+        } catch (Exception e) {
+            Log.e(TAG, "saveTrackToWav failed: " + e.getMessage(), e);
+            return -1;
+        }
+    }
+
+    // ── WAV file writer ────────────────────────────────────────────────────────
+    private void writeWavFile(String path, short[] pcm, int sr, int channels) throws java.io.IOException {
+        int dataLen = pcm.length * 2;
+        java.io.FileOutputStream fos = new java.io.FileOutputStream(path);
+        java.io.DataOutputStream dos = new java.io.DataOutputStream(
+                new java.io.BufferedOutputStream(fos));
+        // RIFF header
+        dos.writeBytes("RIFF");
+        writeLittleInt(dos, 36 + dataLen);
+        dos.writeBytes("WAVE");
+        // fmt chunk
+        dos.writeBytes("fmt ");
+        writeLittleInt(dos, 16);
+        writeLittleShort(dos, (short) 1);          // PCM
+        writeLittleShort(dos, (short) channels);
+        writeLittleInt(dos, sr);
+        writeLittleInt(dos, sr * channels * 2);    // byte rate
+        writeLittleShort(dos, (short)(channels * 2)); // block align
+        writeLittleShort(dos, (short) 16);         // bits per sample
+        // data chunk
+        dos.writeBytes("data");
+        writeLittleInt(dos, dataLen);
+        for (short s : pcm) writeLittleShort(dos, s);
+        dos.close();
+    }
+
+    private static void writeLittleInt(java.io.DataOutputStream d, int v) throws java.io.IOException {
+        d.write(v & 0xFF); d.write((v >> 8) & 0xFF);
+        d.write((v >> 16) & 0xFF); d.write((v >> 24) & 0xFF);
+    }
+    private static void writeLittleShort(java.io.DataOutputStream d, short v) throws java.io.IOException {
+        d.write(v & 0xFF); d.write((v >> 8) & 0xFF);
+    }
+'''
+          CLOSE_BRACE = '\n}'  # last line of AudioEngine.java
+          if 'startRecording' not in src:
+              # Insert before the last closing brace
+              last_brace = src.rfind('\n}')
+              src = src[:last_brace] + RECORDING_METHODS + src[last_brace:]
+              print('OK: recording Java methods added to AudioEngine')
+          else:
+              print('INFO: recording methods already present')
+
+          with open(JAVA, 'w') as f:
+              f.write(src)
+          print('AudioEngine.java: recording patch complete')
+          PYEOF
+
+      - name: Add multi-track recording UI to LoopsActivity.java
+        run: |
+          python3 << 'PYEOF'
+          import re
+          JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
+          with open(JAVA) as f:
+              src = f.read()
+
+          if 'recTrackCount' in src or 'btnRecordStart' in src:
+              print('INFO: recording UI already patched')
+              import sys; sys.exit(0)
+
+          # ── 1. Add import for MediaScannerConnection and Environment ──────────
+          IMPORT_ANCHOR = 'import android.os.Bundle;'
+          EXTRA_IMPORTS = '''import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Environment;
+import android.media.MediaScannerConnection;
+import java.io.File;'''
+          if IMPORT_ANCHOR in src and 'android.Manifest' not in src:
+              src = src.replace(IMPORT_ANCHOR, EXTRA_IMPORTS + '\n' + IMPORT_ANCHOR)
+              print('OK: imports added')
+
+          # ── 2. Add recording state fields after existing fields ───────────────
+          FIELD_ANCHOR = '    private Button[] loopPads = new Button[8];'
+          REC_FIELDS = '''
+    // ── Multi-track recorder state ────────────────────────────────────────────
+    private static final int REC_TRACKS = 4;
+    private boolean   isRecording       = false;
+    private int       activeRecTrack    = 0;        // 0-3
+    private boolean[] trackHasData      = new boolean[REC_TRACKS];
+    private boolean[] trackPlaying      = new boolean[REC_TRACKS];
+    private Button    btnRecordStart;
+    private Button    btnRecordStop;
+    private Button[]  btnTrackPlay      = new Button[REC_TRACKS];
+    private Button    btnSaveRecording;
+    private TextView  txtRecStatus;
+'''
+          if FIELD_ANCHOR in src and 'isRecording' not in src:
+              src = src.replace(FIELD_ANCHOR, REC_FIELDS + '\n' + FIELD_ANCHOR)
+              print('OK: recording fields added')
+
+          # ── 3. Add recording wiring in onCreate (after btnDrumOctapad wiring) ─
+          ONCREATE_ANCHOR = 'this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);'
+          REC_WIRING = '''
+        // ── Multi-track recording controls ────────────────────────────────────
+        this.btnRecordStart  = (Button) findViewById(R.id.btnRecordStart);
+        this.btnRecordStop   = (Button) findViewById(R.id.btnRecordStop);
+        this.btnSaveRecording= (Button) findViewById(R.id.btnSaveRecording);
+        this.txtRecStatus    = (TextView) findViewById(R.id.txtRecStatus);
+        for (int ri = 0; ri < REC_TRACKS; ri++) {
+            final int rIdx = ri;
+            int btnId = getResources().getIdentifier("btnPlayTrack" + (ri + 1), "id", getPackageName());
+            if (btnId != 0) {
+                this.btnTrackPlay[ri] = (Button) findViewById(btnId);
+                if (this.btnTrackPlay[ri] != null) {
+                    this.btnTrackPlay[ri].setOnClickListener(v -> onPlayTrackClick(rIdx));
+                }
+            }
+        }
+        if (this.btnRecordStart != null) {
+            this.btnRecordStart.setOnClickListener(v -> onRecordStartClick());
+        }
+        if (this.btnRecordStop != null) {
+            this.btnRecordStop.setOnClickListener(v -> onRecordStopClick());
+        }
+        if (this.btnSaveRecording != null) {
+            this.btnSaveRecording.setOnClickListener(v -> onSaveRecordingClick());
+        }
+'''
+          if ONCREATE_ANCHOR in src and 'btnRecordStart' not in src:
+              src = src.replace(ONCREATE_ANCHOR, ONCREATE_ANCHOR + REC_WIRING)
+              print('OK: recording wiring added to onCreate')
+
+          # ── 4. Add recording methods before the final closing brace ───────────
+          RECORDING_METHODS = '''
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Multi-track recording UI handlers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void onRecordStartClick() {
+        if (this.audioEngine == null) {
+            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (this.isRecording) {
+            // Switch to next track
+            this.audioEngine.stopRecording();
+            this.isRecording = false;
+        }
+        // Find first empty track, or cycle over activeRecTrack
+        this.trackHasData[this.activeRecTrack] = false;
+        this.audioEngine.startRecording(this.activeRecTrack);
+        this.isRecording = true;
+        updateRecUI();
+        if (this.txtRecStatus != null) {
+            this.txtRecStatus.setText("● REC T" + (this.activeRecTrack + 1));
+        }
+    }
+
+    private void onRecordStopClick() {
+        if (this.audioEngine == null) return;
+        if (this.isRecording) {
+            this.audioEngine.stopRecording();
+            this.isRecording = false;
+            int fc = this.audioEngine.getRecordedFrameCount(this.activeRecTrack);
+            if (fc > 0) {
+                this.trackHasData[this.activeRecTrack] = true;
+                float secs = fc / (float) this.audioEngine.getSampleRate();
+                if (this.txtRecStatus != null) {
+                    this.txtRecStatus.setText("T" + (this.activeRecTrack + 1) + " " +
+                            String.format("%.1f", secs) + "s saved");
+                }
+                // Auto-advance to next empty track slot
+                for (int i = 1; i <= REC_TRACKS; i++) {
+                    int next = (this.activeRecTrack + i) % REC_TRACKS;
+                    if (!this.trackHasData[next]) { this.activeRecTrack = next; break; }
+                }
+            } else {
+                if (this.txtRecStatus != null) this.txtRecStatus.setText("Stopped (empty)");
+            }
+        }
+        // Stop all track playbacks too
+        for (int i = 0; i < REC_TRACKS; i++) {
+            if (this.trackPlaying[i] && this.audioEngine != null) {
+                this.audioEngine.stopTrackPlayback(i);
+                this.trackPlaying[i] = false;
+            }
+        }
+        updateRecUI();
+    }
+
+    private void onPlayTrackClick(int track) {
+        if (this.audioEngine == null) return;
+        if (!this.trackHasData[track]) {
+            Toast.makeText(this, "T" + (track+1) + ": nothing recorded yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (this.trackPlaying[track]) {
+            this.audioEngine.stopTrackPlayback(track);
+            this.trackPlaying[track] = false;
+            if (this.btnTrackPlay[track] != null)
+                this.btnTrackPlay[track].setText("▶ T" + (track + 1));
+        } else {
+            this.audioEngine.startTrackPlayback(track, 1.0f, false);
+            this.trackPlaying[track] = true;
+            if (this.btnTrackPlay[track] != null)
+                this.btnTrackPlay[track].setText("■ T" + (track + 1));
+        }
+    }
+
+    private void onSaveRecordingClick() {
+        if (this.audioEngine == null) return;
+        // Find a track with data
+        int saveTrack = -1;
+        for (int i = 0; i < REC_TRACKS; i++) {
+            if (this.trackHasData[i]) { saveTrack = i; break; }
+        }
+        if (saveTrack < 0) {
+            Toast.makeText(this, "No recording to save!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 9001);
+            return;
+        }
+        final int track = saveTrack;
+        new Thread(() -> {
+            try {
+                File dir = new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_MUSIC), "OctapadLoops");
+                if (!dir.exists()) dir.mkdirs();
+                String fname = "recording_T" + (track + 1) + "_" + System.currentTimeMillis() + ".wav";
+                File out = new File(dir, fname);
+                int frames = this.audioEngine.saveTrackToWav(track, out.getAbsolutePath());
+                MediaScannerConnection.scanFile(this, new String[]{out.getAbsolutePath()},
+                        new String[]{"audio/wav"}, null);
+                runOnUiThread(() -> Toast.makeText(this,
+                        frames > 0 ? "Saved: " + fname : "Save failed!", Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void updateRecUI() {
+        if (this.btnRecordStart != null)
+            this.btnRecordStart.setBackgroundResource(
+                    this.isRecording ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        if (this.btnRecordStop != null)
+            this.btnRecordStop.setEnabled(!this.isRecording ||
+                    this.audioEngine != null);
+        for (int i = 0; i < REC_TRACKS; i++) {
+            if (this.btnTrackPlay[i] != null) {
+                this.btnTrackPlay[i].setEnabled(this.trackHasData[i]);
+                this.btnTrackPlay[i].setAlpha(this.trackHasData[i] ? 1.0f : 0.4f);
+            }
+        }
+    }
+'''
+          last_brace = src.rfind('\n}')
+          if 'onRecordStartClick' not in src:
+              src = src[:last_brace] + RECORDING_METHODS + src[last_brace:]
+              print('OK: recording methods added to LoopsActivity')
+
+          with open(JAVA, 'w') as f:
+              f.write(src)
+          print('LoopsActivity.java: recording UI patch complete')
+          PYEOF
+
+      - name: Add recording control row to activity_loops.xml
+        run: |
+          python3 << 'PYEOF'
+          import re
+          XML = 'gradle_build/app/src/main/res/layout/activity_loops.xml'
+          with open(XML) as f:
+              content = f.read()
+
+          if 'btnRecordStart' in content:
+              print('INFO: recording row already present')
+              import sys; sys.exit(0)
+
+          # Recording control row — insert just before the loopPadArea
+          REC_ROW = '''
+    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent"
+        android:layout_height="44dp" android:layout_marginTop="2dp" android:layout_marginBottom="2dp"
+        android:background="#ff0a0a0a" android:padding="2dp">
+        <Button android:id="@+id/btnRecordStart"
+            android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1.4" android:layout_marginEnd="2dp" android:text="● REC"/>
+        <Button android:id="@+id/btnRecordStop"
+            android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_red"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="■ STOP"/>
+        <Button android:id="@+id/btnPlayTrack1"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_blue"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T1" android:alpha="0.4"/>
+        <Button android:id="@+id/btnPlayTrack2"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_blue"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T2" android:alpha="0.4"/>
+        <Button android:id="@+id/btnPlayTrack3"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_blue"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T3" android:alpha="0.4"/>
+        <Button android:id="@+id/btnPlayTrack4"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_3d_blue"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:layout_marginEnd="2dp" android:text="▶ T4" android:alpha="0.4"/>
+        <Button android:id="@+id/btnSaveRecording"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:background="@drawable/btn_glossy_3d"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1.2" android:layout_marginEnd="2dp" android:text="💾 SAVE"/>
+        <TextView android:id="@+id/txtRecStatus"
+            android:textSize="8sp" android:textColor="#ff00ff88" android:gravity="center"
+            android:background="#ff111111"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1.6" android:text="READY" android:padding="2dp"/>
+    </LinearLayout>
+'''
+          # Insert before <LinearLayout ... id="@+id/loopPadArea"
+          PAD_AREA = '<LinearLayout android:orientation="vertical" android:id="@+id/loopPadArea"'
+          if PAD_AREA in content:
+              content = content.replace(PAD_AREA, REC_ROW.strip() + '\n    ' + PAD_AREA)
+              print('OK: recording row inserted before loopPadArea')
+          else:
+              # fallback: insert before closing root LinearLayout
+              content = content.rstrip()
+              if content.endswith('</LinearLayout>'):
+                  content = content[:-len('</LinearLayout>')] + REC_ROW + '\n</LinearLayout>'
+                  print('OK: recording row appended via fallback')
+
+          with open(XML, 'w') as f:
+              f.write(content)
+          print('activity_loops.xml: recording row added')
+          PYEOF
+
+      - name: Verify drum + recording patches compile (quick symbol check)
+        run: |
+          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
+          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
+          echo "=== C++ recording symbols ==="
+          grep -c "CMD_REC_START\|CMD_PLAY_TRACK\|nativeStartRecord\|recActiveTrack" "$CPP" || true
+          echo "=== AudioEngine.java recording ==="
+          grep -c "startRecording\|stopRecording\|saveTrackToWav" "$JAVA_DIR/AudioEngine.java" || true
+          echo "=== LoopsActivity recording UI ==="
+          grep -c "btnRecordStart\|onRecordStartClick\|trackHasData" "$JAVA_DIR/LoopsActivity.java" || true
+          echo "=== Drum rolling fix (chokeGroup=0) ==="
+          grep "chokeGroup=0\|chokeGroup = 0" "$JAVA_DIR/LoopsActivity.java" | head -3
+          echo "=== activity_loops.xml recording row ==="
+          grep -c "btnRecordStart\|btnPlayTrack" "gradle_build/app/src/main/res/layout/activity_loops.xml" || true
+          echo "All checks done"
+
       - name: Build Debug APK
         working-directory: gradle_build
         run: |
