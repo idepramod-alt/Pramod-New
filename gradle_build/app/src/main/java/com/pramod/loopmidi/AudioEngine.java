@@ -59,6 +59,11 @@ public class AudioEngine {
                                          boolean delayOn, float delayMs, float delayLevel,
                                          float eqLow, float eqMid, float eqHigh,
                                          int chokeGroup, float attackMs, float releaseMs);
+    // New: one-shot/drum with independent speed + pitch (both applied via resampling)
+    private native void nativePlaySampleSP(int padIndex, float volume, float speed, float pitch,
+                                           boolean delayOn, float delayMs, float delayLevel,
+                                           float eqLow, float eqMid, float eqHigh,
+                                           int chokeGroup, float attackMs, float releaseMs);
     // speed = time-stretch factor (1.0=normal, 2.0=2x faster, pitch unchanged)
     // pitch = pitch-shift factor  (1.0=normal, 2.0=octave up, speed unchanged)
     private native void nativePlayLoop(int padIndex, float volume, float speed, float pitch);
@@ -70,7 +75,8 @@ public class AudioEngine {
     // Whether each optional JNI symbol is actually present in the .so
     private boolean hasNativePlayLoop             = false;
     private boolean hasNativeUpdateLoopSpeedPitch = false;
-    private boolean hasNativePlayLoopSP         = false;
+    private boolean hasNativePlayLoopSP           = false;
+    private boolean hasNativePlaySampleSP         = false;
 
     static {
         try {
@@ -140,6 +146,10 @@ public class AudioEngine {
             try { nativeUpdateLoopSpeedPitch(0, 0f, 1f, 1f); hasNativeUpdateLoopSpeedPitch = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativeUpdateLoopSpeedPitch not in .so"); }
             catch (Exception ignored)      { hasNativeUpdateLoopSpeedPitch = true; }
+
+            try { nativePlaySampleSP(0, 0f, 1f, 1f, false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f); hasNativePlaySampleSP = true; }
+            catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativePlaySampleSP not in .so"); }
+            catch (Exception ignored)      { hasNativePlaySampleSP = true; }
         }
     }
 
@@ -290,7 +300,16 @@ public class AudioEngine {
             float rate = Math.max(0.1f, Math.min(8f, pitch));
             if (loopMode == 1 && hasNativePlayLoop) {
                 nativePlayLoop(padIndex, vol, spd, rate);
+            } else if (hasNativePlaySampleSP) {
+                // Use new path: passes speed + pitch separately → render loop combines
+                // them as rate = speed × pitch for linear resampling. This is what makes
+                // the speed slider actually work in one-shot and drum pad modes.
+                nativePlaySampleSP(padIndex, vol, spd, rate,
+                        delayOn, delayMs, delayLevel,
+                        eqLow, eqMid, eqHigh,
+                        chokeGroup, attackMs, releaseMs);
             } else {
+                // Fallback: old path (speed ignored, pitch only)
                 nativePlaySample(padIndex, vol, rate,
                         delayOn, delayMs, delayLevel,
                         eqLow, eqMid, eqHigh,

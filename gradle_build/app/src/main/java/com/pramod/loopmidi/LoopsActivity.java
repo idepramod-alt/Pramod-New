@@ -61,8 +61,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnTempoMinus;
     private Button btnTempoPlus;
     private Button btnResetSpeedPitch;
+    private Button btnDrumOctapad;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
+    private boolean isDrumOctapadMode = false;
     private int currentScaleOffset;
     private EditText editCustomBpm;
     private Equalizer globalEq;
@@ -595,6 +597,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtMasterVolVal = (TextView) findViewById(R.id.txtMasterVolVal);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
+        this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);
         this.btnResetSpeedPitch = (Button) findViewById(R.id.btnResetSpeedPitch);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
@@ -760,6 +763,51 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     LoopsActivity.this.resetSpeedPitch();
                 }
             });
+        }
+        Button button8 = this.btnDrumOctapad;
+        if (button8 != null) {
+            button8.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    LoopsActivity.this.toggleDrumOctapadMode();
+                }
+            });
+        }
+    }
+
+    /** Toggle Drum Octapad mode: one-shot + multi-play both on/off together.
+     *  In Drum Octapad mode every pad tap plays the sample once (one-shot)
+     *  and all 8 pads can play simultaneously — exactly like a real drum kit.
+     *  Speed + pitch sliders apply to each new hit when it is triggered. */
+    public void toggleDrumOctapadMode() {
+        this.isDrumOctapadMode = !this.isDrumOctapadMode;
+        // Drum mode = one-shot ON + multi-play ON
+        this.isOneShotMode = this.isDrumOctapadMode;
+        this.isMultiMode   = this.isDrumOctapadMode;
+        // Sync checkboxes so the UI state matches
+        if (this.chkOneShotMode != null) this.chkOneShotMode.setChecked(this.isOneShotMode);
+        if (this.chkMultiMode   != null) this.chkMultiMode.setChecked(this.isMultiMode);
+        // Visual feedback on the button: orange = active, dark = inactive
+        if (this.btnDrumOctapad != null) {
+            this.btnDrumOctapad.setBackgroundResource(
+                this.isDrumOctapadMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        }
+        // Save both prefs
+        this.prefs.edit()
+            .putBoolean("loop_one_shot_mode", this.isOneShotMode)
+            .putBoolean("loop_multi_mode",    this.isMultiMode)
+            .apply();
+        // Stop all active loops so the new mode takes effect cleanly
+        if (this.isDrumOctapadMode && this.audioEngine != null) {
+            this.audioEngine.stopAll();
+            for (int i = 0; i < 8; i++) {
+                this.loopPlaying[i] = false;
+                if (this.loopPads[i] != null)
+                    this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+            }
+        }
+        if (this.txtLoopStatus != null) {
+            this.txtLoopStatus.setText(this.isDrumOctapadMode ? "DRUM OCTAPAD MODE ON" : "DRUM OCTAPAD MODE OFF");
         }
     }
 

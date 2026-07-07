@@ -613,7 +613,25 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySample(
         jfloat /*eqLow*/, jfloat /*eqMid*/, jfloat /*eqHigh*/,
         jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
     AudioEngineImpl* e = getEngine(env, obj);
+    // Legacy path: speed=1.0 (kept for backward compat). New code uses nativePlaySampleSP.
     if (e) e->playSample((int)padIdx, (float)volume, 1.f, (float)pitch,
+                         (bool)delayOn, (float)delayMs, (float)delayLevel,
+                         (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
+}
+
+// New JNI: play one-shot/drum sample with BOTH speed + pitch applied.
+// speed = playback rate multiplier for duration (1.0 = normal, 2.0 = 2× faster)
+// pitch = pitch-shift multiplier on top (1.0 = normal, 2.0 = octave up)
+// Combined effect: rate = speed × pitch via linear resampling in the render loop.
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativePlaySampleSP(
+        JNIEnv* env, jobject obj,
+        jint padIdx, jfloat volume, jfloat speed, jfloat pitch,
+        jboolean delayOn, jfloat delayMs, jfloat delayLevel,
+        jfloat /*eqLow*/, jfloat /*eqMid*/, jfloat /*eqHigh*/,
+        jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
                          (bool)delayOn, (float)delayMs, (float)delayLevel,
                          (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
 }
