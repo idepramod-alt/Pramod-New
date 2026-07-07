@@ -509,7 +509,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
                 this.loopPlaying[i] = false;
-                this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                updatePadLabel(i);    // preserve drum-mode orange, don't force black
             }
         }
     }
@@ -556,9 +556,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             for (int i = 0; i < 8; i++) {
                 this.loopPlaying[i] = false;
-                if (this.loopPads[i] != null) {
-                    this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
-                }
+                updatePadLabel(i);    // drum-mode pads keep their orange indicator
             }
             if (this.txtLoopStatus != null) {
                 this.txtLoopStatus.setText("STOPPED");
@@ -908,10 +906,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         if (LoopsActivity.this.loopPlaying[i]) {
                             engine.stopPad(i);
                             LoopsActivity.this.loopPlaying[i] = false;
-                            if (LoopsActivity.this.loopPads[i] != null) {
-                                LoopsActivity.this.loopPads[i].setBackgroundResource(
-                                    R.drawable.pad_black_selector);
-                            }
+                            LoopsActivity.this.updatePadLabel(i); // keep drum-mode orange
                         }
                     }
                 }
@@ -1004,8 +999,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.audioEngine.stopAll();
             for (int i = 0; i < 8; i++) {
                 this.loopPlaying[i] = false;
-                if (this.loopPads[i] != null)
-                    this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                updatePadLabel(i);   // respect per-pad drum/loop mode indicator
             }
         }
         if (this.txtLoopStatus != null) {
@@ -1160,7 +1154,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             if (LoopsActivity.this.loopPlaying[i]) {
                                 LoopsActivity.this.audioEngine.stopPad(i);
                                 LoopsActivity.this.loopPlaying[i] = false;
-                                LoopsActivity.this.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
+                                LoopsActivity.this.updatePadLabel(i); // keep drum-mode orange
                             }
                         }
                     }
@@ -1319,6 +1313,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         this.loopSamples[index] = null;
         this.loopUris[index] = null;
+        // Cleared pad has no sample — force dark background regardless of mode
+        this.padDrumMode[index] = false;
+        prefs.edit().putBoolean("pad_drum_mode_" + index, false).apply();
         this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
         saveLoopsToMemory();
         Toast.makeText(this, "Loop " + (index + 1) + " Cleared!", 0).show();
@@ -1555,10 +1552,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             this.loopSamples[i] = null;
             this.loopUris[i] = null;
-            Button button = this.loopPads[i];
-            if (button != null) {
-                button.setBackgroundResource(R.drawable.pad_black_selector);
-            }
+            // Kit load clears samples → reset drum mode and restore dark background
+            this.padDrumMode[i] = false;
+            prefs.edit().putBoolean("pad_drum_mode_" + i, false).apply();
+            updatePadLabel(i);
         }
         TextView textView = this.txtLoopStatus;
         if (textView != null) {
