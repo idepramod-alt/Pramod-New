@@ -16,6 +16,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
@@ -75,6 +76,12 @@ public class AudioEngine {
     // the audio output device changes, e.g. earphone plug/unplug).
     // Preserves all loaded sample data and active voice state.
     private native void nativeReinitStream(int nativeSR, int nativeBurst);
+
+    // ── Internal/system-audio recording (post-mix tap, no MediaProjection) ──
+    private native void nativeStartRecording();
+    private native void nativeStopRecording();
+    private native int  nativeGetRecordedFrameCount();
+    private native int  nativeGetRecordedPcm(short[] out);
 
     // Whether each optional JNI symbol is actually present in the .so
     private boolean hasNativePlayLoop             = false;
@@ -378,6 +385,131 @@ public class AudioEngine {
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "nativeReinitStream unavailable", e);
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  INTERNAL / SYSTEM-AUDIO RECORDING
+    //  Captures the engine's own mixed pad/loop output (post-mix tap in the
+    //  native render callback) — no microphone, no MediaProjection/screen-cast
+    //  permission required. `trackIndex` is only used by the caller for
+    //  naming/UI bookkeeping; the engine itself records one take at a time.
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Start capturing the app's mixed output. Call {@link #stopRecording()} to finish. */
+    public void startRecording(int trackIndex) {
+        if (!nativeAvailable) {
+            Log.e(TAG, "startRecording: native engine not available");
+            return;
+        }
+        try {
+            nativeStartRecording();
+            Log.i(TAG, "Internal-audio recording started (track " + trackIndex + ")");
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeStartRecording unavailable", e);
+        }
+    }
+
+    /** Stop the current internal-audio capture. Safe to call even if not recording. */
+    public void stopRecording() {
+        if (!nativeAvailable) return;
+        try {
+            nativeStopRecording();
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeStopRecording unavailable", e);
+        }
+    }
+
+    /** Number of PCM frames captured by the last/current internal-audio recording. */
+    public int getRecordedFrameCount(int trackIndex) {
+        if (!nativeAvailable) return 0;
+        try {
+            return nativeGetRecordedFrameCount();
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeGetRecordedFrameCount unavailable", e);
+            return 0;
+        }
+    }
+
+    /**
+     * Pull the captured internal-audio take out of the native engine and write
+     * it to a mono 16-bit WAV file at {@code outPath}.
+     * @return number of PCM frames written, or 0 on failure / nothing recorded.
+     */
+    public int saveTrackToWav(int trackIndex, String outPath) {
+        if (!nativeAvailable) return 0;
+        int frames;
+        try {
+            frames = nativeGetRecordedFrameCount();
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeGetRecordedFrameCount unavailable", e);
+            return 0;
+        }
+        if (frames <= 0) {
+            Log.w(TAG, "saveTrackToWav: nothing recorded for track " + trackIndex);
+            return 0;
+        }
+        short[] pcm = new short[frames];
+        int copied;
+        try {
+            copied = nativeGetRecordedPcm(pcm);
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "nativeGetRecordedPcm unavailable", e);
+            return 0;
+        }
+        if (copied <= 0) return 0;
+        try {
+            writeWavFile(outPath, pcm, copied, targetSampleRate, 1);
+            Log.i(TAG, "saveTrackToWav: track " + trackIndex + " → " + outPath
+                    + " (" + copied + " frames @ " + targetSampleRate + "Hz)");
+            return copied;
+        } catch (IOException e) {
+            Log.e(TAG, "saveTrackToWav: WAV write failed", e);
+            return 0;
+        }
+    }
+
+    /** Write mono 16-bit PCM samples as a standard WAV file. */
+    private void writeWavFile(String path, short[] pcm, int frameCount,
+                               int sampleRate, int channels) throws IOException {
+        int bitDepth    = 16;
+        int byteRate    = sampleRate * channels * bitDepth / 8;
+        int blockAlign  = channels * bitDepth / 8;
+        int dataBytes   = frameCount * blockAlign;
+        RandomAccessFile raf = new RandomAccessFile(path, "rw");
+        try {
+            raf.setLength(0);
+            raf.write("RIFF".getBytes());
+            writeIntLE(raf, 36 + dataBytes);
+            raf.write("WAVE".getBytes());
+            raf.write("fmt ".getBytes());
+            writeIntLE(raf, 16);
+            writeShortLE(raf, (short) 1); // PCM
+            writeShortLE(raf, (short) channels);
+            writeIntLE(raf, sampleRate);
+            writeIntLE(raf, byteRate);
+            writeShortLE(raf, (short) blockAlign);
+            writeShortLE(raf, (short) bitDepth);
+            raf.write("data".getBytes());
+            writeIntLE(raf, dataBytes);
+            byte[] bytes = new byte[dataBytes];
+            ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < frameCount; i++) bb.putShort(pcm[i]);
+            raf.write(bytes);
+        } finally {
+            raf.close();
+        }
+    }
+
+    private void writeIntLE(RandomAccessFile raf, int val) throws IOException {
+        raf.write(val & 0xFF);
+        raf.write((val >> 8) & 0xFF);
+        raf.write((val >> 16) & 0xFF);
+        raf.write((val >> 24) & 0xFF);
+    }
+
+    private void writeShortLE(RandomAccessFile raf, short val) throws IOException {
+        raf.write(val & 0xFF);
+        raf.write((val >> 8) & 0xFF);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
