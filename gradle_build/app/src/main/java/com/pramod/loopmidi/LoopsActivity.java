@@ -134,6 +134,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // true  = DRUM mode  (one-shot hit on every tap, like a real drum pad)
     // Long-press any pad to toggle its mode.
     private boolean[] padDrumMode = new boolean[8];  // default all LOOP
+    // ── Per-pad explicit-mode override ────────────────────────────────────────
+    // true  = this pad's LOOP/DRUM mode was explicitly set by the user (via the
+    //         ADD button or long-press) and must be respected no matter what the
+    //         global LOOP MODE / DRUM MODE toggle is set to.
+    // false = this pad has no override yet — it simply follows the global mode.
+    // Cleared when the pad's sample changes (clearLoop / kit change), since a
+    // fresh sample has no explicit user choice yet.
+    private boolean[] padModeOverride = new boolean[8];
 
     // ── Loop Mode / Drum Mode (Roland SPD-SX Pro style) ──────────────────────
     // LOOP MODE (default): pads continuously loop their sample, tap again to stop
@@ -253,8 +261,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }).start();
             return;
         }
-        // Per-pad mode: DRUM mode acts like one-shot (global isOneShotMode is an override too)
-        boolean isDrumPad = this.isGlobalDrumMode || this.padDrumMode[index] || this.isOneShotMode;
+        // Per-pad mode: if the user explicitly set this pad's mode (ADD button or
+        // long-press), that choice always wins over the global LOOP/DRUM toggle —
+        // otherwise the pad simply follows the global mode (isGlobalDrumMode /
+        // isOneShotMode), exactly like before an override was ever set.
+        boolean isDrumPad = this.padModeOverride[index]
+                ? this.padDrumMode[index]
+                : (this.isGlobalDrumMode || this.isOneShotMode);
         if (isDrumPad) {
             // DRUM / ONE-SHOT: play once on each tap, no auto-repeat.
             if (this.loopPlaying[index]) {
@@ -340,9 +353,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      */
     private void updatePadLabel(int index) {
         if (this.loopPads[index] == null) return;
+        // Effective mode: an explicit per-pad override always wins; otherwise the
+        // pad simply reflects whatever the global LOOP/DRUM toggle currently is.
+        boolean effectiveDrum = this.padModeOverride[index]
+                ? this.padDrumMode[index]
+                : (this.isGlobalDrumMode || this.isOneShotMode);
         if (this.loopPlaying[index]) {
             // Playing state handled by the caller (blue glow already set on play)
-        } else if (this.padDrumMode[index]) {
+        } else if (effectiveDrum) {
             this.loopPads[index].setBackgroundResource(R.drawable.pad_orange_selector);
         } else {
             this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
@@ -768,6 +786,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         for (int i = 0; i < 8; i++) {
             this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
             this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_" + i, false);
+            this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_" + i, false);
         }
         this.isMasterVolumeMode = this.prefs.getBoolean("master_vol_mode", true);
         SeekBar seekBar = this.seekMasterVolume;
@@ -984,6 +1003,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         public void onClick(DialogInterface d2, int modeIndex) {
                                             boolean isDrum = (modeIndex == 1);
                                             LoopsActivity.this.padDrumMode[padIndex] = isDrum;
+                                            // Explicit choice — this pad now overrides the global
+                                            // LOOP/DRUM toggle and keeps this exact mode until the
+                                            // user changes it again here or via long-press.
+                                            LoopsActivity.this.padModeOverride[padIndex] = true;
                                             // Drum mode is one-shot only — stop the pad if it was mid-loop,
                                             // same as the long-press toggle does, so state never contradicts UI.
                                             if (isDrum && LoopsActivity.this.loopPlaying[padIndex]) {
@@ -994,6 +1017,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                             }
                                             LoopsActivity.this.prefs.edit()
                                                 .putBoolean("pad_drum_mode_" + padIndex, isDrum)
+                                                .putBoolean("pad_mode_override_" + padIndex, true)
                                                 .apply();
                                             LoopsActivity.this.updatePadLabel(padIndex);
                                             Toast.makeText(LoopsActivity.this,
@@ -1430,14 +1454,26 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
             // Long-press: toggle this pad between LOOP mode and DRUM mode
             this.loopPads[i].setOnLongClickListener(v -> {
-                padDrumMode[index] = !padDrumMode[index];
+                // Long-press toggles the pad's EFFECTIVE mode (override-aware), so
+                // toggling always flips what the pad is actually doing right now —
+                // not just the raw padDrumMode flag underneath a global override.
+                boolean currentlyDrum = padModeOverride[index]
+                        ? padDrumMode[index]
+                        : (isGlobalDrumMode || isOneShotMode);
+                padDrumMode[index] = !currentlyDrum;
+                // Explicit choice — this pad now overrides the global LOOP/DRUM
+                // toggle and keeps this exact mode until changed again.
+                padModeOverride[index] = true;
                 // Stop the pad if it was looping — drum mode is one-shot only
                 if (padDrumMode[index] && loopPlaying[index]) {
                     if (audioEngine != null) audioEngine.stopPad(index);
                     loopPlaying[index] = false;
                 }
                 updatePadLabel(index);
-                prefs.edit().putBoolean("pad_drum_mode_" + index, padDrumMode[index]).apply();
+                prefs.edit()
+                    .putBoolean("pad_drum_mode_" + index, padDrumMode[index])
+                    .putBoolean("pad_mode_override_" + index, true)
+                    .apply();
                 String modeStr = padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
                 txtLoopStatus.setText("PAD " + (index + 1) + " → " + modeStr + " MODE (long-press to toggle)");
                 return true;   // consume the long-press (don't fire the tap handler)
@@ -1496,9 +1532,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         this.loopSamples[index] = null;
         this.loopUris[index] = null;
-        // Cleared pad has no sample — force dark background regardless of mode
+        // Cleared pad has no sample — force dark background regardless of mode,
+        // and drop any explicit override so a freshly loaded sample starts out
+        // following the global LOOP/DRUM mode again.
         this.padDrumMode[index] = false;
-        prefs.edit().putBoolean("pad_drum_mode_" + index, false).apply();
+        this.padModeOverride[index] = false;
+        prefs.edit()
+            .putBoolean("pad_drum_mode_" + index, false)
+            .putBoolean("pad_mode_override_" + index, false)
+            .apply();
         this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
         saveLoopsToMemory();
         Toast.makeText(this, "Loop " + (index + 1) + " Cleared!", 0).show();
@@ -1735,9 +1777,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             this.loopSamples[i] = null;
             this.loopUris[i] = null;
-            // Kit load clears samples → reset drum mode and restore dark background
+            // Kit load clears samples → reset drum mode/override and restore dark background
             this.padDrumMode[i] = false;
-            prefs.edit().putBoolean("pad_drum_mode_" + i, false).apply();
+            this.padModeOverride[i] = false;
+            prefs.edit()
+                .putBoolean("pad_drum_mode_" + i, false)
+                .putBoolean("pad_mode_override_" + i, false)
+                .apply();
             updatePadLabel(i);
         }
         TextView textView = this.txtLoopStatus;
