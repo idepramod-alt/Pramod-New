@@ -2247,12 +2247,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .setView(dialogScroll)
             .setNegativeButton("CLOSE", null);
         recDialog = builder.create();
-        // Closing the dialog (CLOSE button, back press, or tap-outside) must not
-        // leave an AudioRecord thread or MediaProjection session running.
+        // Closing the dialog (CLOSE button, back press, or tap-outside — e.g. to
+        // go tap pads while a track is recording) must NOT stop an in-progress
+        // recording. Recording only stops when the user explicitly presses
+        // ⏹ STOP inside this dialog. We still stop playback preview here, since
+        // that is dialog-local UI, not something the user expects to keep
+        // running invisibly in the background.
         recDialog.setOnDismissListener(dlg -> {
-            if (isRecordingTrack) stopTrackRecording();
             stopMediaPlayer();
-            stopSystemAudioCapture();
+            if (!isRecordingTrack) stopSystemAudioCapture();
         });
 
         // Listeners
