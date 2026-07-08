@@ -265,9 +265,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // long-press), that choice always wins over the global LOOP/DRUM toggle —
         // otherwise the pad simply follows the global mode (isGlobalDrumMode /
         // isOneShotMode), exactly like before an override was ever set.
+        boolean effectiveDrumMode = this.padModeOverride[index]
+                ? this.padDrumMode[index]
+                : this.isGlobalDrumMode;
         boolean isDrumPad = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
+        // Real DRUM MODE and ONE-SHOT MODE use two different choke targets:
+        //   - DRUM MODE: each pad is its own independent voice (chokeGroup = index+1
+        //     below), so drum rolls across different pads never interrupt each other —
+        //     only retapping the SAME pad cuts its own previous hit.
+        //   - ONE-SHOT MODE (and not actually Drum Mode): its choke exists to let a
+        //     one-shot hit cut off a currently-RUNNING LOOP, so it targets loop
+        //     playback specifically, not other pads' drum/one-shot hits.
+        boolean isOneShotTriggered = isDrumPad && !effectiveDrumMode;
         if (isDrumPad) {
             // DRUM / ONE-SHOT: play once on each tap, no auto-repeat.
             if (this.loopPlaying[index]) {
@@ -281,6 +292,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // sample — the "mix-up"/garbled sound instead of a clean one-shot retrigger.
             this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
+            if (isOneShotTriggered) {
+                // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
+                // tap, regardless of Multi-Pad mode — a one-shot hit should always be
+                // able to stop a running loop, that is the point of its choke.
+                for (int i = 0; i < 8; i++) {
+                    if (this.loopPlaying[i]) {
+                        this.audioEngine.stopPad(i);
+                        this.loopPlaying[i] = false;
+                        updatePadLabel(i);
+                    }
+                }
+            }
             if (!this.isMultiMode) {
                 // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
                 // one-shot hits never set loopPlaying=true, so gating this on that flag
