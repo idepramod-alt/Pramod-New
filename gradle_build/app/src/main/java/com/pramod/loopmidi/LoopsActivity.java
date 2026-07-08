@@ -35,8 +35,12 @@ import android.widget.Toast;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.documentfile.provider.DocumentFile;
 import com.pramod.loopmidi.AudioEngine;
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
+import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.AudioRecord;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
 import android.util.Log;
@@ -165,6 +169,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private static final int         REC_SAMPLE_RATE  = 44100;
     // Dialog reference so we can refresh its UI from background threads
     private android.app.AlertDialog  recDialog        = null;
+    // ── System-audio capture (Android 10+) ───────────────────────────────────
+    private MediaProjectionManager   mpManager        = null;
+    private MediaProjection          mediaProjection  = null;
+    private static final int         REQ_MEDIA_PROJECTION = 9002;
     // Debounce handler: prevents flooding the native command queue when sliders
     // are dragged (onProgressChanged fires 60+ times/sec). Audio update fires
     // 40ms after the last slider move; UI labels update immediately as before.
@@ -456,6 +464,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             super.onActivityResult(requestCode, resultCode, data);
             return;
         }
+        if (requestCode == REQ_MEDIA_PROJECTION) {
+            if (resultCode == RESULT_OK && data != null && this.mpManager != null
+                    && android.os.Build.VERSION.SDK_INT >= 29) {
+                this.mediaProjection = this.mpManager.getMediaProjection(resultCode, data);
+                Toast.makeText(this, "🔊 System audio ready — ab REC dabao", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "System audio permission nahi mila", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
         Uri data2 = data.getData();
         if (data2 == null) {
             super.onActivityResult(requestCode, resultCode, data);
@@ -716,6 +734,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
+        // System-audio capture manager (Android 10+)
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            this.mpManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        }
         // Restore global drum mode from prefs
         this.isGlobalDrumMode = this.prefs.getBoolean("global_drum_mode", false);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
@@ -917,27 +939,46 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
-        // ── ADD button: load audio into currently selected pad ────────────────
+        // ── ADD button: pick a pad, then assign LOOP MODE or DRUM MODE to it ───
         if (this.btnAddLoop != null) {
             this.btnAddLoop.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    // Show a quick picker: which pad to load into?
-                    String[] padNames = new String[8];
-                    for (int i = 0; i < 8; i++) padNames[i] = "PAD " + (i + 1);
+                    // Step 1: which pad?
+                    final String[] padNames = new String[8];
+                    for (int i = 0; i < 8; i++) {
+                        padNames[i] = "PAD " + (i + 1) + "  —  " +
+                            (LoopsActivity.this.padDrumMode[i] ? "🥁 DRUM" : "🔁 LOOP");
+                    }
                     new android.app.AlertDialog.Builder(LoopsActivity.this)
-                        .setTitle("Add Audio — Select Pad")
+                        .setTitle("Pad Select Karo")
                         .setItems(padNames, new DialogInterface.OnClickListener() {
                             @Override
-                            public void onClick(DialogInterface d, int which) {
-                                LoopsActivity.this.selectedPad = which;
-                                // Exact same Intent as original showEditOptions "Select Loop Audio"
-                                Intent intent = new Intent("android.intent.action.OPEN_DOCUMENT");
-                                intent.addCategory("android.intent.category.OPENABLE");
-                                intent.setType("audio/*");
-                                intent.addFlags(1);  // FLAG_GRANT_READ_URI_PERMISSION
-                                intent.addFlags(64); // FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-                                LoopsActivity.this.startActivityForResult(intent, REQ_PICK_LOOP_WAV);
+                            public void onClick(DialogInterface d, final int padIndex) {
+                                // Step 2: which mode for this pad?
+                                final String[] modes = {
+                                    "🔁 LOOP MODE — continuous loop, tap to stop",
+                                    "🥁 DRUM MODE — one-shot hit on every tap"
+                                };
+                                new android.app.AlertDialog.Builder(LoopsActivity.this)
+                                    .setTitle("PAD " + (padIndex + 1) + " — Mode Choose Karo")
+                                    .setItems(modes, new DialogInterface.OnClickListener() {
+                                        @Override
+                                        public void onClick(DialogInterface d2, int modeIndex) {
+                                            boolean isDrum = (modeIndex == 1);
+                                            LoopsActivity.this.padDrumMode[padIndex] = isDrum;
+                                            LoopsActivity.this.prefs.edit()
+                                                .putBoolean("pad_drum_mode_" + padIndex, isDrum)
+                                                .apply();
+                                            LoopsActivity.this.updatePadLabel(padIndex);
+                                            Toast.makeText(LoopsActivity.this,
+                                                "PAD " + (padIndex + 1) + " → " +
+                                                    (isDrum ? "🥁 DRUM MODE" : "🔁 LOOP MODE"),
+                                                Toast.LENGTH_SHORT).show();
+                                        }
+                                    })
+                                    .setNegativeButton("Cancel", null)
+                                    .show();
                             }
                         })
                         .setNegativeButton("Cancel", null)
@@ -2018,6 +2059,53 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             : trackCount + " track(s) recorded");
         root.addView(tvStatus);
 
+        // ── Source selector: MIC vs SYSTEM (internal) audio ─────────────────────
+        final boolean[] useSystemAudio = { false };
+        android.widget.LinearLayout srcRow = new android.widget.LinearLayout(this);
+        srcRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        srcRow.setPadding(0, 0, 0, 12);
+
+        final Button btnSrcMic = new Button(this);
+        btnSrcMic.setText("🎤 MIC");
+        btnSrcMic.setBackgroundColor(0xFF0055CC);
+        btnSrcMic.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams micLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        micLP.setMargins(0, 0, 6, 0);
+        btnSrcMic.setLayoutParams(micLP);
+
+        final Button btnSrcSys = new Button(this);
+        btnSrcSys.setText("🔊 SYSTEM (internal)");
+        btnSrcSys.setBackgroundColor(0xFF333333);
+        btnSrcSys.setTextColor(0xFFFFFFFF);
+        btnSrcSys.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        btnSrcMic.setOnClickListener(vv -> {
+            useSystemAudio[0] = false;
+            btnSrcMic.setBackgroundColor(0xFF0055CC);
+            btnSrcSys.setBackgroundColor(0xFF333333);
+            tvStatus.setText("🎤 MIC source selected");
+        });
+        btnSrcSys.setOnClickListener(vv -> {
+            if (android.os.Build.VERSION.SDK_INT < 29) {
+                Toast.makeText(this, "System audio capture sirf Android 10+ pe chalta hai", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            useSystemAudio[0] = true;
+            btnSrcSys.setBackgroundColor(0xFF006600);
+            btnSrcMic.setBackgroundColor(0xFF333333);
+            if (mediaProjection == null && mpManager != null) {
+                tvStatus.setText("🔊 System audio permission maang rahe hain...");
+                startActivityForResult(mpManager.createScreenCaptureIntent(), REQ_MEDIA_PROJECTION);
+            } else {
+                tvStatus.setText("🔊 SYSTEM (internal) source selected");
+            }
+        });
+
+        srcRow.addView(btnSrcMic);
+        srcRow.addView(btnSrcSys);
+        root.addView(srcRow);
+
         // ── Track list ────────────────────────────────────────────────────────
         final android.widget.ScrollView sv = new android.widget.ScrollView(this);
         final android.widget.LinearLayout trackList = new android.widget.LinearLayout(this);
@@ -2094,7 +2182,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 Toast.makeText(this, "Pehle STOP karo!", Toast.LENGTH_SHORT).show();
                 return;
             }
-            startTrackRecording(btnRecStart, tvStatus);
+            if (useSystemAudio[0] && mediaProjection == null) {
+                Toast.makeText(this, "System audio permission pehle do — 🔊 SYSTEM button dabao", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            startTrackRecording(btnRecStart, tvStatus, useSystemAudio[0]);
         });
 
         btnRecStop.setOnClickListener(v -> {
@@ -2216,23 +2308,50 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
-    /** Start recording a new track using AudioRecord (PCM → WAV). */
-    private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus) {
-        int minBuf = AudioRecord.getMinBufferSize(
-            REC_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+    /** Start recording a new track using AudioRecord (PCM → WAV).
+     *  @param useSystemAudio true = capture internal/system playback audio (Android 10+,
+     *                        requires an active MediaProjection); false = record from MIC. */
+    private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus, boolean useSystemAudio) {
+        // System audio capture comes back as stereo; mic recording stays mono.
+        final boolean systemAudio = useSystemAudio && mediaProjection != null
+            && android.os.Build.VERSION.SDK_INT >= 29;
+        final int channelMask = systemAudio ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
+        final int channelCount = systemAudio ? 2 : 1;
+
+        int minBuf = AudioRecord.getMinBufferSize(REC_SAMPLE_RATE, channelMask, AudioFormat.ENCODING_PCM_16BIT);
         if (minBuf <= 0) minBuf = 4096;
         final int bufSize = Math.max(minBuf, 8192);
         final String outPath = new File(getFilesDir(),
             "track_" + System.currentTimeMillis() + ".wav").getAbsolutePath();
         try {
-            audioRecord = new AudioRecord(
-                android.media.MediaRecorder.AudioSource.MIC,
-                REC_SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufSize);
+            if (systemAudio) {
+                AudioPlaybackCaptureConfiguration config =
+                    new AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                        .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                        .build();
+                audioRecord = new AudioRecord.Builder()
+                    .setAudioFormat(new AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(REC_SAMPLE_RATE)
+                        .setChannelMask(channelMask)
+                        .build())
+                    .setBufferSizeInBytes(bufSize)
+                    .setAudioPlaybackCaptureConfig(config)
+                    .build();
+            } else {
+                audioRecord = new AudioRecord(
+                    android.media.MediaRecorder.AudioSource.MIC,
+                    REC_SAMPLE_RATE,
+                    channelMask,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufSize);
+            }
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                Toast.makeText(this, "AudioRecord init failed! Mic blocked?", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, systemAudio
+                    ? "System audio capture init failed!" : "AudioRecord init failed! Mic blocked?",
+                    Toast.LENGTH_LONG).show();
                 audioRecord.release(); audioRecord = null;
                 return;
             }
@@ -2244,10 +2363,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         isRecordingTrack = true;
         btnRecStart.setText("⏺ RECORDING...");
         btnRecStart.setBackgroundColor(0xFFFF0000);
-        tvStatus.setText("🔴 Recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
+        tvStatus.setText((systemAudio ? "🔊 System audio" : "🎤 Mic") +
+            " recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
 
         final AudioRecord ar = audioRecord;
         final int buf = bufSize;
+        final int channels = channelCount;
         recordThread = new Thread(() -> {
             byte[] buffer = new byte[buf];
             java.io.ByteArrayOutputStream pcmOut = new java.io.ByteArrayOutputStream();
@@ -2264,11 +2385,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // Write WAV file
             try {
                 byte[] pcm = pcmOut.toByteArray();
-                writeWavFile(outPath, pcm, REC_SAMPLE_RATE, 1, 16);
+                writeWavFile(outPath, pcm, REC_SAMPLE_RATE, channels, 16);
                 new Handler(Looper.getMainLooper()).post(() -> {
                     trackCount++;
                     trackPaths.add(outPath);
-                    Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM)");
+                    Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM, " + channels + "ch)");
                 });
             } catch (Exception e) {
                 Log.e("LoopsRec", "WAV write failed", e);
