@@ -564,10 +564,17 @@ jobs:
       - name: Fix drum rolling - no-choke for rapid drum hits
         run: |
           JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          grep -q 'chokeGroup=0.*drum\|chokeGroup = 0.*drum' "$JAVA" 2>/dev/null && { echo "already patched"; exit 0; }
-          sed -i 's/playSample(index, sampleData, effectiveVolume(index), this\.currentSpeed, this\.currentPitch, 0, false, 0\.0f, 0\.0f, 0\.0f, 0\.0f, 0\.0f, index + 1, 0\.0f, 0\.0f);/playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f); \/\/ chokeGroup=0: drum rolls/g' "$JAVA"
-          grep -n 'chokeGroup' "$JAVA" | head -3 || true
-          echo "OK: drum rolling fix done"
+          # Superseded: LoopsActivity.java now passes chokeGroup = index + 1 for
+          # every drum/one-shot hit (one unique choke group per pad). That is the
+          # correct, intentional design — retapping the SAME pad chokes (cuts off)
+          # its own previous still-ringing hit, while different pads never choke
+          # each other, so drum rolls across pads still work. This step used to
+          # force chokeGroup back to 0 (= choke disabled entirely, per the native
+          # engine's `if (chokeGroup > 0)` guard), which silently broke same-pad
+          # retrigger choke on every build. Left as a no-op so old builds/history
+          # stay understandable; do not reintroduce the chokeGroup=0 rewrite.
+          grep -n 'index + 1' "$JAVA" | grep -i chokeGroup -A0 2>/dev/null || grep -n 'chokeGroup' "$JAVA" | head -3 || true
+          echo "OK: per-pad choke (index + 1) preserved, no rewrite applied"
 
       - name: Fix drum latency - AAudio API + Sonification content type
         run: |
@@ -1036,7 +1043,7 @@ jobs:
           AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
           LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
-          echo "=== Drum rolling fix (chokeGroup=0) ==="
+          echo "=== Per-pad choke (chokeGroup = index + 1) ==="
           grep -n 'chokeGroup' "$LA" | head -2 || echo "not found"
           echo "=== Latency (AAudio) ==="
           grep -n 'setAudioApi' "$CPP" | head -2 || echo "not found"
