@@ -2498,10 +2498,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { ar.release(); } catch (Exception ignored) {}
             // Write WAV file
             try {
-                byte[] pcm = pcmOut.toByteArray();
+                byte[] rawPcm = pcmOut.toByteArray();
                 // Opt-in ECHO (delay) effect for MIC recordings only. When OFF, this is a
                 // no-op and the file is written exactly as before (normal/dry recording).
-                if (useEcho) pcm = applyEchoEffect(pcm, REC_SAMPLE_RATE);
+                final byte[] pcm = useEcho ? applyEchoEffect(rawPcm, REC_SAMPLE_RATE) : rawPcm;
                 writeWavFile(outPath, pcm, REC_SAMPLE_RATE, channels, 16);
                 new Handler(Looper.getMainLooper()).post(() -> {
                     trackCount++;
