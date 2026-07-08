@@ -460,10 +460,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     @Override // android.app.Activity
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (resultCode != -1 || data == null) {
-            super.onActivityResult(requestCode, resultCode, data);
-            return;
-        }
+        // Handle media-projection response BEFORE the generic OK/data guard below,
+        // since a denial arrives as RESULT_CANCELED with a null Intent and must
+        // still be reported to the user instead of being silently swallowed.
         if (requestCode == REQ_MEDIA_PROJECTION) {
             if (resultCode == RESULT_OK && data != null && this.mpManager != null
                     && android.os.Build.VERSION.SDK_INT >= 29) {
@@ -472,6 +471,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } else {
                 Toast.makeText(this, "System audio permission nahi mila", Toast.LENGTH_SHORT).show();
             }
+            return;
+        }
+        if (resultCode != -1 || data == null) {
+            super.onActivityResult(requestCode, resultCode, data);
             return;
         }
         Uri data2 = data.getData();
@@ -541,12 +544,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
+    /** Release the MediaProjection session (system-audio capture token). Idempotent. */
+    private void stopSystemAudioCapture() {
+        if (this.mediaProjection != null) {
+            try { this.mediaProjection.stop(); } catch (Exception ignored) {}
+            this.mediaProjection = null;
+        }
+    }
+
     @Override // android.app.Activity
     protected void onDestroy() {
         super.onDestroy();
         teardownAudioRouting();
         // Stop any active track recording
         stopTrackRecording();
+        stopSystemAudioCapture();
         if (this.mediaPlayer != null) {
             try { this.mediaPlayer.release(); } catch (Exception ignored) {}
             this.mediaPlayer = null;
@@ -967,6 +979,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         public void onClick(DialogInterface d2, int modeIndex) {
                                             boolean isDrum = (modeIndex == 1);
                                             LoopsActivity.this.padDrumMode[padIndex] = isDrum;
+                                            // Drum mode is one-shot only — stop the pad if it was mid-loop,
+                                            // same as the long-press toggle does, so state never contradicts UI.
+                                            if (isDrum && LoopsActivity.this.loopPlaying[padIndex]) {
+                                                if (LoopsActivity.this.audioEngine != null) {
+                                                    LoopsActivity.this.audioEngine.stopPad(padIndex);
+                                                }
+                                                LoopsActivity.this.loopPlaying[padIndex] = false;
+                                            }
                                             LoopsActivity.this.prefs.edit()
                                                 .putBoolean("pad_drum_mode_" + padIndex, isDrum)
                                                 .apply();
@@ -2175,6 +2195,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .setView(root)
             .setNegativeButton("CLOSE", null);
         recDialog = builder.create();
+        // Closing the dialog (CLOSE button, back press, or tap-outside) must not
+        // leave an AudioRecord thread or MediaProjection session running.
+        recDialog.setOnDismissListener(dlg -> {
+            if (isRecordingTrack) stopTrackRecording();
+            stopMediaPlayer();
+            stopSystemAudioCapture();
+        });
 
         // Listeners
         btnRecStart.setOnClickListener(v -> {
