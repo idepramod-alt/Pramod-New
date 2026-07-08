@@ -167,6 +167,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private java.util.ArrayList<String> trackPaths   = new java.util.ArrayList<>();
     private int                      trackCount       = 0;
     private static final int         REC_SAMPLE_RATE  = 44100;
+    // Multi-Track dialog's "internal (app) audio" recording — uses the native
+    // audio engine's own mix buffer directly, so it never needs mic or
+    // MediaProjection/screen-cast permission.
+    private boolean                  dialogEngineRecording = false;
+    private int                      dialogEngineRecTrack  = 0;
     // Dialog reference so we can refresh its UI from background threads
     private android.app.AlertDialog  recDialog        = null;
     // ── System-audio capture (Android 10+) ───────────────────────────────────
@@ -2106,20 +2111,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             btnSrcSys.setBackgroundColor(0xFF333333);
             tvStatus.setText("🎤 MIC source selected");
         });
+        // "SYSTEM (internal)" now records the app's own mixed pad/loop output
+        // directly from the audio engine — no MediaProjection / screen-cast
+        // permission dialog is ever requested for this.
         btnSrcSys.setOnClickListener(vv -> {
-            if (android.os.Build.VERSION.SDK_INT < 29) {
-                Toast.makeText(this, "System audio capture sirf Android 10+ pe chalta hai", Toast.LENGTH_SHORT).show();
-                return;
-            }
             useSystemAudio[0] = true;
             btnSrcSys.setBackgroundColor(0xFF006600);
             btnSrcMic.setBackgroundColor(0xFF333333);
-            if (mediaProjection == null && mpManager != null) {
-                tvStatus.setText("🔊 System audio permission maang rahe hain...");
-                startActivityForResult(mpManager.createScreenCaptureIntent(), REQ_MEDIA_PROJECTION);
-            } else {
-                tvStatus.setText("🔊 SYSTEM (internal) source selected");
-            }
+            tvStatus.setText("🔊 SYSTEM (internal) source selected");
         });
 
         srcRow.addView(btnSrcMic);
@@ -2214,10 +2213,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnRecStart.setOnClickListener(v -> {
             if (isRecordingTrack) {
                 Toast.makeText(this, "Pehle STOP karo!", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (useSystemAudio[0] && mediaProjection == null) {
-                Toast.makeText(this, "System audio permission pehle do — 🔊 SYSTEM button dabao", Toast.LENGTH_SHORT).show();
                 return;
             }
             startTrackRecording(btnRecStart, tvStatus, useSystemAudio[0]);
@@ -2346,11 +2341,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      *  @param useSystemAudio true = capture internal/system playback audio (Android 10+,
      *                        requires an active MediaProjection); false = record from MIC. */
     private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus, boolean useSystemAudio) {
-        // System audio capture comes back as stereo; mic recording stays mono.
-        final boolean systemAudio = useSystemAudio && mediaProjection != null
-            && android.os.Build.VERSION.SDK_INT >= 29;
-        final int channelMask = systemAudio ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
-        final int channelCount = systemAudio ? 2 : 1;
+        if (useSystemAudio) {
+            // "Internal" source: capture the app's own mixed pad/loop output
+            // straight from the audio engine — no OS-level permission needed,
+            // no MediaProjection / screen-cast prompt.
+            startInternalEngineRecording(btnRecStart, tvStatus);
+            return;
+        }
+
+        final int channelMask = AudioFormat.CHANNEL_IN_MONO;
+        final int channelCount = 1;
 
         int minBuf = AudioRecord.getMinBufferSize(REC_SAMPLE_RATE, channelMask, AudioFormat.ENCODING_PCM_16BIT);
         if (minBuf <= 0) minBuf = 4096;
@@ -2358,34 +2358,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final String outPath = new File(getFilesDir(),
             "track_" + System.currentTimeMillis() + ".wav").getAbsolutePath();
         try {
-            if (systemAudio) {
-                AudioPlaybackCaptureConfiguration config =
-                    new AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
-                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                        .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                        .build();
-                audioRecord = new AudioRecord.Builder()
-                    .setAudioFormat(new AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(REC_SAMPLE_RATE)
-                        .setChannelMask(channelMask)
-                        .build())
-                    .setBufferSizeInBytes(bufSize)
-                    .setAudioPlaybackCaptureConfig(config)
-                    .build();
-            } else {
-                audioRecord = new AudioRecord(
-                    android.media.MediaRecorder.AudioSource.MIC,
-                    REC_SAMPLE_RATE,
-                    channelMask,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    bufSize);
-            }
+            audioRecord = new AudioRecord(
+                android.media.MediaRecorder.AudioSource.MIC,
+                REC_SAMPLE_RATE,
+                channelMask,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufSize);
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                Toast.makeText(this, systemAudio
-                    ? "System audio capture init failed!" : "AudioRecord init failed! Mic blocked?",
-                    Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "AudioRecord init failed! Mic blocked?", Toast.LENGTH_LONG).show();
                 audioRecord.release(); audioRecord = null;
                 return;
             }
@@ -2397,8 +2377,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         isRecordingTrack = true;
         btnRecStart.setText("⏺ RECORDING...");
         btnRecStart.setBackgroundColor(0xFFFF0000);
-        tvStatus.setText((systemAudio ? "🔊 System audio" : "🎤 Mic") +
-            " recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
+        tvStatus.setText("🎤 Mic recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
 
         final AudioRecord ar = audioRecord;
         final int buf = bufSize;
@@ -2437,6 +2416,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     /** Stop the current track recording. */
     public void stopTrackRecording() {
         isRecordingTrack = false;
+        if (dialogEngineRecording) {
+            stopInternalEngineRecording();
+            return;
+        }
         if (audioRecord != null) {
             try { audioRecord.stop(); } catch (Exception ignored) {}
         }
@@ -2445,6 +2428,45 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { recordThread.join(2000); } catch (InterruptedException ignored) {}
             recordThread = null;
         }
+    }
+
+    /**
+     * Start capturing the app's own mixed pad/loop output via the native audio
+     * engine (the same internal-audio mechanism the main REC button uses) —
+     * no microphone, no MediaProjection/screen-cast permission required.
+     */
+    private void startInternalEngineRecording(Button btnRecStart, android.widget.TextView tvStatus) {
+        if (this.audioEngine == null) {
+            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AudioEngine engine = this.audioEngine;
+        engine.startRecording(dialogEngineRecTrack);
+        dialogEngineRecording = true;
+        isRecordingTrack = true;
+        btnRecStart.setText("⏺ RECORDING...");
+        btnRecStart.setBackgroundColor(0xFFFF0000);
+        tvStatus.setText("🔊 Internal (app) audio recording Track " + (trackCount + 1) + " — STOP dabao jab ho jaye");
+    }
+
+    /** Stop the internal-engine capture and save it as a track WAV file. */
+    private void stopInternalEngineRecording() {
+        dialogEngineRecording = false;
+        if (this.audioEngine == null) return;
+        AudioEngine engine = this.audioEngine;
+        engine.stopRecording();
+        int frames = engine.getRecordedFrameCount(dialogEngineRecTrack);
+        if (frames > 0) {
+            String outPath = new File(getFilesDir(),
+                "track_" + System.currentTimeMillis() + ".wav").getAbsolutePath();
+            int written = engine.saveTrackToWav(dialogEngineRecTrack, outPath);
+            if (written > 0) {
+                trackCount++;
+                trackPaths.add(outPath);
+                Log.i("LoopsRec", "Internal-audio track saved → " + outPath + " (" + written + " frames)");
+            }
+        }
+        dialogEngineRecTrack = (dialogEngineRecTrack + 1) % 4;
     }
 
     /** Play a single track file with MediaPlayer. */
