@@ -124,6 +124,19 @@ public:
     float feedBuf[SCRATCH_SIZE];
     float readBuf[SCRATCH_SIZE];
 
+    // ── Internal/system-audio recording (post-mix tap) ─────────────────────
+    // Captures the engine's own mixed output (everything played through the
+    // pads/loops) so it can be saved as a track without MediaProjection or
+    // mic permission. The buffer is fully preallocated by startRecording()
+    // (on the main/binder thread) so the realtime audio callback never
+    // allocates memory — it only writes into pre-reserved slots via an
+    // atomic write index.
+    static const int RECORD_MAX_SECONDS = 300; // 5 minutes cap per take
+    std::vector<float>   recordBuffer;
+    std::atomic<size_t>  recordWritePos{0};
+    std::atomic<bool>    recordActive{false};
+    size_t               recordCapacity = 0;
+
     AudioEngineImpl() {
         memset(loopSonic, 0, sizeof(loopSonic));
         for (int i = 0; i < LOOP_VOICES; i++) {
@@ -315,7 +328,53 @@ public:
         for (int i = 0; i < numFrames; i++) {
             out[i] = tanhf(out[i]);
         }
+
+        // ── Internal/system-audio recording tap ─────────────────────────────
+        // Runs AFTER saturation so the captured take matches exactly what the
+        // listener hears. recordBuffer is preallocated (see startRecording),
+        // so this only ever writes into already-owned memory — no malloc,
+        // no lock, safe for the realtime thread.
+        if (recordActive.load(std::memory_order_relaxed)) {
+            size_t pos = recordWritePos.load(std::memory_order_relaxed);
+            size_t cap = recordCapacity;
+            float* dst = recordBuffer.data();
+            int n = numFrames;
+            if (pos + (size_t)n > cap) n = (int)(cap > pos ? cap - pos : 0);
+            for (int i = 0; i < n; i++) dst[pos + i] = out[i];
+            recordWritePos.store(pos + (size_t)n, std::memory_order_relaxed);
+        }
+
         return oboe::DataCallbackResult::Continue;
+    }
+
+    // ── Recording controls (called from main/binder thread only) ───────────
+    void startRecording() {
+        recordCapacity = (size_t)sampleRate * (size_t)RECORD_MAX_SECONDS;
+        recordBuffer.assign(recordCapacity, 0.f); // main-thread alloc, not RT
+        recordWritePos.store(0, std::memory_order_relaxed);
+        recordActive.store(true, std::memory_order_release);
+    }
+
+    void stopRecording() {
+        recordActive.store(false, std::memory_order_release);
+    }
+
+    int getRecordedFrameCount() {
+        return (int)recordWritePos.load(std::memory_order_acquire);
+    }
+
+    // Copies up to maxLen recorded frames (float -1..1 → 16-bit PCM) into out.
+    // Returns the number of frames actually copied.
+    int getRecordedPcm(short* out, int maxLen) {
+        int count = getRecordedFrameCount();
+        if (count > maxLen) count = maxLen;
+        for (int i = 0; i < count; i++) {
+            float s = recordBuffer[i];
+            if (s > 1.f) s = 1.f;
+            if (s < -1.f) s = -1.f;
+            out[i] = (short)(s * 32767.f);
+        }
+        return count;
     }
 
     // ── Process one command (called from audio thread) ────────────────────────
@@ -715,6 +774,38 @@ Java_com_pramod_loopmidi_AudioEngine_nativeReinitStream(
         JNIEnv* env, jobject obj, jint nativeSR, jint nativeBurst) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->init((int)nativeSR, (int)nativeBurst);
+}
+
+// ── Internal/system-audio recording (post-mix tap of the engine's own output) ──
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStartRecording(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->startRecording();
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStopRecording(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->stopRecording();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedFrameCount(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    return e ? (jint)e->getRecordedFrameCount() : 0;
+}
+
+// Fills `out` with up to out.length recorded PCM frames; returns count copied.
+JNIEXPORT jint JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeGetRecordedPcm(
+        JNIEnv* env, jobject obj, jshortArray out) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e || !out) return 0;
+    jsize len = env->GetArrayLength(out);
+    jshort* data = env->GetShortArrayElements(out, nullptr);
+    int copied = e->getRecordedPcm((short*)data, (int)len);
+    env->ReleaseShortArrayElements(out, data, 0);
+    return (jint)copied;
 }
 
 } // extern "C"
