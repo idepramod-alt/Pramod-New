@@ -285,12 +285,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 this.loopPlaying[index] = false;
                 updatePadLabel(index);
             }
-            // chokeGroup = index+1 (unique per pad) so retapping the SAME pad cuts off
-            // its previous still-playing instance before starting the new one. Without
-            // this, every tap grabbed a brand-new drum voice while the earlier instance
-            // kept ringing out, so repeated taps piled up overlapping copies of the same
-            // sample — the "mix-up"/garbled sound instead of a clean one-shot retrigger.
-            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, index + 1, 0.0f, 0.0f);
+            // chokeGroup: ONE-SHOT mode keeps index+1 (unique per pad) so retapping the
+            // SAME pad cuts off its previous still-playing instance — without this,
+            // repeated one-shot taps piled up overlapping copies of the same sample
+            // ("mix-up"/garbled sound instead of a clean retrigger).
+            // Real DRUM MODE instead uses chokeGroup = 0 (native engine's
+            // `if (chokeGroup > 0)` guard disables choke entirely for that call), so
+            // fast pad rolling / rapid re-hits on the same drum pad let each hit ring
+            // out fully instead of being cut off by the next hit.
+            int chokeGroup = effectiveDrumMode ? 0 : (index + 1);
+            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
             if (isOneShotTriggered) {
                 // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
@@ -2194,6 +2198,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         srcRow.addView(btnSrcSys);
         root.addView(srcRow);
 
+        // ── MIC-only ECHO (delay) toggle ─────────────────────────────────────
+        // Normal (dry, no-effect) mic recording stays the default/unchanged
+        // behavior — ECHO is an opt-in extra applied only when this toggle is
+        // ON and the source is MIC.
+        final boolean[] useEcho = { false };
+        final Button btnEcho = new Button(this);
+        btnEcho.setText("🔁 ECHO: OFF");
+        btnEcho.setBackgroundColor(0xFF333333);
+        btnEcho.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams echoLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        echoLP.setMargins(0, 0, 0, 12);
+        btnEcho.setLayoutParams(echoLP);
+        btnEcho.setOnClickListener(vv -> {
+            useEcho[0] = !useEcho[0];
+            btnEcho.setText(useEcho[0] ? "🔁 ECHO: ON" : "🔁 ECHO: OFF");
+            btnEcho.setBackgroundColor(useEcho[0] ? 0xFF8800CC : 0xFF333333);
+            tvStatus.setText(useEcho[0]
+                ? "🔁 Echo ON — agli MIC recording mein delay/echo lagega"
+                : "Echo OFF — normal (dry) recording");
+        });
+        root.addView(btnEcho);
+
         // ── Track list ────────────────────────────────────────────────────────
         final android.widget.ScrollView sv = new android.widget.ScrollView(this);
         final android.widget.LinearLayout trackList = new android.widget.LinearLayout(this);
@@ -2271,13 +2298,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .setNegativeButton("CLOSE", null);
         recDialog = builder.create();
         // Closing the dialog (CLOSE button, back press, or tap-outside — e.g. to
-        // go tap pads while a track is recording) must NOT stop an in-progress
-        // recording. Recording only stops when the user explicitly presses
-        // ⏹ STOP inside this dialog. We still stop playback preview here, since
-        // that is dialog-local UI, not something the user expects to keep
-        // running invisibly in the background.
+        // go tap pads while a track is recording, or while a recorded track is
+        // playing back) must NOT stop an in-progress recording OR an in-progress
+        // playback. Both only stop when the user explicitly presses ⏹ STOP (for
+        // recording) or ⏹ playback stop / track completes naturally (for
+        // playback) inside this dialog — closing the dialog just hides the UI,
+        // it keeps running in the background exactly like recording does.
         recDialog.setOnDismissListener(dlg -> {
-            stopMediaPlayer();
             if (!isRecordingTrack) stopSystemAudioCapture();
         });
 
@@ -2287,7 +2314,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 Toast.makeText(this, "Pehle STOP karo!", Toast.LENGTH_SHORT).show();
                 return;
             }
-            startTrackRecording(btnRecStart, tvStatus, useSystemAudio[0]);
+            startTrackRecording(btnRecStart, tvStatus, useSystemAudio[0], useEcho[0]);
         });
 
         btnRecStop.setOnClickListener(v -> {
@@ -2411,8 +2438,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     /** Start recording a new track using AudioRecord (PCM → WAV).
      *  @param useSystemAudio true = capture internal/system playback audio (Android 10+,
-     *                        requires an active MediaProjection); false = record from MIC. */
-    private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus, boolean useSystemAudio) {
+     *                        requires an active MediaProjection); false = record from MIC.
+     *  @param useEcho MIC-only opt-in: apply a delay/echo effect to the recorded take
+     *                 before saving. When false, recording is unchanged (normal, dry). */
+    private void startTrackRecording(Button btnRecStart, android.widget.TextView tvStatus, boolean useSystemAudio, boolean useEcho) {
         if (useSystemAudio) {
             // "Internal" source: capture the app's own mixed pad/loop output
             // straight from the audio engine — no OS-level permission needed,
@@ -2470,6 +2499,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // Write WAV file
             try {
                 byte[] pcm = pcmOut.toByteArray();
+                // Opt-in ECHO (delay) effect for MIC recordings only. When OFF, this is a
+                // no-op and the file is written exactly as before (normal/dry recording).
+                if (useEcho) pcm = applyEchoEffect(pcm, REC_SAMPLE_RATE);
                 writeWavFile(outPath, pcm, REC_SAMPLE_RATE, channels, 16);
                 new Handler(Looper.getMainLooper()).post(() -> {
                     trackCount++;
@@ -2625,6 +2657,51 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         raf.seek(4);
         writeIntLE(raf, (int)(totalSize - 8));
         raf.close();
+    }
+
+    /**
+     * Applies a simple delay/echo effect to 16-bit mono PCM (little-endian) audio.
+     * Opt-in only — used for MIC recordings when the ECHO toggle is ON in the
+     * multi-track recorder dialog. Normal (no-echo) recording never calls this.
+     *
+     * Implementation: classic feedback delay line — each output sample mixes the
+     * dry input with a decaying copy of itself from {@code delayMs} earlier,
+     * repeated via feedback so the echo tail naturally fades out.
+     */
+    private byte[] applyEchoEffect(byte[] pcm16leMono, int sampleRate) {
+        final int delayMs = 260;     // gap between each echo repeat
+        final float feedback = 0.35f; // how much of each echo feeds into the next repeat
+        final float wetMix = 0.45f;   // how loud the echo is relative to the dry signal
+
+        int sampleCount = pcm16leMono.length / 2;
+        short[] in = new short[sampleCount];
+        java.nio.ByteBuffer.wrap(pcm16leMono).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer().get(in);
+
+        int delaySamples = Math.max(1, (int) (sampleRate * (delayMs / 1000f)));
+        // Extend the output so the echo tail (a few repeats past the end of the
+        // dry recording) is fully audible instead of being cut off.
+        int tailSamples = delaySamples * 4;
+        float[] out = new float[sampleCount + tailSamples];
+
+        for (int i = 0; i < in.length; i++) out[i] += in[i];
+        for (int i = 0; i < out.length; i++) {
+            int di = i - delaySamples;
+            if (di >= 0) out[i] += out[di] * feedback * wetMix + (di < in.length ? in[di] * wetMix : 0f);
+        }
+
+        short[] result = new short[out.length];
+        for (int i = 0; i < out.length; i++) {
+            float v = out[i];
+            if (v > Short.MAX_VALUE) v = Short.MAX_VALUE;
+            if (v < Short.MIN_VALUE) v = Short.MIN_VALUE;
+            result[i] = (short) v;
+        }
+
+        byte[] outBytes = new byte[result.length * 2];
+        java.nio.ByteBuffer.wrap(outBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer().put(result);
+        return outBytes;
     }
 
     // ── Workflow-patch compatibility stubs ────────────────────────────────────

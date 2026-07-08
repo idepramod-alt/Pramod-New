@@ -564,17 +564,18 @@ jobs:
       - name: Fix drum rolling - no-choke for rapid drum hits
         run: |
           JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          # Superseded: LoopsActivity.java now passes chokeGroup = index + 1 for
-          # every drum/one-shot hit (one unique choke group per pad). That is the
-          # correct, intentional design — retapping the SAME pad chokes (cuts off)
-          # its own previous still-ringing hit, while different pads never choke
-          # each other, so drum rolls across pads still work. This step used to
-          # force chokeGroup back to 0 (= choke disabled entirely, per the native
-          # engine's `if (chokeGroup > 0)` guard), which silently broke same-pad
-          # retrigger choke on every build. Left as a no-op so old builds/history
-          # stay understandable; do not reintroduce the chokeGroup=0 rewrite.
-          grep -n 'index + 1' "$JAVA" | grep -i chokeGroup -A0 2>/dev/null || grep -n 'chokeGroup' "$JAVA" | head -3 || true
-          echo "OK: per-pad choke (index + 1) preserved, no rewrite applied"
+          # LoopsActivity.java now uses a mode-dependent chokeGroup for drum/one-shot
+          # hits:
+          #   - Real DRUM MODE -> chokeGroup = 0 (choke fully disabled, per the native
+          #     engine's `if (chokeGroup > 0)` guard), so fast pad rolling / rapid
+          #     re-hits on the same drum pad let each hit ring out fully instead of
+          #     being cut off by the next hit.
+          #   - ONE-SHOT MODE -> chokeGroup = index + 1 (unique per pad) is kept, so
+          #     retapping the SAME pad still chokes (cuts off) its own previous
+          #     still-ringing hit, while different pads never choke each other.
+          # LOOP mode is untouched — it never used chokeGroup and still doesn't.
+          grep -n 'effectiveDrumMode ? 0 : (index + 1)' "$JAVA" || { echo "ERROR: expected mode-dependent chokeGroup not found"; exit 1; }
+          echo "OK: drum-mode no-choke / one-shot per-pad choke confirmed"
 
       - name: Fix drum latency - AAudio API + Sonification content type
         run: |
