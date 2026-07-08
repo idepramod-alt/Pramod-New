@@ -2079,52 +2079,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             : trackCount + " track(s) recorded");
         root.addView(tvStatus);
 
-        // ── Source selector: MIC vs SYSTEM (internal) audio ─────────────────────
+        // ── Audio source: MIC only (system-audio / screen-capture flow removed —
+        //    this dialog now always records from the microphone, no screen-cast
+        //    permission is ever requested). ───────────────────────────────────
         final boolean[] useSystemAudio = { false };
-        android.widget.LinearLayout srcRow = new android.widget.LinearLayout(this);
-        srcRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        srcRow.setPadding(0, 0, 0, 12);
-
-        final Button btnSrcMic = new Button(this);
-        btnSrcMic.setText("🎤 MIC");
-        btnSrcMic.setBackgroundColor(0xFF0055CC);
-        btnSrcMic.setTextColor(0xFFFFFFFF);
-        android.widget.LinearLayout.LayoutParams micLP =
-            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        micLP.setMargins(0, 0, 6, 0);
-        btnSrcMic.setLayoutParams(micLP);
-
-        final Button btnSrcSys = new Button(this);
-        btnSrcSys.setText("🔊 SYSTEM (internal)");
-        btnSrcSys.setBackgroundColor(0xFF333333);
-        btnSrcSys.setTextColor(0xFFFFFFFF);
-        btnSrcSys.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
-
-        btnSrcMic.setOnClickListener(vv -> {
-            useSystemAudio[0] = false;
-            btnSrcMic.setBackgroundColor(0xFF0055CC);
-            btnSrcSys.setBackgroundColor(0xFF333333);
-            tvStatus.setText("🎤 MIC source selected");
-        });
-        btnSrcSys.setOnClickListener(vv -> {
-            if (android.os.Build.VERSION.SDK_INT < 29) {
-                Toast.makeText(this, "System audio capture sirf Android 10+ pe chalta hai", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            useSystemAudio[0] = true;
-            btnSrcSys.setBackgroundColor(0xFF006600);
-            btnSrcMic.setBackgroundColor(0xFF333333);
-            if (mediaProjection == null && mpManager != null) {
-                tvStatus.setText("🔊 System audio permission maang rahe hain...");
-                startActivityForResult(mpManager.createScreenCaptureIntent(), REQ_MEDIA_PROJECTION);
-            } else {
-                tvStatus.setText("🔊 SYSTEM (internal) source selected");
-            }
-        });
-
-        srcRow.addView(btnSrcMic);
-        srcRow.addView(btnSrcSys);
-        root.addView(srcRow);
 
         // ── Track list ────────────────────────────────────────────────────────
         final android.widget.ScrollView sv = new android.widget.ScrollView(this);
@@ -2190,9 +2148,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         root.addView(btnRow);
 
         // ── Build dialog ──────────────────────────────────────────────────────
+        // Wrap everything in an outer ScrollView so the REC / STOP / PLAY ALL /
+        // CLEAR ALL row can never be pushed off-screen (e.g. on short devices or
+        // when the track list grows) — the whole dialog scrolls instead of
+        // clipping the bottom row.
+        final android.widget.ScrollView dialogScroll = new android.widget.ScrollView(this);
+        dialogScroll.addView(root);
+
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
             .setTitle("🎙 Multi-Track Recorder")
-            .setView(root)
+            .setView(dialogScroll)
             .setNegativeButton("CLOSE", null);
         recDialog = builder.create();
         // Closing the dialog (CLOSE button, back press, or tap-outside) must not
