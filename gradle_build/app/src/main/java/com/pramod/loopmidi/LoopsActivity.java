@@ -308,7 +308,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             }
-            if (!this.isMultiMode) {
+            // Real DRUM MODE never chokes other pads, no matter what Multi-Pad mode
+            // (isMultiMode) is set to — every drum pad is fully independent so rolls
+            // across pads always ring out. Only ONE-SHOT mode (effectiveDrumMode ==
+            // false here) still uses isMultiMode to decide whether a new one-shot hit
+            // should stop other pads; real Drum Mode pads are excluded from this
+            // cross-pad stop loop entirely.
+            if (!effectiveDrumMode && !this.isMultiMode) {
                 // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
                 // one-shot hits never set loopPlaying=true, so gating this on that flag
                 // meant a still-ringing one-shot on another pad was NEVER actually choked
@@ -2413,6 +2419,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     .show();
             });
 
+            // Save this track's WAV out of app-private storage into public device
+            // storage (Music/LoopMidiRecordings) so it shows up in the file manager /
+            // other apps, survives app uninstall, and can be shared normally.
+            Button btnSave = new Button(this);
+            btnSave.setText("💾 SAVE");
+            btnSave.setBackgroundColor(0xFF996600);
+            btnSave.setTextColor(0xFFFFFFFF);
+            android.widget.LinearLayout.LayoutParams svLP2 =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            svLP2.setMargins(4, 0, 4, 0);
+            btnSave.setLayoutParams(svLP2);
+            btnSave.setOnClickListener(v -> saveTrackToDeviceStorage(path, idx, tvStatus));
+
             Button btnDel = new Button(this);
             btnDel.setText("🗑");
             btnDel.setBackgroundColor(0xFF550000);
@@ -2430,6 +2449,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
             row.addView(lbl);
             row.addView(btnPlay);
+            row.addView(btnSave);
             row.addView(btnLoad);
             row.addView(btnDel);
             container.addView(row);
@@ -2702,6 +2722,67 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         java.nio.ByteBuffer.wrap(outBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
             .asShortBuffer().put(result);
         return outBytes;
+    }
+
+    /**
+     * Copies a recorded track's WAV file out of app-private storage
+     * (getFilesDir()) into public device storage (Music/LoopMidiRecordings), so
+     * it appears in the file manager / other apps and survives app uninstall.
+     * The original app-private copy (used for in-app playback, →PAD, etc.) is
+     * left untouched.
+     */
+    private void saveTrackToDeviceStorage(String srcPath, int trackIndex, android.widget.TextView tvStatus) {
+        String fileName = "LoopMidi_Track" + (trackIndex + 1) + "_" + System.currentTimeMillis() + ".wav";
+        // Pre-scoped-storage (Android 6–9) needs the WRITE_EXTERNAL_STORAGE runtime
+        // permission before writing directly into the public Music directory.
+        // Android 10+ (Q) uses MediaStore, which needs no such runtime permission.
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 9002);
+            Toast.makeText(this, "Storage permission allow karke dobara SAVE dabao", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                // Scoped storage (Android 10+): insert via MediaStore, no runtime
+                // storage permission needed for this app-owned public entry.
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, fileName);
+                values.put(android.provider.MediaStore.Audio.Media.MIME_TYPE, "audio/wav");
+                values.put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_MUSIC + "/LoopMidiRecordings");
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new IOException("MediaStore insert failed");
+                try (java.io.InputStream in = new java.io.FileInputStream(srcPath);
+                     java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+            } else {
+                // Pre-scoped-storage: write directly under the public Music dir and
+                // trigger a media scan so it shows up immediately in file managers.
+                File musicDir = new File(android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_MUSIC), "LoopMidiRecordings");
+                if (!musicDir.exists()) musicDir.mkdirs();
+                File outFile = new File(musicDir, fileName);
+                try (java.io.InputStream in = new java.io.FileInputStream(srcPath);
+                     java.io.OutputStream out = new java.io.FileOutputStream(outFile)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                android.media.MediaScannerConnection.scanFile(
+                        this, new String[]{outFile.getAbsolutePath()}, new String[]{"audio/wav"}, null);
+            }
+            tvStatus.setText("💾 Track " + (trackIndex + 1) + " saved → Music/LoopMidiRecordings/" + fileName);
+            Toast.makeText(this, "Saved to Music/LoopMidiRecordings", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e("LoopsRec", "Save to storage failed", e);
+            Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     // ── Workflow-patch compatibility stubs ────────────────────────────────────
