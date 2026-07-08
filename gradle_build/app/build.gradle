@@ -12,7 +12,24 @@ android {
         versionCode 1
         versionName '1.0'
     }
+    signingConfigs {
+        // Checked-in, stable debug keystore (NOT the machine-default ~/.android
+        // debug.keystore, which CI regenerates fresh — and therefore with a
+        // different SHA-1 — on every run). Google Sign-In needs the SHA-1 that
+        // signs the APK to match one registered in the Firebase console, so the
+        // signing cert must stay identical across builds.
+        debug {
+            storeFile file('keystore/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+            storeType 'PKCS12'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
         }
