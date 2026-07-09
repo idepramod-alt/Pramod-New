@@ -80,7 +80,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnTempoMinus;
     private Button btnTempoPlus;
     private Button btnResetSpeedPitch;
-    private Button btnDrumOctapad;
     private Button btnSignOut;
     private TextView txtSignedInAs;
     private CheckBox chkMultiMode;
@@ -830,7 +829,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnMasterVolMode  = (Button) findViewById(R.id.btnMasterVolMode);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
-        this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);
         this.chkDrumChoke = (CheckBox) findViewById(R.id.chkDrumChoke);
         this.chkDrumDelay = (CheckBox) findViewById(R.id.chkDrumDelay);
         this.seekDrumDelay = (SeekBar) findViewById(R.id.seekDrumDelay);
@@ -1298,11 +1296,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Sync checkboxes so the UI state matches
         if (this.chkOneShotMode != null) this.chkOneShotMode.setChecked(this.isOneShotMode);
         if (this.chkMultiMode   != null) this.chkMultiMode.setChecked(this.isMultiMode);
-        // Visual feedback on the button: orange = active, dark = inactive
-        if (this.btnDrumOctapad != null) {
-            this.btnDrumOctapad.setBackgroundResource(
-                this.isDrumOctapadMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
-        }
         // Save both prefs
         this.prefs.edit()
             .putBoolean("loop_one_shot_mode", this.isOneShotMode)
@@ -2249,11 +2242,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         if (this.btnDrumMode != null) {
             this.btnDrumMode.setBackgroundResource(
-                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
-        }
-        // Keep ADV panel's btnDrumOctapad in sync
-        if (this.btnDrumOctapad != null) {
-            this.btnDrumOctapad.setBackgroundResource(
                 this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
         }
     }
