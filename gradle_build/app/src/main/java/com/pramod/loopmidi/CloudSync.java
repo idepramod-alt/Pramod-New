@@ -17,18 +17,22 @@ import java.util.Map;
 /**
  * Static helper that syncs loop/pad settings between local SharedPreferences
  * and Firebase Realtime Database under users/{uid}/loopSettings.
+ *
+ * DB_URL explicitly set — google-services.json mein database_url nahi tha (Asia Southeast 1)
  */
 public class CloudSync {
 
     private static final String PREFS_NAME = "LoopPrefs";
     private static final String DB_PATH    = "users";
+    private static final String DB_URL     =
+            "https://pramod-octapad-loop-default-rtdb.asia-southeast1.firebasedatabase.app";
 
     // -------------------------------------------------------------------------
     // Write user profile (called once after successful Google Sign-In)
     // -------------------------------------------------------------------------
     public static void writeProfile(String uid, String email, String displayName) {
         if (uid == null) return;
-        DatabaseReference ref = FirebaseDatabase.getInstance()
+        DatabaseReference ref = FirebaseDatabase.getInstance(DB_URL)
                 .getReference(DB_PATH).child(uid).child("profile");
         Map<String, Object> profile = new HashMap<>();
         profile.put("email",       email       != null ? email       : "");
@@ -46,7 +50,7 @@ public class CloudSync {
             if (onDone != null) onDone.run();
             return;
         }
-        DatabaseReference ref = FirebaseDatabase.getInstance()
+        DatabaseReference ref = FirebaseDatabase.getInstance(DB_URL)
                 .getReference(DB_PATH).child(uid).child("loopSettings");
 
         ref.addListenerForSingleValueEvent(new ValueEventListener() {
@@ -97,7 +101,7 @@ public class CloudSync {
             }
         }
         if (data.isEmpty()) return;
-        FirebaseDatabase.getInstance()
+        FirebaseDatabase.getInstance(DB_URL)
                 .getReference(DB_PATH).child(uid).child("loopSettings")
                 .setValue(data);
     }
