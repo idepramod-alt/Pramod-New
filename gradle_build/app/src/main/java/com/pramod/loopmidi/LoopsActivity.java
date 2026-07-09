@@ -86,6 +86,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
     private boolean isDrumOctapadMode = false;
+    // Drum-mode-only FX (ADV panel): choke + delay. Only affects real DRUM MODE
+    // hits (effectiveDrumMode == true) — One-Shot and Loop mode keep their own
+    // existing, untouched behavior.
+    private CheckBox chkDrumChoke;
+    private CheckBox chkDrumDelay;
+    private SeekBar seekDrumDelay;
+    private TextView txtDrumDelayVal;
+    private boolean isDrumChokeOn = false;
+    private boolean isDrumDelayOn = false;
+    private float drumDelayLevel = 0.5f;
     private int currentScaleOffset;
     private EditText editCustomBpm;
     private Equalizer globalEq;
@@ -290,13 +300,33 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // chokeGroup: ONE-SHOT mode keeps index+1 (unique per pad) so retapping the
             // SAME pad cuts off its previous still-playing instance — without this,
             // repeated one-shot taps piled up overlapping copies of the same sample
-            // ("mix-up"/garbled sound instead of a clean retrigger).
-            // Real DRUM MODE instead uses chokeGroup = 0 (native engine's
+            // ("mix-up"/garbled sound instead of a clean retrigger). This path is
+            // untouched by the new ADV panel drum FX controls below.
+            // Real DRUM MODE default is chokeGroup = 0 (native engine's
             // `if (chokeGroup > 0)` guard disables choke entirely for that call), so
             // fast pad rolling / rapid re-hits on the same drum pad let each hit ring
-            // out fully instead of being cut off by the next hit.
-            int chokeGroup = effectiveDrumMode ? 0 : (index + 1);
-            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+            // out fully instead of being cut off by the next hit. The ADV panel's
+            // "DRUM CHOKE" checkbox is an opt-in that switches real DRUM MODE to
+            // self-choke (index+1) too, same as ONE-SHOT — off by default so existing
+            // behavior is unchanged unless the user turns it on.
+            int chokeGroup;
+            boolean drumDelayActive;
+            float drumDelayMs;
+            float drumDelayLevelToUse;
+            if (effectiveDrumMode) {
+                chokeGroup = this.isDrumChokeOn ? (index + 1) : 0;
+                drumDelayActive = this.isDrumDelayOn;
+                drumDelayMs = drumDelayActive ? 260f : 0f;
+                drumDelayLevelToUse = drumDelayActive ? this.drumDelayLevel : 0f;
+            } else {
+                // ONE-SHOT mode (not real drum mode): unchanged, no delay FX.
+                chokeGroup = index + 1;
+                drumDelayActive = false;
+                drumDelayMs = 0f;
+                drumDelayLevelToUse = 0f;
+            }
+            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
+                    drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
             if (isOneShotTriggered) {
                 // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
@@ -799,6 +829,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
         this.btnDrumOctapad = (Button) findViewById(R.id.btnDrumOctapad);
+        this.chkDrumChoke = (CheckBox) findViewById(R.id.chkDrumChoke);
+        this.chkDrumDelay = (CheckBox) findViewById(R.id.chkDrumDelay);
+        this.seekDrumDelay = (SeekBar) findViewById(R.id.seekDrumDelay);
+        this.txtDrumDelayVal = (TextView) findViewById(R.id.txtDrumDelayVal);
         this.btnResetSpeedPitch = (Button) findViewById(R.id.btnResetSpeedPitch);
         // Loop Mode / Drum Mode toggle buttons
         this.btnLoopMode = (Button) findViewById(R.id.btnLoopMode);
@@ -848,6 +882,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.reverbLevel  = this.prefs.getInt("loop_reverb_level", 0);
         this.isMultiMode  = this.prefs.getBoolean("loop_multi_mode", false);
         this.isOneShotMode = this.prefs.getBoolean("loop_one_shot_mode", false);
+        this.isDrumChokeOn = this.prefs.getBoolean("drum_choke_on", false);
+        this.isDrumDelayOn = this.prefs.getBoolean("drum_delay_on", false);
+        this.drumDelayLevel = this.prefs.getFloat("drum_delay_level", 0.5f);
         // Restore per-pad volumes and per-pad drum/loop mode
         for (int i = 0; i < 8; i++) {
             this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
@@ -867,6 +904,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (checkBox2 != null) {
             checkBox2.setChecked(this.isOneShotMode);
         }
+        if (this.chkDrumChoke != null) this.chkDrumChoke.setChecked(this.isDrumChokeOn);
+        if (this.chkDrumDelay != null) this.chkDrumDelay.setChecked(this.isDrumDelayOn);
+        if (this.seekDrumDelay != null) this.seekDrumDelay.setProgress((int) (this.drumDelayLevel * 100f));
+        if (this.txtDrumDelayVal != null) this.txtDrumDelayVal.setText(((int) (this.drumDelayLevel * 100f)) + "%");
         setupReverb();
         setupControls();
         initPads();
@@ -1014,15 +1055,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
-        Button button8 = this.btnDrumOctapad;
-        if (button8 != null) {
-            button8.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    LoopsActivity.this.toggleDrumOctapadMode();
-                }
-            });
-        }
+        // btnDrumOctapad button was removed from the ADV panel (duplicated the
+        // Mode Bar's DRUM button); toggleDrumOctapadMode() is left in place but is
+        // no longer wired to a button — chkOneShotMode/chkMultiMode checkboxes in
+        // the same panel already give direct access to that same state.
         // ── Loop Mode button ──────────────────────────────────────────────────
         if (this.btnLoopMode != null) {
             this.btnLoopMode.setOnClickListener(new View.OnClickListener() {
@@ -1441,6 +1477,43 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         CheckBox checkBox2 = this.chkOneShotMode;
         if (checkBox2 != null) {
             checkBox2.setOnCheckedChangeListener(checkListener);
+        }
+        // Drum-mode-only FX: choke + delay (independent of the checkListener above,
+        // does not touch isMultiMode / isOneShotMode / Loop mode at all).
+        if (this.chkDrumChoke != null) {
+            this.chkDrumChoke.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    LoopsActivity.this.isDrumChokeOn = isChecked;
+                    LoopsActivity.this.prefs.edit().putBoolean("drum_choke_on", isChecked).apply();
+                }
+            });
+        }
+        if (this.chkDrumDelay != null) {
+            this.chkDrumDelay.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    LoopsActivity.this.isDrumDelayOn = isChecked;
+                    LoopsActivity.this.prefs.edit().putBoolean("drum_delay_on", isChecked).apply();
+                }
+            });
+        }
+        if (this.seekDrumDelay != null) {
+            this.seekDrumDelay.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    LoopsActivity.this.drumDelayLevel = progress / 100f;
+                    if (LoopsActivity.this.txtDrumDelayVal != null) {
+                        LoopsActivity.this.txtDrumDelayVal.setText(progress + "%");
+                    }
+                }
+                @Override
+                public void onStartTrackingTouch(SeekBar sb) {}
+                @Override
+                public void onStopTrackingTouch(SeekBar sb) {
+                    LoopsActivity.this.prefs.edit().putFloat("drum_delay_level", LoopsActivity.this.drumDelayLevel).apply();
+                }
+            });
         }
 
         // ── Master Volume Mode toggle button ──────────────────────────────────
