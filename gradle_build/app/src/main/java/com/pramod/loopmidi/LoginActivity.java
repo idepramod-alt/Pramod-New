@@ -2,6 +2,7 @@ package com.pramod.loopmidi;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -84,8 +85,34 @@ public class LoginActivity extends Activity {
         super.onStart();
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            checkLicense(currentUser);
+            if (isLicenseCached()) {
+                // Already verified before on this device — enter instantly,
+                // don't make the user wait for a network round-trip.
+                goToLoops();
+                // Quietly re-check license/device-lock in the background so
+                // piracy protection (device-lock kickout) still keeps working.
+                revalidateLicenseSilently(currentUser);
+            } else {
+                checkLicense(currentUser);
+            }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Local "already verified" cache — avoids re-showing the login
+    //  screen / re-fetching data on every app open once the license
+    //  has been confirmed once on this device.
+    // ─────────────────────────────────────────────────────────────────
+    private SharedPreferences authPrefs() {
+        return getSharedPreferences("AuthPrefs", MODE_PRIVATE);
+    }
+
+    private boolean isLicenseCached() {
+        return authPrefs().getBoolean("licensed_ok", false);
+    }
+
+    private void setLicenseCached(boolean value) {
+        authPrefs().edit().putBoolean("licensed_ok", value).apply();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -200,6 +227,10 @@ public class LoginActivity extends Activity {
                         .child("deviceToken")
                         .setValue(localDeviceId);
 
+                // Remember that this device is verified so future app opens
+                // can skip straight in without waiting on the network.
+                setLicenseCached(true);
+
                 // Save profile + sync settings + enter app
                 CloudSync.writeProfile(user.getUid(),
                         user.getEmail(), user.getDisplayName());
@@ -241,6 +272,7 @@ public class LoginActivity extends Activity {
     //  Shown when account is locked to a DIFFERENT device
     // ─────────────────────────────────────────────────────────────────
     private void showKickedOut() {
+        setLicenseCached(false);
         mAuth.signOut();
         mGoogleSignInClient.signOut();
         runOnUiThread(() -> {
@@ -260,6 +292,7 @@ public class LoginActivity extends Activity {
         // Save pending request for admin panel (before signing out)
         savePendingRequest(user);
 
+        setLicenseCached(false);
         mAuth.signOut();
         mGoogleSignInClient.signOut();
         runOnUiThread(() -> {
@@ -276,5 +309,55 @@ public class LoginActivity extends Activity {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(intent);
         finish();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Runs the same license + device-lock check as checkLicense(), but
+    //  silently in the background (no UI, no goToLoops) since the user
+    //  has already been let into the app via the cached license.
+    //  Keeps the anti-piracy device lock enforced without ever blocking
+    //  or delaying app startup for a legitimate, already-verified user.
+    // ─────────────────────────────────────────────────────────────────
+    private void revalidateLicenseSilently(final FirebaseUser user) {
+        final String localDeviceId = getAndroidDeviceId();
+
+        DatabaseReference ref = FirebaseDatabase.getInstance(DB_URL)
+                .getReference("authorizedUsers")
+                .child(user.getUid());
+
+        ref.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                if (!snapshot.exists()) {
+                    // License was revoked server-side — sign out quietly.
+                    // Next app open will show the login screen again.
+                    setLicenseCached(false);
+                    mAuth.signOut();
+                    mGoogleSignInClient.signOut();
+                    return;
+                }
+
+                String savedDeviceId = snapshot.child("deviceToken").getValue(String.class);
+                if (savedDeviceId != null && !savedDeviceId.equals(localDeviceId)) {
+                    // Account got locked to a different device — sign out quietly.
+                    setLicenseCached(false);
+                    mAuth.signOut();
+                    mGoogleSignInClient.signOut();
+                    return;
+                }
+
+                // Still valid on this device — refresh the device lock.
+                FirebaseDatabase.getInstance(DB_URL)
+                        .getReference("authorizedUsers")
+                        .child(user.getUid())
+                        .child("deviceToken")
+                        .setValue(localDeviceId);
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                // Network hiccup — ignore, keep running with the cached license.
+            }
+        });
     }
 }
