@@ -81,6 +81,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnTempoPlus;
     private Button btnResetSpeedPitch;
     private Button btnDrumOctapad;
+    private Button btnSignOut;
+    private TextView txtSignedInAs;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
     private boolean isDrumOctapadMode = false;
@@ -648,6 +650,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updatePadLabel(i);    // preserve drum-mode orange, don't force black
             }
         }
+        // Push the latest loop/pad settings to Firebase for the signed-in account
+        CloudSync.pushCurrentUserSettings(this);
     }
 
     @Override // android.app.Activity
@@ -802,6 +806,35 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
+        // Cloud account row (Google Sign-In / Firebase sync)
+        this.btnSignOut    = (Button)   findViewById(R.id.btnSignOut);
+        this.txtSignedInAs = (TextView) findViewById(R.id.txtSignedInAs);
+        com.google.firebase.auth.FirebaseUser _signedInUser =
+                com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+        if (this.txtSignedInAs != null) {
+            this.txtSignedInAs.setText(
+                    _signedInUser != null && _signedInUser.getEmail() != null
+                            ? "Signed in: " + _signedInUser.getEmail() : "");
+        }
+        if (this.btnSignOut != null) {
+            this.btnSignOut.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    CloudSync.pushCurrentUserSettings(LoopsActivity.this);
+                    com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+                    com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
+                            new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestEmail().build();
+                    com.google.android.gms.auth.api.signin.GoogleSignIn
+                            .getClient(LoopsActivity.this, gso).signOut();
+                    Intent logoutIntent = new Intent(LoopsActivity.this, LoginActivity.class);
+                    logoutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(logoutIntent);
+                    finish();
+                }
+            });
+        }
         // System-audio capture manager (Android 10+)
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             this.mpManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);

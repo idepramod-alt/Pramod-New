@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#ff000000"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pramod Octapad Loops"
+        android:textColor="#ffffffff"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Sign in to sync your loops across devices"
+        android:textColor="#ffaaaaaa"
+        android:textSize="13sp"
+        android:gravity="center"
+        android:layout_marginBottom="40dp"/>
+
+    <Button
+        android:id="@+id/btnGoogleSignIn"
+        android:layout_width="240dp"
+        android:layout_height="48dp"
+        android:text="Sign in with Google"
+        android:textColor="#ff000000"
+        android:textStyle="bold"
+        android:background="#ffffffff"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/txtLoginStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#ffff5555"
+        android:textSize="12sp"
+        android:gravity="center"/>
+
+</LinearLayout>

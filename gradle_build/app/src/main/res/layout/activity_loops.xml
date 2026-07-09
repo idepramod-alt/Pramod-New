@@ -149,6 +149,32 @@
             <Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnDrumOctapad" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="36dp" android:layout_marginStart="6dp" android:text="&#x1F941; DRUM PAD" android:layout_weight="1.2"/>
         </LinearLayout>
 
+        <!-- Account / Cloud sync row -->
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:layout_marginBottom="2dp">
+            <TextView
+                android:id="@+id/txtSignedInAs"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="10sp"
+                android:textColor="#ff00afff"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:text=""/>
+            <Button
+                android:id="@+id/btnSignOut"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:text="Sign Out"
+                android:textSize="9sp"
+                android:textColor="#ffffffff"
+                android:background="@drawable/btn_3d_dark"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"/>
+        </LinearLayout>
+
         <!-- EQ row -->
         <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
             android:layout_width="match_parent" android:layout_height="wrap_content"

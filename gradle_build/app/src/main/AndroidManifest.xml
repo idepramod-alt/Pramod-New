@@ -14,12 +14,13 @@
     <uses-permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
     <application android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" android:label="Pramod Octapad Loops" android:icon="@mipmap/ic_launcher" android:debuggable="true" android:allowBackup="true" android:extractNativeLibs="true" android:appComponentFactory="androidx.core.app.CoreComponentFactory">
         <activity android:name="com.pramod.loopmidi.ActivationActivity" android:exported="true" android:screenOrientation="landscape"/>
-        <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape">
+        <activity android:name="com.pramod.loopmidi.LoginActivity" android:exported="true" android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape"/>
         <service android:name="com.google.firebase.components.ComponentDiscoveryService" android:exported="false" android:directBootAware="true">
             <meta-data android:name="com.google.firebase.components:com.google.firebase.database.FirebaseDatabaseKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
             <meta-data android:name="com.google.firebase.components:com.google.firebase.database.DatabaseRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
