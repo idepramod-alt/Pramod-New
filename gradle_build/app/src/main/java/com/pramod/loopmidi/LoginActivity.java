@@ -82,7 +82,7 @@ public class LoginActivity extends Activity {
     // ─────────────────────────────────────────────────────────────────
     //  Device ID = Android hardware ID (unique per device install)
     // ─────────────────────────────────────────────────────────────────
-    private String getDeviceId() {
+    private String getAndroidDeviceId() {
         return Settings.Secure.getString(
                 getContentResolver(), Settings.Secure.ANDROID_ID);
     }
@@ -95,7 +95,7 @@ public class LoginActivity extends Activity {
     private void checkDeviceThenLicense(FirebaseUser user) {
         if (txtLoginStatus != null) txtLoginStatus.setText("Session check ho raha hai…");
 
-        String localDeviceId = getDeviceId();
+        String localDeviceId = getAndroidDeviceId();
 
         FirebaseDatabase.getInstance()
                 .getReference("authorizedUsers")
@@ -183,7 +183,7 @@ public class LoginActivity extends Activity {
                     public void onDataChange(DataSnapshot snapshot) {
                         if (snapshot.exists()) {
                             // ✅ Licensed — lock THIS device (overwrites any previous device)
-                            String deviceId = getDeviceId();
+                            String deviceId = getAndroidDeviceId();
                             FirebaseDatabase.getInstance()
                                     .getReference("authorizedUsers")
                                     .child(user.getUid())
