@@ -74,53 +74,17 @@ public class LoginActivity extends Activity {
         super.onStart();
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            // Already logged in — check device lock first, then license
-            checkDeviceThenLicense(currentUser);
+            // Already logged in — verify license + device in ONE read
+            checkLicense(currentUser);
         }
     }
 
     // ─────────────────────────────────────────────────────────────────
-    //  Device ID = Android hardware ID (unique per device install)
+    //  Device ID = Android hardware ID (unique per device)
     // ─────────────────────────────────────────────────────────────────
     private String getAndroidDeviceId() {
         return Settings.Secure.getString(
                 getContentResolver(), Settings.Secure.ANDROID_ID);
-    }
-
-    // ─────────────────────────────────────────────────────────────────
-    //  Step 1: Check whether Firebase has a different device registered.
-    //  If same device (or no device saved yet) → proceed to checkLicense.
-    //  If DIFFERENT device → kick out with message.
-    // ─────────────────────────────────────────────────────────────────
-    private void checkDeviceThenLicense(FirebaseUser user) {
-        if (txtLoginStatus != null) txtLoginStatus.setText("Session check ho raha hai…");
-
-        String localDeviceId = getAndroidDeviceId();
-
-        FirebaseDatabase.getInstance()
-                .getReference("authorizedUsers")
-                .child(user.getUid())
-                .child("deviceToken")
-                .addListenerForSingleValueEvent(new ValueEventListener() {
-                    @Override
-                    public void onDataChange(DataSnapshot snapshot) {
-                        String savedDeviceId = snapshot.getValue(String.class);
-
-                        if (savedDeviceId == null || savedDeviceId.equals(localDeviceId)) {
-                            // No device locked yet, OR same device — proceed normally
-                            checkLicense(user);
-                        } else {
-                            // ❌ Another device is using this account → force sign out here
-                            showKickedOut();
-                        }
-                    }
-
-                    @Override
-                    public void onCancelled(DatabaseError error) {
-                        // Network error — fail open (allow), then verify license
-                        checkLicense(user);
-                    }
-                });
     }
 
     private void signIn() {
@@ -168,49 +132,65 @@ public class LoginActivity extends Activity {
     }
 
     /**
-     * Check Firebase: authorizedUsers/{uid} must exist.
-     * If licensed → register this device (overwrite any old device token).
-     * This is the moment Device B kicks out Device A:
-     *   Device B logs in → license OK → writes its own deviceToken → Device A sees mismatch next time.
+     * ONE Firebase read does everything:
+     *  1. License check  — authorizedUsers/{uid} must exist
+     *  2. Device check   — authorizedUsers/{uid}/deviceToken compared with this device
+     *  3. Device lock    — write this device's ID (kicks out the old device automatically)
      */
     private void checkLicense(FirebaseUser user) {
-        if (txtLoginStatus != null) txtLoginStatus.setText("License check ho raha hai…");
+        if (txtLoginStatus != null) txtLoginStatus.setText("Login ho raha hai…");
+
+        String localDeviceId = getAndroidDeviceId();
+
         FirebaseDatabase.getInstance()
                 .getReference("authorizedUsers")
                 .child(user.getUid())
                 .addListenerForSingleValueEvent(new ValueEventListener() {
                     @Override
                     public void onDataChange(DataSnapshot snapshot) {
-                        if (snapshot.exists()) {
-                            // ✅ Licensed — lock THIS device (overwrites any previous device)
-                            String deviceId = getAndroidDeviceId();
-                            FirebaseDatabase.getInstance()
-                                    .getReference("authorizedUsers")
-                                    .child(user.getUid())
-                                    .child("deviceToken")
-                                    .setValue(deviceId);
-
-                            // Save profile + sync settings + enter app
-                            CloudSync.writeProfile(user.getUid(),
-                                    user.getEmail(), user.getDisplayName());
-                            CloudSync.pullSettingsThenRun(
-                                    LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
-                        } else {
+                        if (!snapshot.exists()) {
                             // ❌ Not purchased
                             showNotPurchased();
+                            return;
                         }
+
+                        // ✅ Licensed — now check device lock
+                        DataSnapshot tokenSnap = snapshot.child("deviceToken");
+                        String savedDeviceId   = tokenSnap.getValue(String.class);
+
+                        if (savedDeviceId != null && !savedDeviceId.equals(localDeviceId)) {
+                            // ❌ Another device is already using this account
+                            showKickedOut();
+                            return;
+                        }
+
+                        // ✅ Same device OR no device registered yet
+                        // Lock THIS device — overwrites any stale token
+                        FirebaseDatabase.getInstance()
+                                .getReference("authorizedUsers")
+                                .child(user.getUid())
+                                .child("deviceToken")
+                                .setValue(localDeviceId);
+
+                        // Save profile + sync settings + enter app
+                        CloudSync.writeProfile(user.getUid(),
+                                user.getEmail(), user.getDisplayName());
+                        CloudSync.pullSettingsThenRun(
+                                LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
                     }
 
                     @Override
                     public void onCancelled(DatabaseError error) {
-                        // Network error — fail safe: deny access
-                        showNotPurchased();
+                        // Network error — deny access (fail safe)
+                        if (txtLoginStatus != null)
+                            txtLoginStatus.setText("Network error. Internet check karein.");
+                        if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
                     }
                 });
     }
 
     // ─────────────────────────────────────────────────────────────────
-    //  Shown when account is locked to another device
+    //  Shown when account is locked to a DIFFERENT device
     // ─────────────────────────────────────────────────────────────────
     private void showKickedOut() {
         mAuth.signOut();
