@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
@@ -21,6 +23,7 @@ import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 
@@ -136,57 +139,83 @@ public class LoginActivity extends Activity {
      *  1. License check  — authorizedUsers/{uid} must exist
      *  2. Device check   — authorizedUsers/{uid}/deviceToken compared with this device
      *  3. Device lock    — write this device's ID (kicks out the old device automatically)
+     *
+     *  10-second timeout: agar Firebase jawab na de toh error dikha aur retry allow karo
      */
     private void checkLicense(FirebaseUser user) {
         if (txtLoginStatus != null) txtLoginStatus.setText("Login ho raha hai…");
 
         String localDeviceId = getAndroidDeviceId();
 
-        FirebaseDatabase.getInstance()
+        DatabaseReference ref = FirebaseDatabase.getInstance()
                 .getReference("authorizedUsers")
-                .child(user.getUid())
-                .addListenerForSingleValueEvent(new ValueEventListener() {
-                    @Override
-                    public void onDataChange(DataSnapshot snapshot) {
-                        if (!snapshot.exists()) {
-                            // ❌ Not purchased
-                            showNotPurchased();
-                            return;
-                        }
+                .child(user.getUid());
 
-                        // ✅ Licensed — now check device lock
-                        DataSnapshot tokenSnap = snapshot.child("deviceToken");
-                        String savedDeviceId   = tokenSnap.getValue(String.class);
+        // ── Timeout setup (10 seconds) ──────────────────────────────────
+        Handler timeoutHandler        = new Handler(Looper.getMainLooper());
+        ValueEventListener[] holder   = new ValueEventListener[1];
 
-                        if (savedDeviceId != null && !savedDeviceId.equals(localDeviceId)) {
-                            // ❌ Another device is already using this account
-                            showKickedOut();
-                            return;
-                        }
+        Runnable timeoutTask = () -> {
+            if (holder[0] != null) ref.removeEventListener(holder[0]);
+            runOnUiThread(() -> {
+                if (txtLoginStatus != null)
+                    txtLoginStatus.setText(
+                            "⚠️ Server connect nahi hua (timeout).\n" +
+                            "Internet check karein aur dobara try karein.");
+                if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
+            });
+        };
 
-                        // ✅ Same device OR no device registered yet
-                        // Lock THIS device — overwrites any stale token
-                        FirebaseDatabase.getInstance()
-                                .getReference("authorizedUsers")
-                                .child(user.getUid())
-                                .child("deviceToken")
-                                .setValue(localDeviceId);
+        holder[0] = new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                timeoutHandler.removeCallbacks(timeoutTask); // ✅ timeout cancel
 
-                        // Save profile + sync settings + enter app
-                        CloudSync.writeProfile(user.getUid(),
-                                user.getEmail(), user.getDisplayName());
-                        CloudSync.pullSettingsThenRun(
-                                LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
-                    }
+                if (!snapshot.exists()) {
+                    // ❌ Not purchased
+                    showNotPurchased();
+                    return;
+                }
 
-                    @Override
-                    public void onCancelled(DatabaseError error) {
-                        // Network error — deny access (fail safe)
-                        if (txtLoginStatus != null)
-                            txtLoginStatus.setText("Network error. Internet check karein.");
-                        if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
-                    }
+                // ✅ Licensed — now check device lock
+                DataSnapshot tokenSnap = snapshot.child("deviceToken");
+                String savedDeviceId   = tokenSnap.getValue(String.class);
+
+                if (savedDeviceId != null && !savedDeviceId.equals(localDeviceId)) {
+                    // ❌ Another device is already using this account
+                    showKickedOut();
+                    return;
+                }
+
+                // ✅ Same device OR no device registered yet
+                // Lock THIS device — overwrites any stale token
+                FirebaseDatabase.getInstance()
+                        .getReference("authorizedUsers")
+                        .child(user.getUid())
+                        .child("deviceToken")
+                        .setValue(localDeviceId);
+
+                // Save profile + sync settings + enter app
+                CloudSync.writeProfile(user.getUid(),
+                        user.getEmail(), user.getDisplayName());
+                CloudSync.pullSettingsThenRun(
+                        LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                timeoutHandler.removeCallbacks(timeoutTask); // ✅ timeout cancel
+                runOnUiThread(() -> {
+                    if (txtLoginStatus != null)
+                        txtLoginStatus.setText("Network error. Internet check karein.");
+                    if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
                 });
+            }
+        };
+
+        // Start 10-second countdown, then fire the read
+        timeoutHandler.postDelayed(timeoutTask, 10000);
+        ref.addListenerForSingleValueEvent(holder[0]);
     }
 
     // ─────────────────────────────────────────────────────────────────
