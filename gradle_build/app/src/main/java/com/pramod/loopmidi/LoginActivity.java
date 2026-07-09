@@ -31,6 +31,9 @@ public class LoginActivity extends Activity {
 
     private static final int RC_SIGN_IN = 9001;
 
+    // ── Firebase Realtime Database URL (Asia Southeast 1) ──
+    private static final String DB_URL = "https://pramod-octapad-loop-default-rtdb.asia-southeast1.firebasedatabase.app";
+
     // ── Your WhatsApp number (with country code, no + or spaces) ──
     private static final String WHATSAPP_NUMBER = "916268927194";
     private static final String WHATSAPP_MESSAGE = "Hello, I want to buy Pramod Octapad Loops app.";
@@ -77,7 +80,6 @@ public class LoginActivity extends Activity {
         super.onStart();
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            // Already logged in — verify license + device in ONE read
             checkLicense(currentUser);
         }
     }
@@ -140,20 +142,21 @@ public class LoginActivity extends Activity {
      *  2. Device check   — authorizedUsers/{uid}/deviceToken compared with this device
      *  3. Device lock    — write this device's ID (kicks out the old device automatically)
      *
-     *  10-second timeout: agar Firebase jawab na de toh error dikha aur retry allow karo
+     *  DB_URL explicitly set — google-services.json mein database_url nahi tha
+     *  10-second timeout — agar Firebase jawab na de
      */
     private void checkLicense(FirebaseUser user) {
         if (txtLoginStatus != null) txtLoginStatus.setText("Login ho raha hai…");
 
         String localDeviceId = getAndroidDeviceId();
 
-        DatabaseReference ref = FirebaseDatabase.getInstance()
+        DatabaseReference ref = FirebaseDatabase.getInstance(DB_URL)
                 .getReference("authorizedUsers")
                 .child(user.getUid());
 
-        // ── Timeout setup (10 seconds) ──────────────────────────────────
-        Handler timeoutHandler        = new Handler(Looper.getMainLooper());
-        ValueEventListener[] holder   = new ValueEventListener[1];
+        // ── 10-second timeout ────────────────────────────────────────
+        Handler timeoutHandler      = new Handler(Looper.getMainLooper());
+        ValueEventListener[] holder = new ValueEventListener[1];
 
         Runnable timeoutTask = () -> {
             if (holder[0] != null) ref.removeEventListener(holder[0]);
@@ -169,27 +172,24 @@ public class LoginActivity extends Activity {
         holder[0] = new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
-                timeoutHandler.removeCallbacks(timeoutTask); // ✅ timeout cancel
+                timeoutHandler.removeCallbacks(timeoutTask);
 
                 if (!snapshot.exists()) {
-                    // ❌ Not purchased
                     showNotPurchased();
                     return;
                 }
 
-                // ✅ Licensed — now check device lock
+                // ✅ Licensed — check device lock
                 DataSnapshot tokenSnap = snapshot.child("deviceToken");
                 String savedDeviceId   = tokenSnap.getValue(String.class);
 
                 if (savedDeviceId != null && !savedDeviceId.equals(localDeviceId)) {
-                    // ❌ Another device is already using this account
                     showKickedOut();
                     return;
                 }
 
-                // ✅ Same device OR no device registered yet
-                // Lock THIS device — overwrites any stale token
-                FirebaseDatabase.getInstance()
+                // ✅ Lock this device
+                FirebaseDatabase.getInstance(DB_URL)
                         .getReference("authorizedUsers")
                         .child(user.getUid())
                         .child("deviceToken")
@@ -204,7 +204,7 @@ public class LoginActivity extends Activity {
 
             @Override
             public void onCancelled(DatabaseError error) {
-                timeoutHandler.removeCallbacks(timeoutTask); // ✅ timeout cancel
+                timeoutHandler.removeCallbacks(timeoutTask);
                 runOnUiThread(() -> {
                     if (txtLoginStatus != null)
                         txtLoginStatus.setText("Network error. Internet check karein.");
@@ -213,7 +213,6 @@ public class LoginActivity extends Activity {
             }
         };
 
-        // Start 10-second countdown, then fire the read
         timeoutHandler.postDelayed(timeoutTask, 10000);
         ref.addListenerForSingleValueEvent(holder[0]);
     }
