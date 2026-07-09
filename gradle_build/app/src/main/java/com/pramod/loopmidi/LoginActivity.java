@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
@@ -73,9 +74,53 @@ public class LoginActivity extends Activity {
         super.onStart();
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            // Already logged in — re-verify license every time app opens
-            checkLicense(currentUser);
+            // Already logged in — check device lock first, then license
+            checkDeviceThenLicense(currentUser);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Device ID = Android hardware ID (unique per device install)
+    // ─────────────────────────────────────────────────────────────────
+    private String getDeviceId() {
+        return Settings.Secure.getString(
+                getContentResolver(), Settings.Secure.ANDROID_ID);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Step 1: Check whether Firebase has a different device registered.
+    //  If same device (or no device saved yet) → proceed to checkLicense.
+    //  If DIFFERENT device → kick out with message.
+    // ─────────────────────────────────────────────────────────────────
+    private void checkDeviceThenLicense(FirebaseUser user) {
+        if (txtLoginStatus != null) txtLoginStatus.setText("Session check ho raha hai…");
+
+        String localDeviceId = getDeviceId();
+
+        FirebaseDatabase.getInstance()
+                .getReference("authorizedUsers")
+                .child(user.getUid())
+                .child("deviceToken")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(DataSnapshot snapshot) {
+                        String savedDeviceId = snapshot.getValue(String.class);
+
+                        if (savedDeviceId == null || savedDeviceId.equals(localDeviceId)) {
+                            // No device locked yet, OR same device — proceed normally
+                            checkLicense(user);
+                        } else {
+                            // ❌ Another device is using this account → force sign out here
+                            showKickedOut();
+                        }
+                    }
+
+                    @Override
+                    public void onCancelled(DatabaseError error) {
+                        // Network error — fail open (allow), then verify license
+                        checkLicense(user);
+                    }
+                });
     }
 
     private void signIn() {
@@ -124,10 +169,12 @@ public class LoginActivity extends Activity {
 
     /**
      * Check Firebase: authorizedUsers/{uid} must exist.
-     * Developer adds this entry manually for each buyer.
+     * If licensed → register this device (overwrite any old device token).
+     * This is the moment Device B kicks out Device A:
+     *   Device B logs in → license OK → writes its own deviceToken → Device A sees mismatch next time.
      */
     private void checkLicense(FirebaseUser user) {
-        if (txtLoginStatus != null) txtLoginStatus.setText("Checking license…");
+        if (txtLoginStatus != null) txtLoginStatus.setText("License check ho raha hai…");
         FirebaseDatabase.getInstance()
                 .getReference("authorizedUsers")
                 .child(user.getUid())
@@ -135,13 +182,21 @@ public class LoginActivity extends Activity {
                     @Override
                     public void onDataChange(DataSnapshot snapshot) {
                         if (snapshot.exists()) {
-                            // ✅ Licensed — save profile + sync settings + enter app
+                            // ✅ Licensed — lock THIS device (overwrites any previous device)
+                            String deviceId = getDeviceId();
+                            FirebaseDatabase.getInstance()
+                                    .getReference("authorizedUsers")
+                                    .child(user.getUid())
+                                    .child("deviceToken")
+                                    .setValue(deviceId);
+
+                            // Save profile + sync settings + enter app
                             CloudSync.writeProfile(user.getUid(),
                                     user.getEmail(), user.getDisplayName());
                             CloudSync.pullSettingsThenRun(
                                     LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
                         } else {
-                            // ❌ Not purchased — sign out and show buy button
+                            // ❌ Not purchased
                             showNotPurchased();
                         }
                     }
@@ -154,8 +209,25 @@ public class LoginActivity extends Activity {
                 });
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    //  Shown when account is locked to another device
+    // ─────────────────────────────────────────────────────────────────
+    private void showKickedOut() {
+        mAuth.signOut();
+        mGoogleSignInClient.signOut();
+        runOnUiThread(() -> {
+            if (txtLoginStatus != null)
+                txtLoginStatus.setText(
+                        "❌ Yeh account kisi aur device pe login hai.\n" +
+                        "Pehle wahan logout karein, phir yahan login karein.");
+            if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Shown when user has not purchased
+    // ─────────────────────────────────────────────────────────────────
     private void showNotPurchased() {
-        // Sign out so they can't bypass
         mAuth.signOut();
         mGoogleSignInClient.signOut();
         runOnUiThread(() -> {
