@@ -9,6 +9,10 @@ extern "C" {
 #include <vector>
 #include <atomic>
 #include <algorithm>
+#include <mutex>
+#include <thread>
+#include <chrono>
+#include <condition_variable>
 
 #define TAG  "LoopmidiOboe"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -23,6 +27,12 @@ static const int NUM_VOICES      = LOOP_VOICES + DRUM_VOICES;
 static const int DELAY_BUF_SIZE  = 192000;
 static const int CMD_QUEUE_SIZE  = 128;    // lock-free ring buffer capacity
 static const int SYN_HOP        = 256;   // OLA synthesis hop size
+// Roland SPD-20 Pro-style delay: multiple decaying repeats instead of a single
+// flat echo. delayLevel is now used as the per-repeat feedback amount — each
+// successive repeat is quieter by that factor, same as a real delay pedal.
+static const int   MAX_DELAY_REPEATS = 8;
+static const float MAX_DELAY_FEEDBACK = 0.82f; // keeps the tail musical, never runs away
+static const float MIN_DELAY_REPEAT_AMP = 0.01f; // stop once a repeat is inaudible
 
 // ─── Pad buffer (loaded samples) ─────────────────────────────────────────────
 struct PadBuffer {
@@ -79,8 +89,19 @@ struct CmdQueue {
     Cmd              buf[CMD_QUEUE_SIZE];
     std::atomic<int> head{0};
     std::atomic<int> tail{0};
+    // This ring buffer is designed as lock-free SPSC (single-producer/single-consumer):
+    // pop() runs only on the audio callback thread, which stays lock-free/wait-free as
+    // required for real-time audio. push(), however, is now called from more than one
+    // producer thread — the UI thread AND, since the MIDI-latency fix, the MIDI callback
+    // thread firing playSample() directly for low-latency pad hits. Two producers racing
+    // on the old lock-free push() (read tail, then later write tail) could interleave and
+    // corrupt the queue (lost/garbled commands) under concurrent MIDI + UI activity. A
+    // mutex here only serializes the rare, short push() calls (one per note-on/pad-tap) —
+    // it never touches the real-time pop() path, so it doesn't reintroduce audio glitching.
+    std::mutex       pushMutex;
 
     bool push(const Cmd& c) {
+        std::lock_guard<std::mutex> lock(pushMutex);
         int t    = tail.load(std::memory_order_relaxed);
         int next = (t + 1) % CMD_QUEUE_SIZE;
         if (next == head.load(std::memory_order_acquire)) return false;
@@ -105,6 +126,11 @@ public:
     CmdQueue  cmdQ;
     int       nextDrumVoice = LOOP_VOICES;
     std::shared_ptr<oboe::AudioStream> stream;
+    // Bumped every time init() successfully (re)opens the stream. Used by the
+    // ErrorDisconnected fallback-restart watchdog (see onErrorAfterClose) to
+    // detect whether someone else (Java's AudioDeviceCallback path) already
+    // healed the stream before the watchdog's delay elapses.
+    std::atomic<uint64_t> streamGeneration{0};
 
     // Device-native audio parameters (set from Java via AudioManager queries)
     // Using native SR avoids Android's internal resampler and cuts ~20-40 ms latency
@@ -297,10 +323,19 @@ public:
                     }
                     samp *= vol * v.envGain;
 
-                    // Delay tap
+                    // Delay tap — multi-repeat feedback echo (Roland SPD-20 Pro style):
+                    // each repeat is delayOffset further back and quieter than the
+                    // previous one by the feedback factor, instead of one static echo.
                     if (v.delayOn && v.delayOffset > 0) {
-                        int ri = ((gDelayWrite + i - v.delayOffset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
-                        samp += gDelayBuf[ri] * v.delayLevel;
+                        float amp = v.delayLevel;
+                        for (int r = 1; r <= MAX_DELAY_REPEATS; r++) {
+                            int offset = v.delayOffset * r;
+                            if (offset >= DELAY_BUF_SIZE) break;
+                            int ri = ((gDelayWrite + i - offset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
+                            samp += gDelayBuf[ri] * amp;
+                            amp *= v.delayLevel;
+                            if (amp < MIN_DELAY_REPEAT_AMP) break;
+                        }
                     }
 
                     out[i] += samp;
@@ -420,7 +455,10 @@ public:
             v.chokeGroup  = c.chokeGroup;
             v.isLoop      = c.isLoop;
             v.delayOn     = c.delayOn;
-            v.delayLevel  = c.delayLevel;
+            // Clamp to MAX_DELAY_FEEDBACK: delayLevel now doubles as the per-repeat
+            // feedback amount, so 1.0 would make repeats decay forever without
+            // fading out (endless buildup/clipping). This keeps the tail musical.
+            v.delayLevel  = std::min(c.delayLevel, MAX_DELAY_FEEDBACK);
             // Use actual sampleRate for delay offset calculation (not hardcoded 44.1)
             v.delayOffset = c.delayOn ? (int)(c.delayMs * (sampleRate / 1000.0f)) : 0;
             if (v.delayOffset >= DELAY_BUF_SIZE) v.delayOffset = DELAY_BUF_SIZE - 1;
@@ -485,31 +523,112 @@ public:
 
     void onErrorAfterClose(oboe::AudioStream*, oboe::Result r) override {
         LOGE("Oboe stream error: %s", oboe::convertToText(r));
-        // ERROR_DISCONNECTED means the audio output device changed
-        // (earphone/BT plug or unplug). The Java AudioDeviceCallback in
-        // LoopsActivity handles this case: it re-queries the device-native
-        // SR/burst from AudioManager and calls nativeReinitStream() from
-        // the main thread, then re-triggers any loops that were playing.
+        // ERROR_DISCONNECTED fires for two very different situations:
         //
-        // Calling init() here too would race with that Java callback:
-        //   1. Java reinits stream → loops re-queued → playing
-        //   2. This callback fires ~ms later → init() stops the stream again
-        // So for device-change errors, we let Java own the recovery.
+        //  (a) A real output-device change (earphone/BT plug or unplug). The Java
+        //      AudioDeviceCallback in LoopsActivity/MainActivity handles this: it
+        //      re-queries the device-native SR/burst from AudioManager and calls
+        //      nativeReinitStream() from the main thread, then re-triggers any
+        //      loops that were playing.
+        //
+        //  (b) An incoming phone call or a notification/message sound. Because
+        //      the stream is opened in oboe::SharingMode::Exclusive, Android can
+        //      forcibly preempt it so the system can play the ringtone/notification
+        //      through the same hardware path — with NO audio-device add/remove
+        //      event at all, so the Java AudioDeviceCallback above never fires.
+        //      Previously this left the engine permanently silent (case (a)'s
+        //      "let Java own it" early-return applied here too) until the user
+        //      force-closed and reopened the app, which is the exact bug reported:
+        //      sound stops for good the moment a call/notification sound plays.
+        //
+        // We can't tell (a) apart from (b) from this callback alone, and blindly
+        // restarting here for every disconnect would race with (a)'s Java-owned
+        // recovery (see the old comment this replaced) — Java might reinit with
+        // the new device's correct SR/burst, then this callback fires moments
+        // later and stomps it with the OLD params. So instead we run a short
+        // watchdog: wait briefly for Java to heal the stream (case a); if nothing
+        // reinitialized it in that window (case b, or Java's callback simply
+        // never fires), heal it ourselves. Active voices (loops/one-shots) live
+        // in `voices[]`, untouched by init(), so they keep playing the instant
+        // the stream restarts — no explicit retrigger needed for this path.
         if (r == oboe::Result::ErrorDisconnected) {
-            LOGI("Device disconnected — Java AudioDeviceCallback will reinit stream");
+            uint64_t genBefore = streamGeneration.load(std::memory_order_acquire);
+            int restoreSR = sampleRate, restoreBurst = framesPerBurst;
+            // Register the watchdog and check `destroying` atomically under the SAME
+            // lock the destructor uses: if the destructor has already started tearing
+            // down (or starts concurrently right here), this either sees destroying
+            // already true and skips spawning entirely, or increments activeWatchdogs
+            // before the destructor's wait can observe activeWatchdogs==0 — there is no
+            // gap where a watchdog gets scheduled after the destructor stops watching
+            // for it.
+            {
+                std::lock_guard<std::mutex> lk(watchdogMutex);
+                if (destroying) return;
+                activeWatchdogs++;
+            }
+            // Still detached (fire-and-forget thread handle), but the destructor
+            // below blocks on watchdogCv until activeWatchdogs reaches 0, so this
+            // thread is guaranteed to finish before `this` is ever freed.
+            try {
+                std::thread([this, genBefore, restoreSR, restoreBurst]() {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                    selfHealIfStillDisconnected(genBefore, restoreSR, restoreBurst);
+                    {
+                        std::lock_guard<std::mutex> lk(watchdogMutex);
+                        if (--activeWatchdogs == 0) watchdogCv.notify_all();
+                    }
+                }).detach();
+            } catch (...) {
+                // Thread creation itself failed (e.g. resource exhaustion) — roll back
+                // the count so the destructor doesn't wait forever for a watchdog that
+                // never actually started.
+                LOGE("Failed to spawn ErrorDisconnected watchdog thread");
+                std::lock_guard<std::mutex> lk(watchdogMutex);
+                if (--activeWatchdogs == 0) watchdogCv.notify_all();
+            }
             return;
         }
         // For non-routing errors (underrun turned fatal, driver crash, etc.)
-        // there is no Java callback, so we restart here as a best-effort recovery.
+        // there is no Java callback, so we restart here immediately as a
+        // best-effort recovery.
         LOGI("Non-routing error — restarting stream with current params");
         init(sampleRate, framesPerBurst);
     }
+
+    // Guards init() against concurrent callers: Java can call it (via
+    // nativeReinitStream, on the main thread) at nearly the same moment as the
+    // ErrorDisconnected watchdog thread in onErrorAfterClose. Without this,
+    // two threads could mutate `stream` at once (stop/close/reset racing with
+    // a fresh openStream()), which is undefined behavior.
+    std::mutex initMutex;
+
+    // Tracks the ErrorDisconnected watchdog thread's lifetime so the destructor
+    // can block until it's done, instead of letting a detached thread outlive
+    // (and dereference) a freed AudioEngineImpl if the app is closed mid-sleep.
+    std::mutex              watchdogMutex;
+    std::condition_variable watchdogCv;
+    int                     activeWatchdogs = 0;
+    // Set by the destructor (under watchdogMutex) before it waits, so any
+    // onErrorAfterClose racing to spawn a NEW watchdog right at teardown time sees
+    // this and refuses to schedule one — otherwise a watchdog could be registered
+    // after the destructor already observed activeWatchdogs==0 and moved on to free
+    // `this`.
+    bool                    destroying = false;
 
     // nativeSR:    device's actual hardware sample rate (from AudioManager)
     // nativeBurst: device's optimal frames-per-buffer (from AudioManager)
     // Matching these exactly avoids Android's internal audio resampler
     // and eliminates the ~20-40 ms latency it adds on non-native-rate streams.
     bool init(int nativeSR = 48000, int nativeBurst = 256) {
+        std::lock_guard<std::mutex> lock(initMutex);
+        return initLocked(nativeSR, nativeBurst);
+    }
+
+    // Body of init(), assumes initMutex is already held by the caller. Split out
+    // so the ErrorDisconnected watchdog can re-check streamGeneration and run the
+    // actual reinit atomically under a single lock acquisition (see
+    // selfHealIfStillDisconnected) instead of racing between "check" and "init()".
+    bool initLocked(int nativeSR, int nativeBurst) {
         sampleRate     = nativeSR;
         framesPerBurst = nativeBurst;
 
@@ -569,7 +688,25 @@ public:
              stream->getBufferCapacityInFrames(),
              oboe::convertToText(stream->getAudioApi()),
              stream->getSharingMode() == oboe::SharingMode::Exclusive ? "exclusive" : "shared");
+        streamGeneration.fetch_add(1, std::memory_order_release);
         return true;
+    }
+
+    // Called from the ErrorDisconnected watchdog thread after its delay. Re-checks
+    // streamGeneration UNDER initMutex (not before acquiring it) so there is no gap
+    // between "check" and "act": if Java's device-change reinit is concurrently
+    // running, this call blocks on the lock until it finishes, then sees the bumped
+    // generation and correctly skips — it can never stomp a fresh reinit with stale
+    // pre-disconnect params.
+    void selfHealIfStillDisconnected(uint64_t genBefore, int restoreSR, int restoreBurst) {
+        std::lock_guard<std::mutex> lock(initMutex);
+        if (streamGeneration.load(std::memory_order_acquire) != genBefore) {
+            LOGI("Stream already reinitialized by Java device callback — watchdog no-op");
+            return;
+        }
+        LOGI("No device-change reinit arrived after disconnect — "
+             "self-healing stream (likely a call/notification sound, not a real device change)");
+        initLocked(restoreSR, restoreBurst);
     }
 
     void loadSample(int padIdx, const short* data, int len) {
@@ -639,6 +776,18 @@ public:
     }
 
     ~AudioEngineImpl() {
+        // Block until any in-flight ErrorDisconnected watchdog thread (spawned in
+        // onErrorAfterClose) has finished. Without this, nativeDestroyAudioEngine()
+        // could delete this object while that detached thread is still sleeping,
+        // and it would then dereference freed memory when it wakes up and calls
+        // selfHealIfStillDisconnected(). Worst case this adds a bounded ~400ms
+        // stall to app teardown, only in the rare case a disconnect just happened —
+        // far preferable to a use-after-free crash.
+        {
+            std::unique_lock<std::mutex> lk(watchdogMutex);
+            destroying = true; // refuse any new watchdog racing to start right now
+            watchdogCv.wait(lk, [this] { return activeWatchdogs == 0; });
+        }
         if (stream) { stream->stop(); stream->close(); }
         for (int i = 0; i < LOOP_VOICES; i++) {
             if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);

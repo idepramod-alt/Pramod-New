@@ -246,6 +246,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     private void toggleLoop(final int index) {
+        toggleLoop(index, false);
+    }
+
+    /**
+     * @param audioAlreadyTriggered true when {@link #midiTriggerDrumPadImmediate} already
+     *        fired the native playSample() for this hit (MIDI fast path) — skips the
+     *        duplicate playSample call below but still runs all the choke/state/UI logic.
+     */
+    private void toggleLoop(final int index, boolean audioAlreadyTriggered) {
         // A pad has content if it has a user-picked URI (custom loop) OR a sample already
         // decoded from assets (preset kit). The URI is null for asset-based kits because
         // Android assets don't have content:// URIs — only loopSamples[] is populated.
@@ -332,8 +341,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 drumDelayMs = 0f;
                 drumDelayLevelToUse = 0f;
             }
-            this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
-                    drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+            if (!audioAlreadyTriggered) {
+                this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
+                        drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+            }
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
             if (isOneShotTriggered) {
                 // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
@@ -1676,6 +1687,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void handlePadClick(int index) throws IllegalStateException {
+        handlePadClick(index, false);
+    }
+
+    /**
+     * @param audioAlreadyTriggered true when the caller (MIDI note-on path) has already
+     *        fired the native audio for this hit via {@link #midiTriggerDrumPadImmediate}
+     *        so {@link #toggleLoop} must not play it a second time.
+     */
+    public void handlePadClick(int index, boolean audioAlreadyTriggered) throws IllegalStateException {
         this.selectedPad = index;
         if (this.editMode) {
             showEditOptions(index);
@@ -1695,7 +1715,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (seekDrumDelayTime != null) seekDrumDelayTime.setProgress((int) padDrumDelayTime[index]);
             if (seekDrumDelayLevel != null) seekDrumDelayLevel.setProgress((int)(padDrumDelayLevel[index] * 100f));
             if (txtDrumDelayVal != null) txtDrumDelayVal.setText((int)(padDrumDelayLevel[index] * 100f) + "%");
-            toggleLoop(index);
+            toggleLoop(index, audioAlreadyTriggered);
         }
     }
 
@@ -2181,6 +2201,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 padIndex = note % 8;
             }
             final int finalPadIndex = padIndex;
+            // Fire the sound right now, off the MIDI thread — don't wait for the
+            // runOnUiThread post below to reach the front of the main-thread queue.
+            // See midiTriggerDrumPadImmediate() for why this removes latency.
+            final boolean audioAlreadyTriggered = midiTriggerDrumPadImmediate(finalPadIndex);
             runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.LoopsActivity.22
                 final /* synthetic */ LoopsActivity this$0;
 
@@ -2193,7 +2217,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     int i = finalPadIndex;
                     if (i >= 0 && i < 8) {
                         this.this$0.loopPads[finalPadIndex].setPressed(true);
-                        this.this$0.handlePadClick(finalPadIndex);
+                        this.this$0.handlePadClick(finalPadIndex, audioAlreadyTriggered);
                         Handler handler = new Handler(Looper.getMainLooper());
                         final int i2 = finalPadIndex;
                         handler.postDelayed(new Runnable(this) { // from class: com.pramod.loopmidi.LoopsActivity.22.1
@@ -2212,6 +2236,61 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
+    }
+
+    /**
+     * MIDI fast-path: fires the native audio for a drum/one-shot pad hit synchronously,
+     * off the MIDI callback thread — with NO wait for a main-thread post/dispatch. This
+     * removes the UI-thread scheduling latency (jitter from layout/animation/other work
+     * queued ahead of it) that previously sat between a MIDI note-on and the sound
+     * actually starting, since the old path only called toggleLoop() (which does the
+     * playSample() call) from inside runOnUiThread().
+     *
+     * Only handles the "sample already loaded + drum/one-shot pad" case — the exact same
+     * condition toggleLoop() requires before it plays anything. If the sample isn't loaded
+     * yet, or the pad is in LOOP mode (start/stop toggle, not a per-hit trigger — far less
+     * latency sensitive), this returns false and the normal toggleLoop() path on the UI
+     * thread handles it exactly as before, unchanged.
+     *
+     * @return true if audio was fired here (caller must tell toggleLoop() to skip playSample).
+     */
+    private boolean midiTriggerDrumPadImmediate(int index) {
+        // Snapshot the engine reference once: onDestroy() nulls out this.audioEngine on the
+        // UI thread, and this method runs on the MIDI callback thread, so re-reading the
+        // field between the null check and the playSample() call below could race with
+        // teardown and throw an NPE. A local snapshot makes the check+use atomic.
+        AudioEngine engine = this.audioEngine;
+        AudioEngine.SampleData sampleData = this.loopSamples[index];
+        if (sampleData == null || !sampleData.loaded || engine == null) {
+            return false;
+        }
+        boolean effectiveDrumMode = this.padModeOverride[index]
+                ? this.padDrumMode[index]
+                : this.isGlobalDrumMode;
+        boolean isDrumPad = this.padModeOverride[index]
+                ? this.padDrumMode[index]
+                : (this.isGlobalDrumMode || this.isOneShotMode);
+        if (!isDrumPad) {
+            return false;
+        }
+        int chokeGroup;
+        boolean drumDelayActive;
+        float drumDelayMs;
+        float drumDelayLevelToUse;
+        if (effectiveDrumMode) {
+            chokeGroup = this.padDrumChokeGroup[index];
+            drumDelayActive = this.padDrumDelayOn[index];
+            drumDelayMs = drumDelayActive ? this.padDrumDelayTime[index] : 0f;
+            drumDelayLevelToUse = drumDelayActive ? this.padDrumDelayLevel[index] : 0f;
+        } else {
+            chokeGroup = index + 1;
+            drumDelayActive = false;
+            drumDelayMs = 0f;
+            drumDelayLevelToUse = 0f;
+        }
+        engine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
+                drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+        return true;
     }
 
     public void preloadLoop(int index) {
