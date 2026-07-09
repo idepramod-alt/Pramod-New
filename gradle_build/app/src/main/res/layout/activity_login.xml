@@ -42,6 +42,18 @@
         android:text=""
         android:textColor="#ffff5555"
         android:textSize="12sp"
-        android:gravity="center"/>
+        android:gravity="center"
+        android:layout_marginBottom="24dp"/>
+
+    <!-- Shown only when user has not purchased -->
+    <Button
+        android:id="@+id/btnWhatsApp"
+        android:layout_width="240dp"
+        android:layout_height="48dp"
+        android:text="📲 WhatsApp pe kharidein"
+        android:textColor="#ffffffff"
+        android:textStyle="bold"
+        android:background="#ff25D366"
+        android:visibility="gone"/>
 
 </LinearLayout>

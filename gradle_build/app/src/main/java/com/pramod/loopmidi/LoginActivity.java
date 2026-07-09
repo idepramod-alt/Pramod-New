@@ -2,6 +2,7 @@ package com.pramod.loopmidi;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
@@ -17,14 +18,23 @@ import com.google.firebase.auth.AuthCredential;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 public class LoginActivity extends Activity {
 
     private static final int RC_SIGN_IN = 9001;
 
+    // ── Your WhatsApp number (with country code, no + or spaces) ──
+    private static final String WHATSAPP_NUMBER = "916268927194";
+    private static final String WHATSAPP_MESSAGE = "Hello, I want to buy Pramod Octapad Loops app.";
+
     private GoogleSignInClient mGoogleSignInClient;
     private FirebaseAuth       mAuth;
     private Button             btnGoogleSignIn;
+    private Button             btnWhatsApp;
     private TextView           txtLoginStatus;
 
     @Override
@@ -41,12 +51,19 @@ public class LoginActivity extends Activity {
         mGoogleSignInClient = GoogleSignIn.getClient(this, gso);
 
         btnGoogleSignIn = (Button) findViewById(R.id.btnGoogleSignIn);
+        btnWhatsApp     = (Button) findViewById(R.id.btnWhatsApp);
         txtLoginStatus  = (TextView) findViewById(R.id.txtLoginStatus);
 
-        btnGoogleSignIn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                signIn();
+        btnGoogleSignIn.setOnClickListener(v -> signIn());
+
+        btnWhatsApp.setOnClickListener(v -> {
+            try {
+                String url = "https://wa.me/" + WHATSAPP_NUMBER
+                        + "?text=" + Uri.encode(WHATSAPP_MESSAGE);
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e) {
+                if (txtLoginStatus != null)
+                    txtLoginStatus.setText("WhatsApp nahi mila phone mein.");
             }
         });
     }
@@ -54,10 +71,10 @@ public class LoginActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        // If already signed in, skip login screen
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            goToLoops();
+            // Already logged in — re-verify license every time app opens
+            checkLicense(currentUser);
         }
     }
 
@@ -85,20 +102,16 @@ public class LoginActivity extends Activity {
     }
 
     private void firebaseAuthWithGoogle(GoogleSignInAccount acct) {
-        if (txtLoginStatus != null) txtLoginStatus.setText("Authenticating…");
+        if (txtLoginStatus != null) txtLoginStatus.setText("Verifying…");
         AuthCredential credential = GoogleAuthProvider.getCredential(acct.getIdToken(), null);
         mAuth.signInWithCredential(credential)
                 .addOnCompleteListener(this, task -> {
                     if (task.isSuccessful()) {
                         FirebaseUser user = mAuth.getCurrentUser();
                         if (user != null) {
-                            CloudSync.writeProfile(user.getUid(),
-                                    user.getEmail(), user.getDisplayName());
-                            // Pull cloud settings into local prefs, then launch LoopsActivity
-                            CloudSync.pullSettingsThenRun(LoginActivity.this,
-                                    user.getUid(), this::goToLoops);
+                            checkLicense(user);
                         } else {
-                            goToLoops();
+                            showNotPurchased();
                         }
                     } else {
                         String msg = task.getException() != null
@@ -107,6 +120,50 @@ public class LoginActivity extends Activity {
                         if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
                     }
                 });
+    }
+
+    /**
+     * Check Firebase: authorizedUsers/{uid} must exist.
+     * Developer adds this entry manually for each buyer.
+     */
+    private void checkLicense(FirebaseUser user) {
+        if (txtLoginStatus != null) txtLoginStatus.setText("Checking license…");
+        FirebaseDatabase.getInstance()
+                .getReference("authorizedUsers")
+                .child(user.getUid())
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(DataSnapshot snapshot) {
+                        if (snapshot.exists()) {
+                            // ✅ Licensed — save profile + sync settings + enter app
+                            CloudSync.writeProfile(user.getUid(),
+                                    user.getEmail(), user.getDisplayName());
+                            CloudSync.pullSettingsThenRun(
+                                    LoginActivity.this, user.getUid(), LoginActivity.this::goToLoops);
+                        } else {
+                            // ❌ Not purchased — sign out and show buy button
+                            showNotPurchased();
+                        }
+                    }
+
+                    @Override
+                    public void onCancelled(DatabaseError error) {
+                        // Network error — fail safe: deny access
+                        showNotPurchased();
+                    }
+                });
+    }
+
+    private void showNotPurchased() {
+        // Sign out so they can't bypass
+        mAuth.signOut();
+        mGoogleSignInClient.signOut();
+        runOnUiThread(() -> {
+            if (txtLoginStatus != null)
+                txtLoginStatus.setText("❌ App kharidi nahi hai.\nKharidne ke liye WhatsApp karein.");
+            if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
+            if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
+        });
     }
 
     private void goToLoops() {
