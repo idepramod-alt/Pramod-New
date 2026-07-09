@@ -88,14 +88,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // Drum-mode-only FX (ADV panel): choke + delay. Only affects real DRUM MODE
     // hits (effectiveDrumMode == true) — One-Shot and Loop mode keep their own
     // existing, untouched behavior.
-    private CheckBox chkDrumChoke;
+    private SeekBar seekDrumChoke;
+    private TextView txtDrumChokeVal;
     private CheckBox chkDrumDelay;
-    private SeekBar seekDrumDelay;
+    private SeekBar seekDrumDelayTime;
+    private SeekBar seekDrumDelayLevel;
     private TextView txtDrumDelayVal;
-    // Per-pad, like MainActivity's padDelayOn[]/padChokeGroup[] — each pad keeps
-    // its own choke/delay setting instead of one global switch.
-    private boolean[] padDrumChokeOn = new boolean[8];
+    // Per-pad, exactly like MainActivity's padChokeGroup[]/padDelayOn[]/
+    // padDelayTime[]/padDelayLevel[] — each pad keeps its own choke group number
+    // and delay settings instead of one global switch. seekDrumChoke's progress
+    // (0-4) IS the chokeGroup value directly passed to playSample, same as
+    // MainActivity's seekChokeGroup — 0 means choke disabled.
+    private int[] padDrumChokeGroup = new int[8];
     private boolean[] padDrumDelayOn = new boolean[8];
+    private float[] padDrumDelayTime = new float[8];
     private float[] padDrumDelayLevel = new float[8];
     private int currentScaleOffset;
     private EditText editCustomBpm;
@@ -315,9 +321,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             float drumDelayMs;
             float drumDelayLevelToUse;
             if (effectiveDrumMode) {
-                chokeGroup = this.padDrumChokeOn[index] ? (index + 1) : 0;
+                chokeGroup = this.padDrumChokeGroup[index];
                 drumDelayActive = this.padDrumDelayOn[index];
-                drumDelayMs = drumDelayActive ? 260f : 0f;
+                drumDelayMs = drumDelayActive ? this.padDrumDelayTime[index] : 0f;
                 drumDelayLevelToUse = drumDelayActive ? this.padDrumDelayLevel[index] : 0f;
             } else {
                 // ONE-SHOT mode (not real drum mode): unchanged, no delay FX.
@@ -829,9 +835,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnMasterVolMode  = (Button) findViewById(R.id.btnMasterVolMode);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
-        this.chkDrumChoke = (CheckBox) findViewById(R.id.chkDrumChoke);
+        this.seekDrumChoke = (SeekBar) findViewById(R.id.seekDrumChoke);
+        this.txtDrumChokeVal = (TextView) findViewById(R.id.txtDrumChokeVal);
         this.chkDrumDelay = (CheckBox) findViewById(R.id.chkDrumDelay);
-        this.seekDrumDelay = (SeekBar) findViewById(R.id.seekDrumDelay);
+        this.seekDrumDelayTime = (SeekBar) findViewById(R.id.seekDrumDelayTime);
+        this.seekDrumDelayLevel = (SeekBar) findViewById(R.id.seekDrumDelayLevel);
         this.txtDrumDelayVal = (TextView) findViewById(R.id.txtDrumDelayVal);
         this.btnResetSpeedPitch = (Button) findViewById(R.id.btnResetSpeedPitch);
         // Loop Mode / Drum Mode toggle buttons
@@ -888,8 +896,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
             this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_" + i, false);
             this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_" + i, false);
-            this.padDrumChokeOn[i] = this.prefs.getBoolean("pad_drum_choke_" + i, false);
+            this.padDrumChokeGroup[i] = this.prefs.getInt("pad_drum_choke_grp_" + i, 0);
             this.padDrumDelayOn[i] = this.prefs.getBoolean("pad_drum_delay_on_" + i, false);
+            this.padDrumDelayTime[i] = this.prefs.getFloat("pad_drum_delay_time_" + i, 150.0f);
             this.padDrumDelayLevel[i] = this.prefs.getFloat("pad_drum_delay_level_" + i, 0.5f);
         }
         this.isMasterVolumeMode = this.prefs.getBoolean("master_vol_mode", true);
@@ -907,9 +916,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // Show the currently-selected pad's drum FX settings (defaults to pad 0 at startup;
         // updated again on every pad tap in handlePadClick()).
-        if (this.chkDrumChoke != null) this.chkDrumChoke.setChecked(this.padDrumChokeOn[this.selectedPad]);
+        if (this.seekDrumChoke != null) this.seekDrumChoke.setProgress(this.padDrumChokeGroup[this.selectedPad]);
+        if (this.txtDrumChokeVal != null) this.txtDrumChokeVal.setText(String.valueOf(this.padDrumChokeGroup[this.selectedPad]));
         if (this.chkDrumDelay != null) this.chkDrumDelay.setChecked(this.padDrumDelayOn[this.selectedPad]);
-        if (this.seekDrumDelay != null) this.seekDrumDelay.setProgress((int) (this.padDrumDelayLevel[this.selectedPad] * 100f));
+        if (this.seekDrumDelayTime != null) this.seekDrumDelayTime.setProgress((int) this.padDrumDelayTime[this.selectedPad]);
+        if (this.seekDrumDelayLevel != null) this.seekDrumDelayLevel.setProgress((int) (this.padDrumDelayLevel[this.selectedPad] * 100f));
         if (this.txtDrumDelayVal != null) this.txtDrumDelayVal.setText(((int) (this.padDrumDelayLevel[this.selectedPad] * 100f)) + "%");
         setupReverb();
         setupControls();
@@ -1481,14 +1492,24 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // scoped to whichever pad is currently selected (LoopsActivity.this.selectedPad).
         // Independent of the checkListener above — does not touch isMultiMode /
         // isOneShotMode / Loop mode at all.
-        if (this.chkDrumChoke != null) {
-            this.chkDrumChoke.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+        // seekDrumChoke's progress (0-4) IS the chokeGroup value directly, exactly
+        // like MainActivity's seekChokeGroup — no on/off checkbox, 0 = choke off.
+        if (this.seekDrumChoke != null) {
+            this.seekDrumChoke.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
-                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    if (!fromUser) return;
                     int pad = LoopsActivity.this.selectedPad;
-                    LoopsActivity.this.padDrumChokeOn[pad] = isChecked;
-                    LoopsActivity.this.prefs.edit().putBoolean("pad_drum_choke_" + pad, isChecked).apply();
+                    LoopsActivity.this.padDrumChokeGroup[pad] = progress;
+                    if (LoopsActivity.this.txtDrumChokeVal != null) {
+                        LoopsActivity.this.txtDrumChokeVal.setText(String.valueOf(progress));
+                    }
+                    LoopsActivity.this.prefs.edit().putInt("pad_drum_choke_grp_" + pad, progress).apply();
                 }
+                @Override
+                public void onStartTrackingTouch(SeekBar sb) {}
+                @Override
+                public void onStopTrackingTouch(SeekBar sb) {}
             });
         }
         if (this.chkDrumDelay != null) {
@@ -1501,23 +1522,37 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
-        if (this.seekDrumDelay != null) {
-            this.seekDrumDelay.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        if (this.seekDrumDelayTime != null) {
+            this.seekDrumDelayTime.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    if (!fromUser) return;
+                    int pad = LoopsActivity.this.selectedPad;
+                    LoopsActivity.this.padDrumDelayTime[pad] = progress;
+                    LoopsActivity.this.prefs.edit().putFloat("pad_drum_delay_time_" + pad, (float) progress).apply();
+                }
+                @Override
+                public void onStartTrackingTouch(SeekBar sb) {}
+                @Override
+                public void onStopTrackingTouch(SeekBar sb) {}
+            });
+        }
+        if (this.seekDrumDelayLevel != null) {
+            this.seekDrumDelayLevel.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    if (!fromUser) return;
                     int pad = LoopsActivity.this.selectedPad;
                     LoopsActivity.this.padDrumDelayLevel[pad] = progress / 100f;
                     if (LoopsActivity.this.txtDrumDelayVal != null) {
                         LoopsActivity.this.txtDrumDelayVal.setText(progress + "%");
                     }
+                    LoopsActivity.this.prefs.edit().putFloat("pad_drum_delay_level_" + pad, LoopsActivity.this.padDrumDelayLevel[pad]).apply();
                 }
                 @Override
                 public void onStartTrackingTouch(SeekBar sb) {}
                 @Override
-                public void onStopTrackingTouch(SeekBar sb) {
-                    int pad = LoopsActivity.this.selectedPad;
-                    LoopsActivity.this.prefs.edit().putFloat("pad_drum_delay_level_" + pad, LoopsActivity.this.padDrumDelayLevel[pad]).apply();
-                }
+                public void onStopTrackingTouch(SeekBar sb) {}
             });
         }
 
@@ -1642,9 +1677,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             // Refresh the drum FX row (CHOKE/DELAY) to show THIS pad's own settings —
             // per-pad, same idea as MainActivity's per-pad edit dialog refresh.
-            if (chkDrumChoke != null) chkDrumChoke.setChecked(padDrumChokeOn[index]);
+            if (seekDrumChoke != null) seekDrumChoke.setProgress(padDrumChokeGroup[index]);
+            if (txtDrumChokeVal != null) txtDrumChokeVal.setText(String.valueOf(padDrumChokeGroup[index]));
             if (chkDrumDelay != null) chkDrumDelay.setChecked(padDrumDelayOn[index]);
-            if (seekDrumDelay != null) seekDrumDelay.setProgress((int)(padDrumDelayLevel[index] * 100f));
+            if (seekDrumDelayTime != null) seekDrumDelayTime.setProgress((int) padDrumDelayTime[index]);
+            if (seekDrumDelayLevel != null) seekDrumDelayLevel.setProgress((int)(padDrumDelayLevel[index] * 100f));
             if (txtDrumDelayVal != null) txtDrumDelayVal.setText((int)(padDrumDelayLevel[index] * 100f) + "%");
             toggleLoop(index);
         }

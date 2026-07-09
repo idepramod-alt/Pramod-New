@@ -602,17 +602,17 @@ jobs:
         run: |
           JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           # LoopsActivity.java now uses a mode-dependent, PER-PAD chokeGroup for
-          # drum/one-shot hits (mirrors MainActivity's per-pad padChokeGroup[] array):
-          #   - Real DRUM MODE -> chokeGroup = padDrumChokeOn[index] ? (index+1) : 0.
-          #     Default is 0 (choke disabled, per the native engine's
-          #     `if (chokeGroup > 0)` guard) so fast pad rolling / rapid re-hits let
-          #     each hit ring out fully; the per-pad CHOKE checkbox opts a pad into
-          #     self-choke, same behavior as ONE-SHOT.
+          # drum/one-shot hits, matching MainActivity's own per-pad seekChokeGroup
+          # pattern exactly (progress value IS the chokeGroup, 0 = off):
+          #   - Real DRUM MODE -> chokeGroup = padDrumChokeGroup[index] (0-4, set by
+          #     the per-pad seekDrumChoke slider in the ADV panel). Default is 0
+          #     (choke disabled, per the native engine's `if (chokeGroup > 0)` guard)
+          #     so fast pad rolling / rapid re-hits let each hit ring out fully.
           #   - ONE-SHOT MODE -> chokeGroup = index + 1 (unique per pad), unchanged,
           #     so retapping the SAME pad still chokes (cuts off) its own previous
           #     still-ringing hit, while different pads never choke each other.
           # LOOP mode is untouched — it never used chokeGroup and still doesn't.
-          grep -n 'padDrumChokeOn\[index\] ? (index + 1) : 0' "$JAVA" || { echo "ERROR: expected per-pad mode-dependent chokeGroup not found"; exit 1; }
+          grep -n 'chokeGroup = this.padDrumChokeGroup\[index\]' "$JAVA" || { echo "ERROR: expected per-pad mode-dependent chokeGroup not found"; exit 1; }
           echo "OK: drum-mode per-pad choke / one-shot per-pad choke confirmed"
 
       - name: Fix drum latency - AAudio API + Sonification content type

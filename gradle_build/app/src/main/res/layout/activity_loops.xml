@@ -148,25 +148,43 @@
                 android:layout_weight="1" android:buttonTint="#ff00afff"/>
         </LinearLayout>
 
-        <!-- Drum-mode-only FX row (choke + delay). These only affect real DRUM MODE
-             hits; Loop mode and One-Shot mode keep their own existing behavior. -->
+        <!-- Drum-mode-only FX (per pad — same as MainActivity's per-pad
+             chkDelay/seekDelayTime/seekDelayLevel/seekChokeGroup, just scoped to
+             whichever pad is selected here). Only affects real DRUM MODE hits;
+             Loop mode and One-Shot mode keep their own existing, untouched behavior. -->
         <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="8dp">
             <TextView android:textSize="9sp" android:textStyle="bold" android:textColor="#ff888888"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="DRUM FX:"/>
-            <CheckBox android:textSize="11sp" android:textColor="#ffffffff"
-                android:id="@+id/chkDrumChoke" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                android:text="CHOKE" android:layout_weight="1" android:buttonTint="#ff00afff"/>
-            <CheckBox android:textSize="11sp" android:textColor="#ffffffff"
-                android:id="@+id/chkDrumDelay" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                android:text="DELAY" android:layout_weight="1" android:buttonTint="#ff00afff"/>
-            <SeekBar android:id="@+id/seekDrumDelay"
+                android:text="CHOKE GRP"/>
+            <SeekBar android:id="@+id/seekDrumChoke"
                 android:layout_width="0dp" android:layout_height="wrap_content"
-                android:max="100" android:progress="50" android:layout_weight="1.4"
+                android:max="4" android:progress="0" android:layout_weight="1"
+                android:layout_marginStart="4dp"/>
+            <TextView android:textSize="10sp" android:textColor="#ff00afff" android:gravity="end"
+                android:id="@+id/txtDrumChokeVal" android:layout_width="16dp"
+                android:layout_height="wrap_content" android:text="0"/>
+        </LinearLayout>
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp">
+            <CheckBox android:textSize="11sp" android:textColor="#ff00ffff"
+                android:id="@+id/chkDrumDelay" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="DLY" android:buttonTint="#ff00ffff"/>
+            <TextView android:textSize="9sp" android:textColor="#ff888888"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="6dp" android:text="TIME"/>
+            <SeekBar android:id="@+id/seekDrumDelayTime"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:max="500" android:progress="150" android:layout_weight="1"
+                android:layout_marginStart="4dp"/>
+            <TextView android:textSize="9sp" android:textColor="#888888"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="6dp" android:text="LVL"/>
+            <SeekBar android:id="@+id/seekDrumDelayLevel"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:max="100" android:progress="50" android:layout_weight="1"
                 android:layout_marginStart="4dp"/>
             <TextView android:textSize="10sp" android:textColor="#ff00afff" android:gravity="end"
                 android:id="@+id/txtDrumDelayVal" android:layout_width="32dp"
