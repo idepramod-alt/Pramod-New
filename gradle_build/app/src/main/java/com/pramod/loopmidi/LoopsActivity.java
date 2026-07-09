@@ -809,7 +809,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnBack = (Button) findViewById(R.id.btnBack);
         this.btnEditLoops = (Button) findViewById(R.id.btnEditLoops);
         this.btnAdvancedLoops = (Button) findViewById(R.id.btnAdvancedLoops);
-        this.advancedControlPanel = findViewById(R.id.advancedControlPanel);
+        this.advancedControlPanel = findViewById(R.id.advancedControlPanelScroll);
         this.txtLoopStatus = (TextView) findViewById(R.id.txtLoopStatus);
         this.txtMidiStatus = (TextView) findViewById(R.id.txtMidiStatus);
         if (this.txtMidiStatus != null) {
@@ -1519,6 +1519,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     int pad = LoopsActivity.this.selectedPad;
                     LoopsActivity.this.padDrumDelayOn[pad] = isChecked;
                     LoopsActivity.this.prefs.edit().putBoolean("pad_drum_delay_on_" + pad, isChecked).apply();
+                    // DLY ON hote hi agar CHOKE GRP abhi 0 (off) hai to use apne aap
+                    // 1 kar do — warna DRUM MODE mein fast/roll taps ke delay tails
+                    // ek-doosre pe overlap ho kar continuous "mic echo" jaisa wash bana
+                    // dete hain. Choke > 0 hote hi har naya hit apna hi pichla
+                    // hit+delay-tail cut kar deta hai, to sirf ek clean slapback repeat
+                    // sunayi deta hai — exactly MainActivity ke seekChokeGroup jaisa.
+                    if (isChecked && LoopsActivity.this.padDrumChokeGroup[pad] == 0) {
+                        LoopsActivity.this.padDrumChokeGroup[pad] = 1;
+                        LoopsActivity.this.prefs.edit().putInt("pad_drum_choke_grp_" + pad, 1).apply();
+                        if (LoopsActivity.this.seekDrumChoke != null) LoopsActivity.this.seekDrumChoke.setProgress(1);
+                        if (LoopsActivity.this.txtDrumChokeVal != null) LoopsActivity.this.txtDrumChokeVal.setText("1");
+                    }
                 }
             });
         }

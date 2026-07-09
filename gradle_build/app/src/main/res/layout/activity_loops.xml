@@ -108,10 +108,17 @@
     </LinearLayout>
 
     <!-- ── Advanced Panel (ADV button toggles visibility) ── -->
+    <!-- Fixed-height ScrollView so this panel can NEVER grow tall enough to push
+         the pad grid (loopPadArea, weight=1) off-screen — extra FX rows just
+         scroll inside this box instead of stealing the pads' space. -->
+    <ScrollView android:id="@+id/advancedControlPanelScroll"
+        android:visibility="gone" android:layout_width="match_parent"
+        android:layout_height="210dp" android:layout_marginBottom="4dp"
+        android:fillViewport="false">
     <LinearLayout android:orientation="vertical" android:id="@+id/advancedControlPanel"
         android:background="#ff333333" android:padding="8dp"
-        android:visibility="gone" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:layout_marginBottom="4dp">
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
 
         <!-- Master Volume row -->
         <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
@@ -241,6 +248,7 @@
                 android:layout_weight="1"/>
         </LinearLayout>
     </LinearLayout>
+    </ScrollView>
 
     <!-- ── Speed / Pitch / BPM bar ── -->
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
