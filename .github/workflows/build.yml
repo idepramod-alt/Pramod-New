@@ -95,6 +95,7 @@ jobs:
               implementation 'com.google.firebase:firebase-auth:22.3.1'
               implementation 'com.google.android.gms:play-services-base:18.3.0'
               implementation 'com.google.android.gms:play-services-tasks:18.1.0'
+              implementation 'com.google.android.gms:play-services-auth:21.2.0'
               implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.25'
               implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0'
               implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -148,12 +149,13 @@ jobs:
                   android:allowBackup="true"
                   android:appComponentFactory="androidx.core.app.CoreComponentFactory">
                   <activity android:name="com.pramod.loopmidi.ActivationActivity" android:exported="true" android:screenOrientation="landscape"/>
-                  <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape">
+                  <activity android:name="com.pramod.loopmidi.LoginActivity" android:exported="true" android:screenOrientation="landscape">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
+                  <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape"/>
                   <activity android:name="com.pramod.loopmidi.MainActivity" android:exported="false" android:screenOrientation="landscape"/>
                   <service android:name="com.google.firebase.components.ComponentDiscoveryService" android:exported="false" android:directBootAware="true">
                       <meta-data android:name="com.google.firebase.components:com.google.firebase.database.FirebaseDatabaseKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
@@ -185,19 +187,41 @@ jobs:
           cat > google-services.json << 'EOF'
           {
             "project_info": {
-              "project_number": "000000000000",
-              "project_id": "pramod-placeholder",
-              "storage_bucket": "pramod-placeholder.appspot.com"
+              "project_number": "1070428492610",
+              "project_id": "pramod-octapad-loop",
+              "storage_bucket": "pramod-octapad-loop.firebasestorage.app"
             },
             "client": [
               {
                 "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                  "mobilesdk_app_id": "1:1070428492610:android:463803a2e3c8dff1b0eedb",
                   "android_client_info": { "package_name": "com.pramod.loopmidi" }
                 },
-                "oauth_client": [],
-                "api_key": [{ "current_key": "placeholder" }],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+                "oauth_client": [
+                  {
+                    "client_id": "1070428492610-4ob9cmeo9es55p8uc6a4i51a9u1ni61l.apps.googleusercontent.com",
+                    "client_type": 1,
+                    "android_info": {
+                      "package_name": "com.pramod.loopmidi",
+                      "certificate_hash": "9324732a57a16f3f5244991f32a4bbd178ff6659"
+                    }
+                  },
+                  {
+                    "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [{ "current_key": "AIzaSyAM5iLKu7EBcodDUgBiGadmIAsMv82yxhc" }],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
               }
             ],
             "configuration_version": "1"
@@ -237,6 +261,7 @@ jobs:
           find gradle_build/app/src/main/res/layout -type f \
             ! -name "activity_activation.xml" \
             ! -name "activity_loops.xml" \
+            ! -name "activity_login.xml" \
             ! -name "custom_dialog.xml" \
             ! -name "main.xml" \
             ! -name "notification_action.xml" \
