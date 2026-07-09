@@ -27,12 +27,16 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class LoginActivity extends Activity {
 
     private static final int RC_SIGN_IN = 9001;
 
     // ── Firebase Realtime Database URL (Asia Southeast 1) ──
-    private static final String DB_URL = "https://pramod-octapad-loop-default-rtdb.asia-southeast1.firebasedatabase.app";
+    private static final String DB_URL =
+            "https://pramod-octapad-loop-default-rtdb.asia-southeast1.firebasedatabase.app";
 
     // ── Your WhatsApp number (with country code, no + or spaces) ──
     private static final String WHATSAPP_NUMBER = "916268927194";
@@ -125,7 +129,7 @@ public class LoginActivity extends Activity {
                         if (user != null) {
                             checkLicense(user);
                         } else {
-                            showNotPurchased();
+                            showNotPurchased(null);
                         }
                     } else {
                         String msg = task.getException() != null
@@ -175,7 +179,8 @@ public class LoginActivity extends Activity {
                 timeoutHandler.removeCallbacks(timeoutTask);
 
                 if (!snapshot.exists()) {
-                    showNotPurchased();
+                    // ❌ Not purchased — save pending request for admin
+                    showNotPurchased(user);
                     return;
                 }
 
@@ -218,6 +223,21 @@ public class LoginActivity extends Activity {
     }
 
     // ─────────────────────────────────────────────────────────────────
+    //  Save pending request so admin can approve from admin panel
+    // ─────────────────────────────────────────────────────────────────
+    private void savePendingRequest(FirebaseUser user) {
+        if (user == null) return;
+        Map<String, Object> data = new HashMap<>();
+        data.put("email",       user.getEmail()       != null ? user.getEmail()       : "");
+        data.put("displayName", user.getDisplayName() != null ? user.getDisplayName() : "");
+        data.put("timestamp",   System.currentTimeMillis());
+        FirebaseDatabase.getInstance(DB_URL)
+                .getReference("pendingRequests")
+                .child(user.getUid())
+                .setValue(data);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     //  Shown when account is locked to a DIFFERENT device
     // ─────────────────────────────────────────────────────────────────
     private void showKickedOut() {
@@ -234,13 +254,18 @@ public class LoginActivity extends Activity {
 
     // ─────────────────────────────────────────────────────────────────
     //  Shown when user has not purchased
+    //  Also saves a pending request so admin sees it in admin panel
     // ─────────────────────────────────────────────────────────────────
-    private void showNotPurchased() {
+    private void showNotPurchased(FirebaseUser user) {
+        // Save pending request for admin panel (before signing out)
+        savePendingRequest(user);
+
         mAuth.signOut();
         mGoogleSignInClient.signOut();
         runOnUiThread(() -> {
             if (txtLoginStatus != null)
-                txtLoginStatus.setText("❌ App kharidi nahi hai.\nKharidne ke liye WhatsApp karein.");
+                txtLoginStatus.setText(
+                        "❌ App kharidi nahi hai.\nKharidne ke liye WhatsApp karein.");
             if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
             if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
         });
