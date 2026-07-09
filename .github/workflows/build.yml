@@ -869,6 +869,7 @@ jobs:
           grep -c 'audioEngine.startRecording\|audioEngine.stopRecording' "$LA" || true
 
       - name: Add ADD MODE button plus Loop-Drum to ADV panel
+        if: false
         run: |
           LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
           XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
