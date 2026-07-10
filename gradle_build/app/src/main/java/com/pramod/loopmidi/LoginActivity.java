@@ -49,6 +49,10 @@ public class LoginActivity extends Activity {
     private Button             btnWhatsApp;
     private TextView           txtLoginStatus;
 
+    // ── Real-time approval listener (waits for admin to activate the user) ──
+    private ValueEventListener approvalListener;
+    private DatabaseReference  approvalRef;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -96,6 +100,13 @@ public class LoginActivity extends Activity {
                 checkLicense(currentUser);
             }
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Clean up real-time approval listener
+        clearApprovalListener();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -156,7 +167,7 @@ public class LoginActivity extends Activity {
                         if (user != null) {
                             checkLicense(user);
                         } else {
-                            showNotPurchased(null);
+                            showPurchaseRequired(null);
                         }
                     } else {
                         String msg = task.getException() != null
@@ -206,8 +217,8 @@ public class LoginActivity extends Activity {
                 timeoutHandler.removeCallbacks(timeoutTask);
 
                 if (!snapshot.exists()) {
-                    // ❌ Not purchased — save pending request for admin
-                    showNotPurchased(user);
+                    // ❌ Not yet activated by admin — send pending request and wait
+                    waitForApproval(user);
                     return;
                 }
 
@@ -254,7 +265,74 @@ public class LoginActivity extends Activity {
     }
 
     // ─────────────────────────────────────────────────────────────────
+    //  Wait for admin approval:
+    //  1. Write pending request to Firebase (user stays signed in so
+    //     the write succeeds — token is not revoked early)
+    //  2. Show "waiting" UI
+    //  3. Listen to authorizedUsers/{uid} in real-time — as soon as
+    //     admin clicks "Activate", the listener fires and user enters
+    //     the app automatically without re-signing-in
+    // ─────────────────────────────────────────────────────────────────
+    private void waitForApproval(FirebaseUser user) {
+        setLicenseCached(false);
+
+        // Step 1: Write pending request while user is still authenticated
+        savePendingRequest(user);
+
+        // Step 2: Show waiting UI
+        runOnUiThread(() -> {
+            if (txtLoginStatus != null)
+                txtLoginStatus.setText(
+                        "⏳ Aapki login request admin ko bheji gayi hai.\n\n" +
+                        "Admin approve karne par aap automatically app mein\n" +
+                        "enter ho jayenge — yahan raho!\n\n" +
+                        "Kharidne ke liye WhatsApp par message karein.");
+            if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(false);
+            if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
+        });
+
+        // Step 3: Real-time listener — fires the moment admin activates this user
+        clearApprovalListener();
+
+        approvalRef = FirebaseDatabase.getInstance(DB_URL)
+                .getReference("authorizedUsers")
+                .child(user.getUid());
+
+        approvalListener = new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                if (snapshot.exists()) {
+                    // 🎉 Admin ne approve kar diya!
+                    clearApprovalListener();
+                    runOnUiThread(() -> {
+                        if (txtLoginStatus != null)
+                            txtLoginStatus.setText("✅ Admin ne approve kar diya! App khul rahi hai…");
+                        if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(false);
+                    });
+                    // Re-run checkLicense to handle device-lock and enter app
+                    checkLicense(user);
+                }
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                // Network issue — let user retry manually
+                runOnUiThread(() -> {
+                    if (txtLoginStatus != null)
+                        txtLoginStatus.setText(
+                                "Network error. Internet check karein.\n" +
+                                "Dobara login karein.");
+                    if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
+                });
+            }
+        };
+
+        approvalRef.addValueEventListener(approvalListener);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     //  Save pending request so admin can approve from admin panel
+    //  (called while user is still authenticated so the DB write succeeds)
     // ─────────────────────────────────────────────────────────────────
     private void savePendingRequest(FirebaseUser user) {
         if (user == null) return;
@@ -266,6 +344,17 @@ public class LoginActivity extends Activity {
                 .getReference("pendingRequests")
                 .child(user.getUid())
                 .setValue(data);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Remove and null the approval listener safely
+    // ─────────────────────────────────────────────────────────────────
+    private void clearApprovalListener() {
+        if (approvalListener != null && approvalRef != null) {
+            approvalRef.removeEventListener(approvalListener);
+        }
+        approvalListener = null;
+        approvalRef      = null;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -285,20 +374,14 @@ public class LoginActivity extends Activity {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    //  Shown when user has not purchased
-    //  Also saves a pending request so admin sees it in admin panel
+    //  Fallback: user is null (edge case) — just show sign-in option
     // ─────────────────────────────────────────────────────────────────
-    private void showNotPurchased(FirebaseUser user) {
-        // Save pending request for admin panel (before signing out)
-        savePendingRequest(user);
-
+    private void showPurchaseRequired(FirebaseUser user) {
         setLicenseCached(false);
-        mAuth.signOut();
-        mGoogleSignInClient.signOut();
         runOnUiThread(() -> {
             if (txtLoginStatus != null)
                 txtLoginStatus.setText(
-                        "❌ App kharidi nahi hai.\nKharidne ke liye WhatsApp karein.");
+                        "❌ Login nahi ho saka.\nDobara try karein ya WhatsApp karein.");
             if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
             if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
         });

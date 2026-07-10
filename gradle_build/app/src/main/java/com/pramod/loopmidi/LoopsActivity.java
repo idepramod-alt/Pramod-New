@@ -82,6 +82,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnResetSpeedPitch;
     private Button btnSignOut;
     private TextView txtSignedInAs;
+    // ── Admin deactivation real-time listener ──
+    private com.google.firebase.database.ValueEventListener deactivateListener;
+    private com.google.firebase.database.DatabaseReference  deactivateRef;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
     private boolean isDrumOctapadMode = false;
@@ -661,6 +664,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     @Override // android.app.Activity
     protected void onDestroy() {
         super.onDestroy();
+        // Clean up admin deactivation listener
+        if (deactivateListener != null && deactivateRef != null) {
+            deactivateRef.removeEventListener(deactivateListener);
+            deactivateListener = null;
+        }
         teardownAudioRouting();
         // Stop any active track recording
         stopTrackRecording();
@@ -888,6 +896,49 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
+
+        // ── Real-time deactivation listener ──────────────────────────────────
+        // Agar admin "Deactivate" kare to user turant logout ho jaye — koi wait nahi
+        com.google.firebase.auth.FirebaseUser _sessionUser =
+                com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+        if (_sessionUser != null) {
+            final String _uid    = _sessionUser.getUid();
+            final String _DB_URL = "https://pramod-octapad-loop-default-rtdb.asia-southeast1.firebasedatabase.app";
+            deactivateRef = com.google.firebase.database.FirebaseDatabase
+                    .getInstance(_DB_URL)
+                    .getReference("authorizedUsers")
+                    .child(_uid);
+            deactivateListener = new com.google.firebase.database.ValueEventListener() {
+                @Override
+                public void onDataChange(com.google.firebase.database.DataSnapshot snapshot) {
+                    if (!snapshot.exists()) {
+                        // Admin ne deactivate kar diya — immediately force-logout
+                        runOnUiThread(() -> {
+                            getSharedPreferences("AuthPrefs", MODE_PRIVATE)
+                                    .edit().putBoolean("licensed_ok", false).apply();
+                            com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+                            com.google.android.gms.auth.api.signin.GoogleSignInOptions _gso =
+                                    new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                                    .requestEmail().build();
+                            com.google.android.gms.auth.api.signin.GoogleSignIn
+                                    .getClient(LoopsActivity.this, _gso).signOut();
+                            Intent _logoutIntent = new Intent(LoopsActivity.this, LoginActivity.class);
+                            _logoutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                            startActivity(_logoutIntent);
+                            finish();
+                        });
+                    }
+                }
+                @Override
+                public void onCancelled(com.google.firebase.database.DatabaseError error) {
+                    // Network issue — ignore, will retry on next event
+                }
+            };
+            deactivateRef.addValueEventListener(deactivateListener);
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // System-audio capture manager (Android 10+)
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             this.mpManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
