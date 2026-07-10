@@ -1,0 +1,54 @@
+name: Build Admin Panel APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'adminpanel/**'
+      - '.github/workflows/build-adminpanel.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle wrapper
+        working-directory: adminpanel
+        run: gradle wrapper --gradle-version 8.9
+
+      - name: Build Debug APK
+        working-directory: adminpanel
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/admin_build.log
+
+      - name: Show build errors
+        if: always()
+        run: |
+          if [ -f /tmp/admin_build.log ]; then
+            echo "===== Last 200 lines of build log ====="
+            tail -n 200 /tmp/admin_build.log
+          else
+            echo "No build log found."
+          fi
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-panel-debug-apk
+          path: adminpanel/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
