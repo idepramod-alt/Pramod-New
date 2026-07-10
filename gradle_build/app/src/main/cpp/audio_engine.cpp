@@ -237,8 +237,13 @@ public:
     int sampleRate    = 48000;
     int framesPerBurst = 256;
 
-    float gDelayBuf[DELAY_BUF_SIZE];
-    int   gDelayWrite = 0;
+    // Per-voice delay lines (NOT a single shared/global buffer). Each voice
+    // (i.e. each individual pad hit) gets its own delay history, so a pad
+    // with delay OFF never picks up echoes from a different pad that has
+    // delay ON, and one pad's delay tail can't be perceived as affecting
+    // another pad's choke/cutoff behavior.
+    float delayBuf[NUM_VOICES][DELAY_BUF_SIZE];
+    int   delayWrite[NUM_VOICES] = {0};
 
     // One Sonic stream per loop voice — handles pitch-preserving speed and vice-versa
     sonicStream loopSonic[LOOP_VOICES];
@@ -277,14 +282,6 @@ public:
 
         float* out = static_cast<float*>(audioData);
         memset(out, 0, sizeof(float) * numFrames);
-
-        // Dry (pre-delay-tap) accumulator. Only the dry hits get written back
-        // into gDelayBuf below — writing the wet `out` mix (which already
-        // contains the echo added at the delay tap) would re-record the echo
-        // itself into the delay line, turning a single tap into an infinite,
-        // self-feeding chain of decaying repeats.
-        float dryOut[SCRATCH_SIZE];
-        memset(dryOut, 0, sizeof(float) * numFrames);
 
         // Process all pending commands (lock-free)
         Cmd c;
@@ -432,8 +429,9 @@ public:
                     samp *= vol * v.envGain;
 
                     // 3-band tone EQ, applied before the delay tap so echoes
-                    // (which read back from gDelayBuf, written post-EQ below)
-                    // carry the same tonal shaping as the dry hit.
+                    // (which read back from this voice's own delay line,
+                    // written post-EQ below) carry the same tonal shaping as
+                    // the dry hit.
                     if (v.eqOn) {
                         samp = biquadProcess(v.eqLowC,  v.eqLowS,  samp);
                         samp = biquadProcess(v.eqMidC,  v.eqMidS,  samp);
@@ -442,14 +440,20 @@ public:
 
                     // Delay tap — single repeat echo (no feedback chain): only one
                     // echo at delayOffset is added, at delayLevel amplitude. No
-                    // further decaying repeats are generated.
-                    dryOut[i] += samp;
+                    // further decaying repeats are generated. Uses THIS voice's
+                    // own private delay line (delayBuf[vi]) — never a buffer
+                    // shared with other pads/voices, so a pad with delay OFF
+                    // can never pick up an echo of a different pad's hit, and
+                    // one pad's delay tail can't be mistaken for another pad's
+                    // sound being cut off / choked.
+                    int dw = delayWrite[vi];
+                    delayBuf[vi][(dw + i) % DELAY_BUF_SIZE] = samp;
 
                     if (v.delayOn && v.delayOffset > 0) {
                         int offset = v.delayOffset;
                         if (offset < DELAY_BUF_SIZE) {
-                            int ri = ((gDelayWrite + i - offset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
-                            samp += gDelayBuf[ri] * v.delayLevel;
+                            int ri = ((dw + i - offset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
+                            samp += delayBuf[vi][ri] * v.delayLevel;
                         }
                     }
 
@@ -465,14 +469,14 @@ public:
                         break;
                     }
                 }
+
+                // Advance this voice's own delay-line write cursor by a full
+                // callback's worth of frames, regardless of whether the loop
+                // above broke early (sample ended) — keeps its ring buffer
+                // position consistent across callbacks.
+                delayWrite[vi] = (delayWrite[vi] + numFrames) % DELAY_BUF_SIZE;
             }
         }
-
-        // Write to delay buffer — dry signal only (see dryOut comment above),
-        // so the echo never gets re-recorded into its own delay line.
-        for (int i = 0; i < numFrames; i++)
-            gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = dryOut[i];
-        gDelayWrite = (gDelayWrite + numFrames) % DELAY_BUF_SIZE;
 
         // Soft saturation (tanh): smoother than hard clip; avoids the harsh
         // click that hard clipping adds when transients exceed ±1.0.
@@ -760,7 +764,8 @@ public:
         framesPerBurst = nativeBurst;
 
         if (stream) { stream->stop(); stream->close(); stream.reset(); }
-        memset(gDelayBuf, 0, sizeof(gDelayBuf));
+        memset(delayBuf, 0, sizeof(delayBuf));
+        memset(delayWrite, 0, sizeof(delayWrite));
 
         // Reinitialize Sonic streams with the new sample rate.
         // Also reset loopSonicLastSpeed/Pitch to 1.0 so that the render
