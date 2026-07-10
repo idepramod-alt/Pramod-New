@@ -34,6 +34,100 @@ static const int   MAX_DELAY_REPEATS = 8;
 static const float MAX_DELAY_FEEDBACK = 0.82f; // keeps the tail musical, never runs away
 static const float MIN_DELAY_REPEAT_AMP = 0.01f; // stop once a repeat is inaudible
 
+// ─── 3-band tone EQ (low-shelf / mid-peak / high-shelf), RBJ cookbook biquads ──
+// Ported from the reference engine: eqLow/eqMid/eqHigh are dB-style gains
+// (~-15..+15, see MainActivity's (progress-100)*0.15f mapping) that shape the
+// pad's tone before it hits the delay line, so echoes inherit the same
+// coloration as the dry hit — this is what was missing from our delay: the
+// eqLow/eqMid/eqHigh sliders were wired into playSample() but silently
+// discarded, so they never affected the sound at all.
+struct BiquadCoeffs { float b0 = 1.f, b1 = 0.f, b2 = 0.f, a1 = 0.f, a2 = 0.f; };
+struct BiquadState  { float z1 = 0.f, z2 = 0.f; };
+
+static inline float dbToGainSqrt(float dB) { return powf(10.f, dB / 40.f); } // sqrt(10^(dB/20))
+
+// Guards against invalid/unstable coefficients on low sample rates (engine
+// supports SR down to a few kHz on some devices) — a shelf/peak frequency at
+// or above Nyquist produces a degenerate or unstable biquad.
+static inline float safeFreq(float freq, float sr) {
+    float nyquistSafe = 0.45f * sr;
+    return std::min(freq, nyquistSafe);
+}
+
+static BiquadCoeffs makeLowShelf(float sr, float freq, float dB) {
+    BiquadCoeffs c;
+    if (dB == 0.f) return c;
+    freq = safeFreq(freq, sr);
+    float A = dbToGainSqrt(dB);
+    float w0 = 2.f * (float)M_PI * freq / sr;
+    float cosw0 = cosf(w0), sinw0 = sinf(w0);
+    float S = 1.f; // shelf slope
+    float alpha = sinw0 / 2.f * sqrtf((A + 1.f/A) * (1.f/S - 1.f) + 2.f);
+    float sqrtA = sqrtf(A);
+    float b0 =    A*((A+1) - (A-1)*cosw0 + 2*sqrtA*alpha);
+    float b1 =  2*A*((A-1) - (A+1)*cosw0);
+    float b2 =    A*((A+1) - (A-1)*cosw0 - 2*sqrtA*alpha);
+    float a0 =      (A+1) + (A-1)*cosw0 + 2*sqrtA*alpha;
+    float a1 =   -2*((A-1) + (A+1)*cosw0);
+    float a2 =      (A+1) + (A-1)*cosw0 - 2*sqrtA*alpha;
+    c.b0 = b0/a0; c.b1 = b1/a0; c.b2 = b2/a0; c.a1 = a1/a0; c.a2 = a2/a0;
+    return c;
+}
+
+static BiquadCoeffs makeHighShelf(float sr, float freq, float dB) {
+    BiquadCoeffs c;
+    if (dB == 0.f) return c;
+    freq = safeFreq(freq, sr);
+    float A = dbToGainSqrt(dB);
+    float w0 = 2.f * (float)M_PI * freq / sr;
+    float cosw0 = cosf(w0), sinw0 = sinf(w0);
+    float S = 1.f;
+    float alpha = sinw0 / 2.f * sqrtf((A + 1.f/A) * (1.f/S - 1.f) + 2.f);
+    float sqrtA = sqrtf(A);
+    float b0 =    A*((A+1) + (A-1)*cosw0 + 2*sqrtA*alpha);
+    float b1 = -2*A*((A-1) + (A+1)*cosw0);
+    float b2 =    A*((A+1) + (A-1)*cosw0 - 2*sqrtA*alpha);
+    float a0 =      (A+1) - (A-1)*cosw0 + 2*sqrtA*alpha;
+    float a1 =    2*((A-1) - (A+1)*cosw0);
+    float a2 =      (A+1) - (A-1)*cosw0 - 2*sqrtA*alpha;
+    c.b0 = b0/a0; c.b1 = b1/a0; c.b2 = b2/a0; c.a1 = a1/a0; c.a2 = a2/a0;
+    return c;
+}
+
+static BiquadCoeffs makePeaking(float sr, float freq, float dB, float Q) {
+    BiquadCoeffs c;
+    if (dB == 0.f) return c;
+    freq = safeFreq(freq, sr);
+    float A = dbToGainSqrt(dB);
+    float w0 = 2.f * (float)M_PI * freq / sr;
+    float cosw0 = cosf(w0), sinw0 = sinf(w0);
+    float alpha = sinw0 / (2.f * Q);
+    float b0 = 1 + alpha*A;
+    float b1 = -2*cosw0;
+    float b2 = 1 - alpha*A;
+    float a0 = 1 + alpha/A;
+    float a1 = -2*cosw0;
+    float a2 = 1 - alpha/A;
+    c.b0 = b0/a0; c.b1 = b1/a0; c.b2 = b2/a0; c.a1 = a1/a0; c.a2 = a2/a0;
+    return c;
+}
+
+static inline float biquadProcess(const BiquadCoeffs& c, BiquadState& s, float x) {
+    // Transposed Direct Form II — stable, cheap, standard for per-sample RT use.
+    float y = c.b0 * x + s.z1;
+    s.z1 = c.b1 * x - c.a1 * y + s.z2;
+    s.z2 = c.b2 * x - c.a2 * y;
+    // Defensive: a pathological coefficient set (shouldn't happen post-safeFreq/
+    // dB clamping, but extreme device sample rates are untested) could still
+    // diverge into NaN/Inf. Reset state and pass the input through dry rather
+    // than let a runaway filter corrupt the output stream.
+    if (!std::isfinite(y) || !std::isfinite(s.z1) || !std::isfinite(s.z2)) {
+        s = BiquadState{};
+        return x;
+    }
+    return y;
+}
+
 // ─── Pad buffer (loaded samples) ─────────────────────────────────────────────
 struct PadBuffer {
     std::vector<float> pcm;
@@ -61,6 +155,11 @@ struct Voice {
     bool    delayOn    = false;
     float   delayLevel = 0.f;
     int     delayOffset= 0;
+    // 3-band tone EQ (low-shelf/mid-peak/high-shelf) — shapes the dry hit AND,
+    // since the delay buffer stores the post-EQ output, the echoes too.
+    bool         eqOn = false;
+    BiquadCoeffs eqLowC, eqMidC, eqHighC;
+    BiquadState  eqLowS, eqMidS, eqHighS;
     // OLA granular synthesis state
     int   grainStartA = 0;
     int   grainStartB = 0;
@@ -79,6 +178,9 @@ struct Cmd {
     bool    delayOn;
     float   delayMs;
     float   delayLevel;
+    float   eqLow;
+    float   eqMid;
+    float   eqHigh;
     int     chokeGroup;
     float   attackMs;
     float   releaseMs;
@@ -323,6 +425,15 @@ public:
                     }
                     samp *= vol * v.envGain;
 
+                    // 3-band tone EQ, applied before the delay tap so echoes
+                    // (which read back from gDelayBuf, written post-EQ below)
+                    // carry the same tonal shaping as the dry hit.
+                    if (v.eqOn) {
+                        samp = biquadProcess(v.eqLowC,  v.eqLowS,  samp);
+                        samp = biquadProcess(v.eqMidC,  v.eqMidS,  samp);
+                        samp = biquadProcess(v.eqHighC, v.eqHighS, samp);
+                    }
+
                     // Delay tap — multi-repeat feedback echo (Roland SPD-20 Pro style):
                     // each repeat is delayOffset further back and quieter than the
                     // previous one by the feedback factor, instead of one static echo.
@@ -462,6 +573,17 @@ public:
             // Use actual sampleRate for delay offset calculation (not hardcoded 44.1)
             v.delayOffset = c.delayOn ? (int)(c.delayMs * (sampleRate / 1000.0f)) : 0;
             if (v.delayOffset >= DELAY_BUF_SIZE) v.delayOffset = DELAY_BUF_SIZE - 1;
+
+            // 3-band EQ: low-shelf @150Hz, mid-peak @1kHz (Q=0.9), high-shelf @6kHz.
+            // Coefficients only need recomputing once per note-on (not per-sample).
+            v.eqOn = (c.eqLow != 0.f || c.eqMid != 0.f || c.eqHigh != 0.f);
+            if (v.eqOn) {
+                const float sr2 = (float)sampleRate;
+                v.eqLowC  = makeLowShelf (sr2,  150.f, c.eqLow);
+                v.eqMidC  = makePeaking  (sr2, 1000.f, c.eqMid, 0.9f);
+                v.eqHighC = makeHighShelf(sr2, 6000.f, c.eqHigh);
+            }
+            v.eqLowS = BiquadState{}; v.eqMidS = BiquadState{}; v.eqHighS = BiquadState{};
 
             // Use actual sampleRate for envelope ramp calculation
             const float sr = (float)sampleRate;
@@ -724,6 +846,7 @@ public:
     // pitch: pitch-shift factor  (1.0 = normal pitch, independent of speed)
     void playSample(int padIdx, float volume, float speed, float pitch,
                     bool delayOn, float delayMs, float delayLevel,
+                    float eqLow, float eqMid, float eqHigh,
                     int chokeGroup, float attackMs, float releaseMs, bool isLoop) {
         if (padIdx < 0 || padIdx >= MAX_PADS) return;
         if (!pads[padIdx].loaded.load(std::memory_order_acquire)) {
@@ -738,6 +861,11 @@ public:
         c.delayOn    = delayOn;
         c.delayMs    = delayMs;
         c.delayLevel = std::max(0.f, std::min(1.f, delayLevel));
+        // eqLow/eqMid/eqHigh arrive as dB-style gains (~-15..+15); clamp defensively
+        // so a malformed value can't blow up the biquad coefficient math.
+        c.eqLow      = std::max(-24.f, std::min(24.f, eqLow));
+        c.eqMid      = std::max(-24.f, std::min(24.f, eqMid));
+        c.eqHigh     = std::max(-24.f, std::min(24.f, eqHigh));
         c.chokeGroup = chokeGroup;
         c.attackMs   = attackMs;
         c.releaseMs  = releaseMs;
@@ -747,7 +875,7 @@ public:
 
     void playLoopSP(int padIdx, float volume, float speed, float pitchShift) {
         if (padIdx >= 0 && padIdx < LOOP_VOICES) {
-            playSample(padIdx, volume, speed, pitchShift, false, 0.f, 0.f, 0, 0.f, 0.f, true);
+            playSample(padIdx, volume, speed, pitchShift, false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, true);
         }
     }
 
@@ -836,12 +964,13 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySample(
         JNIEnv* env, jobject obj,
         jint padIdx, jfloat volume, jfloat pitch,
         jboolean delayOn, jfloat delayMs, jfloat delayLevel,
-        jfloat /*eqLow*/, jfloat /*eqMid*/, jfloat /*eqHigh*/,
+        jfloat eqLow, jfloat eqMid, jfloat eqHigh,
         jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
     AudioEngineImpl* e = getEngine(env, obj);
     // Legacy path: speed=1.0 (kept for backward compat). New code uses nativePlaySampleSP.
     if (e) e->playSample((int)padIdx, (float)volume, 1.f, (float)pitch,
                          (bool)delayOn, (float)delayMs, (float)delayLevel,
+                         (float)eqLow, (float)eqMid, (float)eqHigh,
                          (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
 }
 
@@ -854,11 +983,12 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySampleSP(
         JNIEnv* env, jobject obj,
         jint padIdx, jfloat volume, jfloat speed, jfloat pitch,
         jboolean delayOn, jfloat delayMs, jfloat delayLevel,
-        jfloat /*eqLow*/, jfloat /*eqMid*/, jfloat /*eqHigh*/,
+        jfloat eqLow, jfloat eqMid, jfloat eqHigh,
         jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
                          (bool)delayOn, (float)delayMs, (float)delayLevel,
+                         (float)eqLow, (float)eqMid, (float)eqHigh,
                          (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
 }
 
@@ -871,7 +1001,7 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlayLoop(
         jint padIdx, jfloat volume, jfloat speed, jfloat pitch) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
-                         false, 0.f, 0.f, 0, 0.f, 0.f, true);
+                         false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, true);
 }
 
 // nativePlayLoopSP: start loop with independent speed + pitch
