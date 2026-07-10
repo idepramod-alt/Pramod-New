@@ -278,6 +278,14 @@ public:
         float* out = static_cast<float*>(audioData);
         memset(out, 0, sizeof(float) * numFrames);
 
+        // Dry (pre-delay-tap) accumulator. Only the dry hits get written back
+        // into gDelayBuf below — writing the wet `out` mix (which already
+        // contains the echo added at the delay tap) would re-record the echo
+        // itself into the delay line, turning a single tap into an infinite,
+        // self-feeding chain of decaying repeats.
+        float dryOut[SCRATCH_SIZE];
+        memset(dryOut, 0, sizeof(float) * numFrames);
+
         // Process all pending commands (lock-free)
         Cmd c;
         while (cmdQ.pop(c)) processCmd(c);
@@ -435,6 +443,8 @@ public:
                     // Delay tap — single repeat echo (no feedback chain): only one
                     // echo at delayOffset is added, at delayLevel amplitude. No
                     // further decaying repeats are generated.
+                    dryOut[i] += samp;
+
                     if (v.delayOn && v.delayOffset > 0) {
                         int offset = v.delayOffset;
                         if (offset < DELAY_BUF_SIZE) {
@@ -458,9 +468,10 @@ public:
             }
         }
 
-        // Write to delay buffer
+        // Write to delay buffer — dry signal only (see dryOut comment above),
+        // so the echo never gets re-recorded into its own delay line.
         for (int i = 0; i < numFrames; i++)
-            gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = out[i];
+            gDelayBuf[(gDelayWrite + i) % DELAY_BUF_SIZE] = dryOut[i];
         gDelayWrite = (gDelayWrite + numFrames) % DELAY_BUF_SIZE;
 
         // Soft saturation (tanh): smoother than hard clip; avoids the harsh
