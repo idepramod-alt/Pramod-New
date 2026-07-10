@@ -30,9 +30,7 @@ static const int SYN_HOP        = 256;   // OLA synthesis hop size
 // Roland SPD-20 Pro-style delay: multiple decaying repeats instead of a single
 // flat echo. delayLevel is now used as the per-repeat feedback amount — each
 // successive repeat is quieter by that factor, same as a real delay pedal.
-static const int   MAX_DELAY_REPEATS = 8;
 static const float MAX_DELAY_FEEDBACK = 0.82f; // keeps the tail musical, never runs away
-static const float MIN_DELAY_REPEAT_AMP = 0.01f; // stop once a repeat is inaudible
 
 // ─── 3-band tone EQ (low-shelf / mid-peak / high-shelf), RBJ cookbook biquads ──
 // Ported from the reference engine: eqLow/eqMid/eqHigh are dB-style gains
@@ -434,18 +432,14 @@ public:
                         samp = biquadProcess(v.eqHighC, v.eqHighS, samp);
                     }
 
-                    // Delay tap — multi-repeat feedback echo (Roland SPD-20 Pro style):
-                    // each repeat is delayOffset further back and quieter than the
-                    // previous one by the feedback factor, instead of one static echo.
+                    // Delay tap — single repeat echo (no feedback chain): only one
+                    // echo at delayOffset is added, at delayLevel amplitude. No
+                    // further decaying repeats are generated.
                     if (v.delayOn && v.delayOffset > 0) {
-                        float amp = v.delayLevel;
-                        for (int r = 1; r <= MAX_DELAY_REPEATS; r++) {
-                            int offset = v.delayOffset * r;
-                            if (offset >= DELAY_BUF_SIZE) break;
+                        int offset = v.delayOffset;
+                        if (offset < DELAY_BUF_SIZE) {
                             int ri = ((gDelayWrite + i - offset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
-                            samp += gDelayBuf[ri] * amp;
-                            amp *= v.delayLevel;
-                            if (amp < MIN_DELAY_REPEAT_AMP) break;
+                            samp += gDelayBuf[ri] * v.delayLevel;
                         }
                     }
 
