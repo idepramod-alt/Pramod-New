@@ -85,10 +85,14 @@ public class AudioTrimmer {
     /**
      * Write a standard 44-byte WAV header.
      */
+    /**
+     * Write WAV header. numSamples = total interleaved PCM words (already includes all channels).
+     * dataSize = numSamples * (bitsPerSample/8) — do NOT multiply by channels again here.
+     */
     public static void writeWavHeader(FileOutputStream fos, int sampleRate,
                                       int channels, int bitsPerSample,
                                       int numSamples) throws IOException {
-        int dataSize   = numSamples * channels * (bitsPerSample / 8);
+        int dataSize   = numSamples * (bitsPerSample / 8); // samples already interleaved
         int byteRate   = sampleRate * channels * bitsPerSample / 8;
         int blockAlign = channels * bitsPerSample / 8;
 
@@ -115,11 +119,14 @@ public class AudioTrimmer {
 
     /**
      * Write PCM 16-bit samples as a WAV file.
+     * samples[] is interleaved (all channels), so numFrames = samples.length / channels.
      */
     public static void writePcmToWav(short[] samples, int sampleRate,
                                      int channels, File outFile) throws IOException {
+        // numSamples in WAV header means total interleaved samples (not per-channel frames)
+        int numSamples = samples.length; // total PCM words (already includes all channels)
         try (FileOutputStream fos = new FileOutputStream(outFile)) {
-            writeWavHeader(fos, sampleRate, channels, 16, samples.length);
+            writeWavHeader(fos, sampleRate, channels, 16, numSamples);
             ByteBuffer buf = ByteBuffer.allocate(samples.length * 2).order(ByteOrder.LITTLE_ENDIAN);
             for (short s : samples) buf.putShort(s);
             fos.write(buf.array());

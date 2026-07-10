@@ -295,8 +295,12 @@ public class RecordActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // Clear callbacks FIRST so late onDone/onAmplitude posts don't navigate a dead Activity
+        recorder.setOnAmplitude(null);
+        recorder.setOnDone(null);
         if (recorder.isRecording()) recorder.stopRecording();
         stopTimer();
+        uiHandler.removeCallbacksAndMessages(null);
         usbHandler.removeCallbacksAndMessages(null);
     }
 }

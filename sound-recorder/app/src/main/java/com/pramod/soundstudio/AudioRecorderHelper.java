@@ -143,6 +143,9 @@ public class AudioRecorderHelper {
         try (FileOutputStream fos = new FileOutputStream(outputFile)) {
             // Write placeholder header first; we'll overwrite it at the end
             AudioTrimmer.writeWavHeader(fos, sampleRate, channels, 16, 0);
+            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                throw new IllegalStateException("AudioRecord failed to initialize");
+            }
             audioRecord.startRecording();
 
             while (recording.get()) {
@@ -151,33 +154,39 @@ public class AudioRecorderHelper {
                     fos.write(buf, 0, n);
                     totalBytes += n;
 
-                    // Emit amplitude for waveform (peak of this buffer)
-                    if (onAmplitude != null) {
+                    // Emit amplitude — peak of this buffer
+                    AmplitudeCallback cb = onAmplitude;
+                    if (cb != null) {
                         short peak = 0;
                         for (int i = 0; i + 1 < n; i += 2) {
                             short s = (short)((buf[i+1] << 8) | (buf[i] & 0xFF));
                             if (Math.abs(s) > Math.abs(peak)) peak = s;
                         }
                         final float amp = Math.abs(peak) / 32767f;
-                        // Post on main thread happens in Activity
-                        if (onAmplitude != null) onAmplitude.onAmplitude(amp);
+                        cb.onAmplitude(amp);
                     }
+                } else if (n == AudioRecord.ERROR_INVALID_OPERATION
+                        || n == AudioRecord.ERROR_BAD_VALUE) {
+                    Log.w(TAG, "AudioRecord.read returned error: " + n);
+                    break;
                 }
             }
 
-            audioRecord.stop();
+            try { audioRecord.stop(); } catch (IllegalStateException ignored) {}
             audioRecord.release();
             audioRecord = null;
 
-            // Patch the WAV header with correct sample count
-            int numSamples = (int)(totalBytes / 2); // 16-bit → 2 bytes/sample
+            // Patch the WAV header — numSamples = total interleaved PCM words
+            int numSamples = (int)(totalBytes / 2); // 16-bit → 2 bytes per word
             patchWavHeader(outputFile, numSamples, sampleRate, channels, 16);
 
-            if (onDone != null) onDone.onDone(outputFile, null);
+            DoneCallback cb = onDone;
+            if (cb != null) cb.onDone(outputFile, null);
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             Log.e(TAG, "WAV write loop error", e);
-            if (onDone != null) onDone.onDone(null, e.getMessage());
+            DoneCallback cb = onDone;
+            if (cb != null) cb.onDone(null, e.getMessage());
         }
     }
 
@@ -243,7 +252,8 @@ public class AudioRecorderHelper {
                                        int sampleRate, int channels,
                                        int bps) throws IOException {
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "rw")) {
-            int dataSize = numSamples * channels * (bps / 8);
+            // numSamples = total interleaved PCM words; dataSize = words × bytes-per-word
+            int dataSize = numSamples * (bps / 8);
             // RIFF chunk size at offset 4
             raf.seek(4);
             writeLEInt(raf, 36 + dataSize);
