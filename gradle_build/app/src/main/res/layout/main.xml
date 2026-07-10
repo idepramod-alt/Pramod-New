@@ -58,6 +58,10 @@
         </LinearLayout>
         <Button android:textSize="10sp" android:textColor="#ffffffff" android:id="@+id/btnPadColor" android:background="#ff333333" android:layout_width="0dp" android:layout_height="match_parent" android:text="COLOR" android:layout_weight="1"/>
     </LinearLayout>
+    <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@+id/accountRow" android:background="#ff111111" android:padding="2dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp">
+        <TextView android:id="@+id/txtSignedInAs" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="10sp" android:textColor="#ff00afff" android:singleLine="true" android:ellipsize="end" android:text=""/>
+        <Button android:id="@+id/btnSignOut" android:layout_width="wrap_content" android:layout_height="28dp" android:text="Sign Out" android:textSize="9sp" android:textColor="#ffffffff" android:background="@drawable/btn_3d_dark" android:paddingStart="8dp" android:paddingEnd="8dp"/>
+    </LinearLayout>
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@+id/titleBar" android:background="#ff000000" android:padding="6dp" android:layout_width="match_parent" android:layout_height="40dp" android:layout_marginTop="4dp">
         <TextView android:textSize="12sp" android:textStyle="bold" android:textColor="#ff00afff" android:id="@+id/txtSelectedPad" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SELECTED : PAD 1"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnBankToggle" android:background="#ff660000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="BANK A"/>

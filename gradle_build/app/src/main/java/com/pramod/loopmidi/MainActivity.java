@@ -58,6 +58,8 @@ public class MainActivity extends Activity {
     private Uri assistSoundUri;
     private AudioEngine audioEngine;
     private Button btnEditMode;
+    private Button btnSignOut;
+    private TextView txtSignedInAs;
     private Button btnEq;
     private Button btnLoadKit;
     private Button btnLoops;
@@ -441,6 +443,35 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     Intent intent = new Intent(MainActivity.this, LoopsActivity.class);
                     MainActivity.this.startActivity(intent);
+                }
+            });
+        }
+        // Cloud account row (Google Sign-In / Firebase) — same login system as LoopsActivity
+        this.btnSignOut    = (Button)   findViewById(R.id.btnSignOut);
+        this.txtSignedInAs = (TextView) findViewById(R.id.txtSignedInAs);
+        com.google.firebase.auth.FirebaseUser _signedInUser =
+                com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+        if (this.txtSignedInAs != null) {
+            this.txtSignedInAs.setText(
+                    _signedInUser != null && _signedInUser.getEmail() != null
+                            ? "Signed in: " + _signedInUser.getEmail() : "");
+        }
+        if (this.btnSignOut != null) {
+            this.btnSignOut.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    CloudSync.pushCurrentUserSettings(MainActivity.this);
+                    com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+                    com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
+                            new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestEmail().build();
+                    com.google.android.gms.auth.api.signin.GoogleSignIn
+                            .getClient(MainActivity.this, gso).signOut();
+                    Intent logoutIntent = new Intent(MainActivity.this, LoginActivity.class);
+                    logoutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(logoutIntent);
+                    finish();
                 }
             });
         }
