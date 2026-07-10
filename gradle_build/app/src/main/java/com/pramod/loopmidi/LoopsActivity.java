@@ -85,6 +85,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ── Admin deactivation real-time listener ──
     private com.google.firebase.database.ValueEventListener deactivateListener;
     private com.google.firebase.database.DatabaseReference  deactivateRef;
+    private boolean isForceLogoutInProgress = false;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
     private boolean isDrumOctapadMode = false;
@@ -911,7 +912,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             deactivateListener = new com.google.firebase.database.ValueEventListener() {
                 @Override
                 public void onDataChange(com.google.firebase.database.DataSnapshot snapshot) {
-                    if (!snapshot.exists()) {
+                    if (!snapshot.exists() && !isForceLogoutInProgress) {
+                        isForceLogoutInProgress = true;
                         // Admin ne deactivate kar diya — immediately force-logout
                         runOnUiThread(() -> {
                             getSharedPreferences("AuthPrefs", MODE_PRIVATE)
