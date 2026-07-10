@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <!-- Top Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="8dp">
+
+            <Button
+                android:id="@+id/btnBack"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="←"
+                android:textColor="@color/text_primary"
+                android:background="@color/bg_card2"
+                android:textSize="18sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"/>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="10dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✂️ Trim &amp; Edit"
+                    android:textColor="@color/text_primary"
+                    android:textSize="17sp"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:id="@+id/tvFileName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="middle"/>
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnSave"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✅ Save"
+                android:textColor="@color/text_primary"
+                android:background="@color/accent_green"
+                android:textSize="13sp"/>
+        </LinearLayout>
+
+        <!-- File Info -->
+        <TextView
+            android:id="@+id/tvDuration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Loading…"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:paddingBottom="10dp"/>
+
+        <!-- Waveform Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="10dp"
+            android:layout_marginBottom="10dp">
+
+            <com.pramod.soundstudio.WaveformView
+                android:id="@+id/waveformView"
+                android:layout_width="match_parent"
+                android:layout_height="130dp"
+                android:background="#111111"/>
+        </LinearLayout>
+
+        <!-- Auto Trim Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✨ AUTO SILENCE TRIM"
+                android:textColor="@color/accent_amber"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:paddingBottom="6dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Automatically detect and remove silent gaps from start and end"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:paddingBottom="12dp"/>
+
+            <Button
+                android:id="@+id/btnAutoTrim"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="⚡ AUTO TRIM"
+                android:textColor="@color/text_primary"
+                android:background="@color/accent_amber"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:id="@+id/tvAutoTrimResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/accent_green"
+                android:textSize="12sp"
+                android:paddingTop="8dp"/>
+        </LinearLayout>
+
+        <!-- Manual Trim Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="MANUAL TRIM"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:paddingBottom="10dp"/>
+
+            <!-- Start / End / Duration row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingEnd="6dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Start (s)"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"/>
+
+                    <EditText
+                        android:id="@+id/etStartSec"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:text="0.000"
+                        android:textColor="@color/text_primary"
+                        android:background="@color/bg_card2"
+                        android:inputType="numberDecimal"
+                        android:padding="6dp"
+                        android:textSize="14sp"
+                        android:fontFamily="monospace"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="End (s)"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"/>
+
+                    <EditText
+                        android:id="@+id/etEndSec"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:text="0.000"
+                        android:textColor="@color/text_primary"
+                        android:background="@color/bg_card2"
+                        android:inputType="numberDecimal"
+                        android:padding="6dp"
+                        android:textSize="14sp"
+                        android:fontFamily="monospace"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="6dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Duration"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"/>
+
+                    <TextView
+                        android:id="@+id/tvDurationDisplay"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:text="—"
+                        android:textColor="@color/accent_amber"
+                        android:textSize="13sp"
+                        android:gravity="center_vertical"
+                        android:fontFamily="monospace"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnApplyTrim"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:text="✂️ Apply Trim"
+                android:textColor="@color/text_primary"
+                android:background="@color/bg_card2"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
+        <!-- Playback + Load Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <Button
+                android:id="@+id/btnPlay"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="▶ Play Preview"
+                android:textColor="@color/text_primary"
+                android:background="@color/bg_card2"
+                android:textSize="14sp"
+                android:layout_marginBottom="10dp"/>
+
+            <Button
+                android:id="@+id/btnLoadOctapad"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="📤 LOAD TO OCTAPAD APP"
+                android:textColor="@color/text_primary"
+                android:background="@color/accent_green"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- OTG USB Host support -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SoundStudio">
+
+        <!-- File Manager Screen (Entry Point) -->
+        <activity
+            android:name=".FilesActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Record Screen -->
+        <activity
+            android:name=".RecordActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- Trim / Edit Screen -->
+        <activity
+            android:name=".EditorActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- FileProvider for sharing audio files with Octapad app -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.pramod.soundstudio.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

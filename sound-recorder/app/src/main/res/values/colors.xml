@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#0D0D0D</color>
+    <color name="bg_card">#1A1A1A</color>
+    <color name="bg_card2">#222222</color>
+    <color name="accent_red">#E53935</color>
+    <color name="accent_amber">#FF8F00</color>
+    <color name="accent_blue">#0288D1</color>
+    <color name="accent_green">#2E7D32</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#AAAAAA</color>
+    <color name="text_muted">#666666</color>
+    <color name="chip_selected">#E53935</color>
+    <color name="chip_unselected">#333333</color>
+    <color name="waveform_active">#E53935</color>
+    <color name="waveform_inactive">#444444</color>
+    <color name="divider">#2A2A2A</color>
+    <color name="usb_connected">#4CAF50</color>
+    <color name="usb_disconnected">#666666</color>
+</resources>

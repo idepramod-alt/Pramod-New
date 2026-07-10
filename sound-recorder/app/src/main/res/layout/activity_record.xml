@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <!-- Top Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="12dp">
+
+            <Button
+                android:id="@+id/btnBack"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="←"
+                android:textColor="@color/text_primary"
+                android:background="@color/bg_card2"
+                android:textSize="18sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🎙️ Pramod Sound Studio"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:paddingStart="10dp"/>
+
+            <TextView
+                android:id="@+id/tvUsbStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚪ Checking…"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"/>
+        </LinearLayout>
+
+        <!-- Input Source Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="INPUT SOURCE"
+                android:textColor="@color/accent_red"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:paddingBottom="10dp"/>
+
+            <RadioGroup
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/rbUsb"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔌  USB Audio Interface (OTG)"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent_red"
+                    android:checked="true"
+                    android:paddingBottom="6dp"/>
+
+                <RadioButton
+                    android:id="@+id/rbBuiltin"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🎤  Built-in Microphone"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent_red"/>
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Roland SPD-20Pro → USB Interface → OTG → Phone"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"
+                android:paddingTop="8dp"/>
+        </LinearLayout>
+
+        <!-- Format Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RECORDING FORMAT"
+                android:textColor="@color/accent_red"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:paddingBottom="10dp"/>
+
+            <!-- WAV / Compressed toggle -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="12dp">
+
+                <RadioButton
+                    android:id="@+id/rbWav"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="  WAV (Lossless)"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent_red"
+                    android:checked="true"/>
+
+                <RadioButton
+                    android:id="@+id/rbCompressed"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="  Compressed (AAC)"
+                    android:textColor="@color/text_secondary"
+                    android:buttonTint="@color/accent_red"/>
+            </LinearLayout>
+
+            <!-- Sample Rate -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sample Rate"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:paddingBottom="6dp"/>
+
+            <LinearLayout
+                android:id="@+id/llSampleRate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="12dp"/>
+
+            <!-- Bit Depth -->
+            <TextView
+                android:id="@+id/tvBitDepthLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bit Depth"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:paddingBottom="6dp"/>
+
+            <LinearLayout
+                android:id="@+id/llBitDepth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="12dp"/>
+
+            <!-- File size estimate -->
+            <TextView
+                android:id="@+id/tvFileSizeEst"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="≈ 5.2 MB/min (WAV 44.1kHz 16-bit)"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"/>
+        </LinearLayout>
+
+        <!-- Waveform Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:padding="14dp"
+            android:layout_marginBottom="10dp">
+
+            <com.pramod.soundstudio.WaveformView
+                android:id="@+id/waveformView"
+                android:layout_width="match_parent"
+                android:layout_height="100dp"
+                android:background="#111111"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="10dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvTimer"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="00:00.000"
+                    android:textColor="@color/text_primary"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace"/>
+
+                <TextView
+                    android:id="@+id/tvRecStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="READY"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Record Button -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btnRecord"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                android:text="⏺ RECORD"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:background="@drawable/bg_record_btn"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tap to start recording"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp"
+                android:paddingTop="8dp"/>
+        </LinearLayout>
+
+        <!-- Bottom Nav -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:background="@color/bg_card"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/navFiles"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="📁 Files"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="🎙️ Record"
+                android:textColor="@color/accent_red"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="⚙️ Settings"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:gravity="center"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

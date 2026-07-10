@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pramod Sound Studio</string>
+    <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="trim">Trim</string>
+    <string name="auto_trim">Auto Trim</string>
+    <string name="load_to_octapad">Load to Octapad</string>
+    <string name="convert">Convert</string>
+    <string name="delete">Delete</string>
+</resources>
