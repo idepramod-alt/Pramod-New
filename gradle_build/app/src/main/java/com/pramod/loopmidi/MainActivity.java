@@ -436,28 +436,21 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Handle MIDI Note-Off.
+     *
+     * Intentionally a no-op: pads here are one-shot hits that must ring out
+     * fully once triggered, exactly like a finger tap. A MIDI pad controller
+     * sends Note-Off almost immediately after Note-On (as soon as the
+     * physical pad is released) — that is normal and NOT a signal to cut the
+     * sample, but this previously called audioEngine.stopPad() unconditionally
+     * on every Note-Off, which chopped off drum-roll hits and any pad with a
+     * longer sample as soon as the controller released. Only happened over
+     * MIDI since touch input has no separate "release" event — same root
+     * cause and fix as LoopsActivity.handleMidiNoteOff().
+     */
     public void handleMidiNoteOff(byte note) {
-        if (!this.isVisible) return;
-        // Use same note→pad mapping as handleMidiNoteOn (old code used note%8 which was wrong)
-        int padIndex = -1;
-        switch (note) {
-            case 36: padIndex = 4; break;
-            case 37: padIndex = 2; break;
-            case 38: case 40: padIndex = 5; break;
-            case 39: padIndex = 3; break;
-            case 42: case 44: padIndex = 7; break;
-            case 45: case 47: case 48: case 50: padIndex = 1; break;
-            case 46: padIndex = 6; break;
-            case 49: padIndex = 0; break;
-        }
-        if (padIndex == -1) padIndex = (note & 0xFF) % 8;
-        try {
-            if (this.audioEngine != null) {
-                this.audioEngine.stopPad(padIndex);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error handling MIDI note off", e);
-        }
+        // No-op — see javadoc above.
     }
 
     private void playPadSoundImmediate(int index) {
