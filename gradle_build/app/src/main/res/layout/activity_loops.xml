@@ -99,11 +99,10 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="🎚️VEL\nOFF" android:layout_weight="1"/>
 
-        <!-- Brand name plaque: white bold text with black stroke on a 3D glossy black plate -->
+        <!-- Brand name: no plate, just bold yellow text with a black stroke -->
         <TextView android:id="@+id/txtBrandName"
-            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffff00"
             android:shadowColor="#ff000000" android:shadowDx="1" android:shadowDy="1" android:shadowRadius="2.5"
-            android:background="@drawable/brand_plate_glossy"
             android:gravity="center" android:singleLine="true"
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="PRAMOD OCTAPAD LOOPS" android:layout_weight="1.6"/>
