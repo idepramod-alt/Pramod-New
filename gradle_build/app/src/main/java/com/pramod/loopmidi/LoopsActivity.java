@@ -2335,35 +2335,26 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     /**
-     * Handle MIDI Note-Off — stop the pad that was playing.
-     * LoopsActivity previously had no Note-Off handler at all; this adds it.
-     * Called from onSend() for both 0x8n messages AND velocity-0 note-on.
+     * Handle MIDI Note-Off.
+     *
+     * Intentionally a no-op for DRUM / ONE-SHOT pads: those are one-shot hits
+     * that must ring out fully once triggered, exactly like a finger tap on
+     * the touch pad (see handlePadClick / "let each hit ring out fully").
+     * A MIDI pad controller sends Note-Off almost immediately after Note-On
+     * (as soon as the physical pad is released), which is normal and NOT a
+     * signal to cut the sample — most MIDI controllers send it within
+     * milliseconds of the hit, well before a longer sample has finished
+     * playing. Previously this called engine.stopPad() here, which chopped
+     * off drum-roll hits and any pad with a longer sample as soon as the
+     * controller released — but ONLY over MIDI, since touch input has no
+     * separate "release" event. Loop-mode pads were already excluded from
+     * this stop call and are unaffected either way — they only stop via
+     * their own toggle logic in handleMidiNoteOn / midiTriggerDrumPadImmediate.
      */
     public void handleMidiNoteOff(byte note) {
-        if (!this.isVisible) return;
-        int padIndex = -1;
-        switch (note) {
-            case 36: padIndex = 4; break;
-            case 37: padIndex = 2; break;
-            case 38: case 40: padIndex = 5; break;
-            case 39: padIndex = 3; break;
-            case 42: case 44: padIndex = 7; break;
-            case 45: case 47: case 48: case 50: padIndex = 1; break;
-            case 46: padIndex = 6; break;
-            case 49: padIndex = 0; break;
-        }
-        if (padIndex == -1) padIndex = (note & 0xFF) % 8;
-        // Only stop pads that are in one-shot / drum mode — loops should keep running
-        // until the user or next note-on toggles them off.
-        final int finalPad = padIndex;
-        boolean isDrum = this.padModeOverride[finalPad]
-                ? this.padDrumMode[finalPad]
-                : (this.isGlobalDrumMode || this.isOneShotMode);
-        if (!isDrum) return;
-        AudioEngine engine = this.audioEngine;
-        if (engine != null) {
-            try { engine.stopPad(finalPad); } catch (Exception ignored) {}
-        }
+        // No-op — see javadoc above. Kept as a named handler (rather than
+        // removing the Note-Off parsing branch) so future work — e.g. an
+        // opt-in "sustain while held" mode — has a clear place to hook in.
     }
 
     public void handleMidiNoteOn(byte note, byte velocity) {
