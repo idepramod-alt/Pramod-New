@@ -74,6 +74,9 @@ public class MainActivity extends Activity {
     private CheckBox chkDelay;
     private View fxControlBar;
     private boolean isVisible;
+    // Velocity Sensitivity: when ON, MIDI velocity (0-127) scales the hit volume
+    private boolean velocitySensitiveMode = false;
+    private Button btnVelocity = null;
     private MidiManager midiManager;
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
@@ -210,8 +213,30 @@ public class MainActivity extends Activity {
     }
 
     private void hideSystemUI() {
-        View decorView = getWindow().getDecorView();
-        decorView.setSystemUiVisibility(5894);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            // Android 11+ (API 30): new WindowInsetsController API
+            // setDecorFitsSystemWindows(false) → layout draws behind nav/status bars
+            getWindow().setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(android.view.WindowInsets.Type.statusBars()
+                        | android.view.WindowInsets.Type.navigationBars());
+                // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE:
+                // swipe se temporarily dikhega, phir auto-hide ho jayega
+                controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            // Android 6–10 (API 23–29): legacy flags
+            View decorView = getWindow().getDecorView();
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
     }
 
     private void setupMidi() {
@@ -246,55 +271,67 @@ public class MainActivity extends Activity {
 
     public void openMidiDevice(MidiDeviceInfo info) {
         if (info.getOutputPortCount() > 0) {
-            this.midiManager.openDevice(info, new MidiManager.OnDeviceOpenedListener() { // from class: com.pramod.loopmidi.MainActivity.2
-                @Override // android.media.midi.MidiManager.OnDeviceOpenedListener
+            this.midiManager.openDevice(info, new MidiManager.OnDeviceOpenedListener() {
+                @Override
                 public void onDeviceOpened(MidiDevice device) {
+                    if (device == null) return;
                     MainActivity.this.openedMidiDevice = device;
                     int portCount = device.getInfo().getOutputPortCount();
+                    // Open ALL output ports — supports multi-port MIDI devices
                     for (int portIndex = 0; portIndex < portCount; portIndex++) {
                         MidiOutputPort port = device.openOutputPort(portIndex);
-                        if (port != null) {
-                            if (MainActivity.this.midiOutputPort == null) {
-                                MainActivity.this.midiOutputPort = port;
-                            }
-                            MainActivity.this.midiOutputPorts.add(port);
+                        if (port == null) continue;
+                        if (MainActivity.this.midiOutputPort == null) {
+                            MainActivity.this.midiOutputPort = port;
+                        }
+                        MainActivity.this.midiOutputPorts.add(port);
+                        if (MainActivity.this.txtMidiStatus != null) {
                             MainActivity.this.txtMidiStatus.setText("MIDI connected");
-                            port.connect(new MidiReceiver() { // from class: com.pramod.loopmidi.MainActivity.2.1
-                                @Override // android.media.midi.MidiReceiver
-                                public void onSend(byte[] msg, int offset, int count, long timestamp) {
-                                    int end = offset + count;
-                                    int status = 0;
-                                    int i = offset;
-                                    while (i < end) {
-                                        int value = msg[i] & UByte.MAX_VALUE;
-                                        if (value >= 128) {
-                                            status = value;
-                                        } else if ((status & 240) != 144) {
-                                            if ((status & 240) != 128) {
-                                                continue;
-                                            } else if (i + 1 < end) {
-                                                int noteOff = msg[i] & UByte.MAX_VALUE;
-                                                MainActivity.this.handleMidiNoteOff((byte) noteOff);
-                                                i++;
-                                            } else {
-                                                return;
-                                            }
-                                        } else if (i + 1 < end) {
-                                            int velocity = msg[i + 1] & UByte.MAX_VALUE;
-                                            if (velocity > 0) {
-                                                MainActivity.this.handleMidiNoteOn((byte) value, (byte) velocity);
-                                            } else {
-                                                MainActivity.this.handleMidiNoteOff((byte) value);
-                                            }
-                                            i++;
+                        }
+                        port.connect(new MidiReceiver() {
+                            @Override
+                            public void onSend(byte[] msg, int offset, int count, long timestamp) {
+                                // ── Zero-latency MIDI parser ─────────────────────────────
+                                // Runs on dedicated MIDI thread. Audio fires immediately via
+                                // playPadSoundImmediate(); UI updates posted to UI thread after.
+                                int end    = offset + count;
+                                int status = 0;
+                                int i      = offset;
+                                while (i < end) {
+                                    int val = msg[i] & 0xFF;
+                                    if (val >= 0x80) {
+                                        // Status byte — update running status and advance
+                                        status = val;
+                                        i++;
+                                        continue;
+                                    }
+                                    int type = status & 0xF0;
+                                    if (type == 0x90) {
+                                        // Note-On (0x9n channel message)
+                                        if (i + 1 >= end) return;
+                                        byte note     = (byte) val;
+                                        int  velocity = msg[i + 1] & 0xFF;
+                                        if (velocity > 0) {
+                                            MainActivity.this.handleMidiNoteOn(note, (byte) velocity);
                                         } else {
-                                            return;
+                                            // velocity == 0 is a Note-Off in disguise
+                                            MainActivity.this.handleMidiNoteOff(note);
                                         }
+                                        i += 2;
+                                    } else if (type == 0x80) {
+                                        // Note-Off (0x8n channel message)
+                                        if (i + 1 >= end) return;
+                                        byte note = (byte) val;
+                                        MainActivity.this.handleMidiNoteOff(note);
+                                        i += 2;
+                                    } else {
+                                        // Program Change, Pitch Bend, CC, etc. — skip data byte
+                                        // (old code had `continue` here which skipped i++ → infinite loop!)
                                         i++;
                                     }
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 }
             }, new Handler(Looper.getMainLooper()));
@@ -359,7 +396,11 @@ public class MainActivity extends Activity {
                 padIndex = note % 8;
             }
             final int finalPadIndex = padIndex;
-            playPadSoundImmediate(finalPadIndex);
+            // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
+            final float velScale = velocitySensitiveMode
+                    ? (0.3f + 0.7f * ((velocity & 0xFF) / 127.0f))
+                    : 1.0f;
+            playPadSoundImmediate(finalPadIndex, velScale);
             runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.MainActivity.3
                 final /* synthetic */ MainActivity this$0;
 
@@ -396,25 +437,57 @@ public class MainActivity extends Activity {
     }
 
     public void handleMidiNoteOff(byte note) {
-        int padIndex;
-        if (this.isVisible && (padIndex = note % 8) >= 0 && padIndex < 8) {
-            try {
-                if (this.audioEngine != null) {
-                    this.audioEngine.stopPad(padIndex);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error handling MIDI note off", e);
+        if (!this.isVisible) return;
+        // Use same note→pad mapping as handleMidiNoteOn (old code used note%8 which was wrong)
+        int padIndex = -1;
+        switch (note) {
+            case 36: padIndex = 4; break;
+            case 37: padIndex = 2; break;
+            case 38: case 40: padIndex = 5; break;
+            case 39: padIndex = 3; break;
+            case 42: case 44: padIndex = 7; break;
+            case 45: case 47: case 48: case 50: padIndex = 1; break;
+            case 46: padIndex = 6; break;
+            case 49: padIndex = 0; break;
+        }
+        if (padIndex == -1) padIndex = (note & 0xFF) % 8;
+        try {
+            if (this.audioEngine != null) {
+                this.audioEngine.stopPad(padIndex);
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling MIDI note off", e);
         }
     }
 
     private void playPadSoundImmediate(int index) {
+        playPadSoundImmediate(index, 1.0f);
+    }
+
+    /**
+     * Fires pad audio immediately on calling thread (MIDI or UI).
+     * @param velocityScale 0.3–1.0 when velocity-sensitive, always 1.0 when OFF.
+     */
+    private void playPadSoundImmediate(int index, float velocityScale) {
         try {
             AudioEngine.SampleData sampleData = this.samples[index];
             if (sampleData != null && sampleData.loaded) {
-                this.audioEngine.playSample(index, sampleData, this.padVolume[index], this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f);
+                float vol = this.padVolume[index] * velocityScale;
+                this.audioEngine.playSample(index, sampleData, vol, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f);
             }
         } catch (Exception e) {
+        }
+    }
+
+    /** Updates the Velocity button label + color to match velocitySensitiveMode. */
+    private void updateVelocityButton() {
+        if (btnVelocity == null) return;
+        if (velocitySensitiveMode) {
+            btnVelocity.setText("🎚️VEL\nON");
+            btnVelocity.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnVelocity.setText("🎚️VEL\nOFF");
+            btnVelocity.setBackgroundResource(R.drawable.btn_3d_dark);
         }
     }
 
@@ -439,6 +512,8 @@ public class MainActivity extends Activity {
         this.btnPrevKit = (Button) findViewById(R.id.btnPrevKit);
         this.btnNextKit = (Button) findViewById(R.id.btnNextKit);
         this.btnEq = (Button) findViewById(R.id.btnEq);
+        // Velocity Sensitivity toggle button
+        this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         Button button = (Button) findViewById(R.id.btnLoops);
         this.btnLoops = button;
         if (button != null) {
@@ -538,6 +613,16 @@ public class MainActivity extends Activity {
         audioEngine.start();
         initPads();
         initSeekBars();
+        // Restore velocity sensitivity mode from prefs
+        this.velocitySensitiveMode = this.prefs.getBoolean("velocity_sensitive_mode", false);
+        updateVelocityButton();
+        if (this.btnVelocity != null) {
+            this.btnVelocity.setOnClickListener(v -> {
+                velocitySensitiveMode = !velocitySensitiveMode;
+                prefs.edit().putBoolean("velocity_sensitive_mode", velocitySensitiveMode).apply();
+                updateVelocityButton();
+            });
+        }
         this.editMode = this.prefs.getBoolean(KEY_EDIT_MODE, false);
         int i = this.prefs.getInt(KEY_KIT_INDEX, 1);
         this.kitIndex = i;
@@ -857,10 +942,11 @@ public class MainActivity extends Activity {
                 }
                 MainActivity.this.lastHitTime[this.index] = now;
                 MainActivity.this.activePointerId[this.index] = pointerId;
-                v.setPressed(true);
+                // ── Audio BEFORE visual — fire sound with zero setPressed overhead ──
                 if (!MainActivity.this.editMode) {
-                    MainActivity.this.playPadSound(this.index);
+                    MainActivity.this.playPadSoundImmediate(this.index);
                 }
+                v.setPressed(true);
                 MainActivity.this.selectedPad = this.index;
                 if (!MainActivity.this.editMode || MainActivity.this.copySourcePad == -1 || MainActivity.this.copySourcePad == this.index) {
                     if (!MainActivity.this.editMode || MainActivity.this.swapSourcePad == -1 || MainActivity.this.swapSourcePad == this.index) {
