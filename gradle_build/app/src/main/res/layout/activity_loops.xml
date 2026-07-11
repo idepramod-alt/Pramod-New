@@ -323,6 +323,59 @@
             android:layout_width="40dp" android:layout_height="30dp" android:text="RESET"/>
     </LinearLayout>
 
+    <!-- ── File Sound Player strip ── -->
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#ff1a1a2e"
+        android:padding="4dp"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:layout_marginTop="2dp">
+
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnFileSoundPick"
+            android:background="@drawable/btn_3d_blue"
+            android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:paddingStart="10dp" android:paddingEnd="10dp"
+            android:text="🗃️ FILE"/>
+
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnFileSoundPlay"
+            android:background="@drawable/btn_3d_dark"
+            android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp"
+            android:paddingStart="10dp" android:paddingEnd="10dp"
+            android:text="▶ PLAY"/>
+
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnFileSoundStop"
+            android:background="#ffcc0000"
+            android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp"
+            android:paddingStart="10dp" android:paddingEnd="10dp"
+            android:text="■ STOP"/>
+
+        <TextView android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginLeft="6dp" android:text="VOL"/>
+
+        <SeekBar android:id="@+id/seekFileSoundVol"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="4dp"
+            android:max="100" android:progress="80"/>
+
+        <TextView android:textSize="9sp" android:textColor="#ffaaaaaa"
+            android:gravity="center_vertical"
+            android:id="@+id/txtFileSoundName"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:layout_marginLeft="8dp"
+            android:singleLine="true" android:ellipsize="end"
+            android:text="no file selected"/>
+    </LinearLayout>
+
     <!-- ── Pad Grid ── -->
     <!-- Hidden stubs: workflow CI patch scripts grep for these IDs to skip re-adding their rows -->
     <Button android:id="@+id/btnRecordStart" android:visibility="gone" android:layout_width="0dp" android:layout_height="0dp"/>
