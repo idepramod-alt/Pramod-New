@@ -917,12 +917,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
-        // File Sound Player strip
-        this.btnFileSoundPick = (Button)   findViewById(R.id.btnFileSoundPick);
-        this.btnFileSoundPlay = (Button)   findViewById(R.id.btnFileSoundPlay);
-        this.btnFileSoundStop = (Button)   findViewById(R.id.btnFileSoundStop);
-        this.seekFileSoundVol = (SeekBar)  findViewById(R.id.seekFileSoundVol);
-        this.txtFileSoundName = (TextView) findViewById(R.id.txtFileSoundName);
+        // File Sound Player controls: no longer in the layout XML — they are
+        // built programmatically inside showMultiTrackRecDialog() via
+        // buildFileSoundPlayerRow(), so there's nothing to find here anymore.
         // Cloud account row (Google Sign-In / Firebase sync)
         this.btnSignOut    = (Button)   findViewById(R.id.btnSignOut);
         this.txtSignedInAs = (TextView) findViewById(R.id.txtSignedInAs);
