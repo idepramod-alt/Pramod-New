@@ -17,6 +17,8 @@
         </LinearLayout>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnSaveKit" android:background="@drawable/btn_glossy_3d" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="4dp" android:text="SAVE" android:layout_weight="1.2"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnLoadKit" android:background="@drawable/btn_glossy_3d" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="LOAD" android:layout_weight="1.2"/>
+        <!-- Velocity Sensitivity toggle: ON = MIDI velocity scales volume, OFF = fixed volume -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnVelocity" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="🎚️VEL&#10;OFF" android:layout_weight="1.2"/>
     </LinearLayout>
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@+id/fxControlBar" android:background="#ff111111" android:padding="2dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="40dp">
         <CheckBox android:textSize="10sp" android:textColor="#ff00ffff" android:id="@+id/chkDelay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DLY"/>
@@ -67,7 +69,20 @@
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnBankToggle" android:background="#ff660000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="BANK A"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnLoops" android:background="#ff006600" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="LOOPS"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:background="#ffcc0000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="STOP" android:onClick="onStopLoopClick"/>
-        <TextView android:textSize="15sp" android:textStyle="bold" android:textColor="#ffffffff" android:gravity="center" android:id="@+id/txtBrand" android:layout_width="0dp" android:layout_height="wrap_content" android:text="MOBILE OCTAPAD PRAMOD SAHU" android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/txtBrand"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="MOBILE OCTAPAD PRAMOD SAHU"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="#FFD700"
+            android:shadowColor="#7a4400"
+            android:shadowDx="2"
+            android:shadowDy="3"
+            android:shadowRadius="2"/>
         <TextView android:textSize="12sp" android:textStyle="bold" android:textColor="#ff00ff00" android:gravity="center" android:id="@+id/txtMidiStatus" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="MIDI: disconnected"/>
     </LinearLayout>
     <LinearLayout android:orientation="vertical" android:id="@+id/padArea" android:padding="2dp" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="2">
