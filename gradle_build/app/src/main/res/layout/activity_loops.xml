@@ -93,6 +93,12 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="🔴 REC" android:layout_weight="1"/>
 
+        <!-- Velocity Sensitivity toggle: ON = MIDI velocity scales volume, OFF = fixed volume -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnVelocity" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp" android:text="🎚️VEL\nOFF" android:layout_weight="1"/>
+
         <View android:background="#ff444444" android:layout_width="1dp"
             android:layout_height="match_parent"
             android:layout_marginStart="6dp" android:layout_marginEnd="6dp"/>
