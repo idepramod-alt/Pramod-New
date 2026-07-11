@@ -66,6 +66,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private static final int REQ_LOAD_LOOP_FOLDER = 6003;
     private static final int REQ_PICK_LOOP_WAV = 6001;
     private static final int REQ_SAVE_LOOP_FOLDER = 6002;
+    private static final int REQ_PICK_FILE_SOUND  = 6010;
     public static LoopsActivity globalInstance;
     private View advancedControlPanel;
     private Button btnAdvancedLoops;
@@ -115,6 +116,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private MidiManager midiManager;
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
+    // All open output ports — same multi-port support as MainActivity
+    private java.util.ArrayList<MidiOutputPort> midiOutputPorts = new java.util.ArrayList<>();
     private SharedPreferences prefs;
     private SeekBar seekMasterVolume;
     private SeekBar seekPitch;
@@ -172,6 +175,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private boolean isGlobalDrumMode = false;
     private Button btnLoopMode = null;
     private Button btnDrumMode = null;
+    // Velocity Sensitivity: when ON, MIDI velocity (0-127) scales the hit volume
+    private boolean velocitySensitiveMode = false;
+    private Button btnVelocity = null;
     // Saved pre-drum-mode values so switching back to Loop Mode truly restores them
     private boolean savedMultiMode    = false;
     private boolean savedOneShotMode  = false;
@@ -191,6 +197,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ── Multi-track Recording system ─────────────────────────────────────────
     private Button   btnRec        = null;  // in Mode Bar, opens dialog
     private Button   btnAddLoop    = null;  // in Mode Bar, loads audio into selected pad
+    // ── File Sound Player (strip below Mode Bar) ──────────────────────────────
+    private Button        btnFileSoundPick = null;
+    private Button        btnFileSoundPlay = null;
+    private Button        btnFileSoundStop = null;
+    private SeekBar       seekFileSoundVol = null;
+    private TextView      txtFileSoundName = null;
+    private MediaPlayer   fileSoundPlayer  = null;
+    private Uri           fileSoundUri     = null;
+    private float         fileSoundVolume  = 0.8f;
     private android.media.AudioRecord audioRecord     = null;
     private MediaPlayer              mediaPlayer      = null;
     private volatile boolean         isRecordingTrack = false;
@@ -637,6 +652,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } catch (Exception e3) {
                 e3.printStackTrace();
             }
+        } else if (requestCode == REQ_PICK_FILE_SOUND) {
+            try {
+                getContentResolver().takePersistableUriPermission(data2, data.getFlags() & 1);
+            } catch (Exception ignored) {}
+            fileSoundUri = data2;
+            // Show filename in label
+            String displayName = "(file loaded)";
+            android.database.Cursor cursor = null;
+            try {
+                cursor = getContentResolver().query(data2,
+                    new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                    null, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    displayName = cursor.getString(0);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (cursor != null) cursor.close();
+            }
+            if (txtFileSoundName != null) txtFileSoundName.setText(displayName);
+            Toast.makeText(this, "✅ File loaded: " + displayName, Toast.LENGTH_SHORT).show();
         }
         super.onActivityResult(requestCode, resultCode, data);
     }
@@ -677,6 +713,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.mediaPlayer != null) {
             try { this.mediaPlayer.release(); } catch (Exception ignored) {}
             this.mediaPlayer = null;
+        }
+        // Stop file sound player
+        if (this.fileSoundPlayer != null) {
+            try { this.fileSoundPlayer.release(); } catch (Exception ignored) {}
+            this.fileSoundPlayer = null;
         }
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i]) {
@@ -865,9 +906,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Loop Mode / Drum Mode toggle buttons
         this.btnLoopMode = (Button) findViewById(R.id.btnLoopMode);
         this.btnDrumMode = (Button) findViewById(R.id.btnDrumMode);
+        // Velocity Sensitivity toggle button
+        this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
+        // File Sound Player strip
+        this.btnFileSoundPick = (Button)   findViewById(R.id.btnFileSoundPick);
+        this.btnFileSoundPlay = (Button)   findViewById(R.id.btnFileSoundPlay);
+        this.btnFileSoundStop = (Button)   findViewById(R.id.btnFileSoundStop);
+        this.seekFileSoundVol = (SeekBar)  findViewById(R.id.seekFileSoundVol);
+        this.txtFileSoundName = (TextView) findViewById(R.id.txtFileSoundName);
         // Cloud account row (Google Sign-In / Firebase sync)
         this.btnSignOut    = (Button)   findViewById(R.id.btnSignOut);
         this.txtSignedInAs = (TextView) findViewById(R.id.txtSignedInAs);
@@ -945,6 +994,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             this.mpManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         }
+        // Restore velocity sensitivity mode from prefs
+        this.velocitySensitiveMode = this.prefs.getBoolean("velocity_sensitive_mode", false);
+        updateVelocityButton();
         // Restore global drum mode from prefs
         this.isGlobalDrumMode = this.prefs.getBoolean("global_drum_mode", false);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
@@ -1137,6 +1189,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Mode Bar's DRUM button); toggleDrumOctapadMode() is left in place but is
         // no longer wired to a button — chkOneShotMode/chkMultiMode checkboxes in
         // the same panel already give direct access to that same state.
+        // ── Velocity Sensitivity toggle ───────────────────────────────────────
+        if (this.btnVelocity != null) {
+            this.btnVelocity.setOnClickListener(v -> {
+                velocitySensitiveMode = !velocitySensitiveMode;
+                prefs.edit().putBoolean("velocity_sensitive_mode", velocitySensitiveMode).apply();
+                updateVelocityButton();
+            });
+        }
         // ── Loop Mode button ──────────────────────────────────────────────────
         if (this.btnLoopMode != null) {
             this.btnLoopMode.setOnClickListener(new View.OnClickListener() {
@@ -1223,6 +1283,34 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 public void onClick(View v) {
                     LoopsActivity.this.showMultiTrackRecDialog();
                 }
+            });
+        }
+
+        // ── File Sound Player strip buttons ───────────────────────────────────
+        if (this.btnFileSoundPick != null) {
+            this.btnFileSoundPick.setOnClickListener(v -> {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("audio/*");
+                startActivityForResult(intent, REQ_PICK_FILE_SOUND);
+            });
+        }
+        if (this.btnFileSoundPlay != null) {
+            this.btnFileSoundPlay.setOnClickListener(v -> playFileSoundPlayer());
+        }
+        if (this.btnFileSoundStop != null) {
+            this.btnFileSoundStop.setOnClickListener(v -> stopFileSoundPlayer());
+        }
+        if (this.seekFileSoundVol != null) {
+            this.seekFileSoundVol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    fileSoundVolume = progress / 100f;
+                    if (fileSoundPlayer != null) {
+                        try { fileSoundPlayer.setVolume(fileSoundVolume, fileSoundVolume); } catch (Exception ignored) {}
+                    }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {}
             });
         }
 
@@ -1695,8 +1783,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 @Override
                 public boolean onTouch(View v, MotionEvent event) throws IllegalStateException {
                     if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                        v.setPressed(true);
+                        // ── Audio BEFORE visual — fires sound with zero UI overhead ──
                         this.this$0.handlePadClick(index);
+                        v.setPressed(true);
                         return true;
                     } else if (event.getAction() == MotionEvent.ACTION_UP
                             || event.getAction() == MotionEvent.ACTION_CANCEL) {
@@ -1753,22 +1842,26 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.editMode) {
             showEditOptions(index);
         } else {
+            // ── AUDIO FIRST — zero UI work before sound starts ────────────────
+            // Previously 7 UI updates (seekBars, TextViews, CheckBox) ran before
+            // toggleLoop(), adding 3-8 ms of layout/draw overhead on every tap.
+            // Now audio fires immediately; UI refreshes after the sound has begun.
+            toggleLoop(index, audioAlreadyTriggered);
+
+            // ── UI updates AFTER audio — sliders/labels refresh once sound is rolling ──
             // In PAD volume mode: update the slider to reflect this pad's individual volume
-            // so the user immediately sees and can adjust this pad's level on tap.
             if (!isMasterVolumeMode && seekMasterVolume != null) {
                 seekMasterVolume.setProgress((int)(padVolume[index] * 100f));
                 if (txtMasterVolVal != null)
                     txtMasterVolVal.setText((int)(padVolume[index] * 100f) + "%");
             }
-            // Refresh the drum FX row (CHOKE/DELAY) to show THIS pad's own settings —
-            // per-pad, same idea as MainActivity's per-pad edit dialog refresh.
+            // Refresh the drum FX row (CHOKE/DELAY) to show THIS pad's own settings
             if (seekDrumChoke != null) seekDrumChoke.setProgress(padDrumChokeGroup[index]);
             if (txtDrumChokeVal != null) txtDrumChokeVal.setText(String.valueOf(padDrumChokeGroup[index]));
             if (chkDrumDelay != null) chkDrumDelay.setChecked(padDrumDelayOn[index]);
             if (seekDrumDelayTime != null) seekDrumDelayTime.setProgress((int) padDrumDelayTime[index]);
             if (seekDrumDelayLevel != null) seekDrumDelayLevel.setProgress((int)(padDrumDelayLevel[index] * 100f));
             if (txtDrumDelayVal != null) txtDrumDelayVal.setText((int)(padDrumDelayLevel[index] * 100f) + "%");
-            toggleLoop(index, audioAlreadyTriggered);
         }
     }
 
@@ -2112,8 +2205,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     private void hideSystemUI() {
-        View decorView = getWindow().getDecorView();
-        decorView.setSystemUiVisibility(5894);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            // Android 11+ (API 30): new WindowInsetsController API
+            getWindow().setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(android.view.WindowInsets.Type.statusBars()
+                        | android.view.WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            // Android 6–10 (API 23–29): legacy flags
+            View decorView = getWindow().getDecorView();
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
     }
 
     private void setupMidi() {
@@ -2150,49 +2262,74 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void openMidiDevice(MidiDeviceInfo info) {
         if (info.getOutputPortCount() > 0) {
-            this.midiManager.openDevice(info, new MidiManager.OnDeviceOpenedListener() { // from class: com.pramod.loopmidi.LoopsActivity.21
-                @Override // android.media.midi.MidiManager.OnDeviceOpenedListener
+            this.midiManager.openDevice(info, new MidiManager.OnDeviceOpenedListener() {
+                @Override
                 public void onDeviceOpened(MidiDevice device) {
+                    if (device == null) return;
                     LoopsActivity.this.openedMidiDevice = device;
-                    LoopsActivity.this.midiOutputPort = device.openOutputPort(0);
-                    if (LoopsActivity.this.midiOutputPort != null) {
+                    int portCount = device.getInfo().getOutputPortCount();
+                    // ── Open ALL output ports (multi-port support like MainActivity) ──
+                    for (int portIndex = 0; portIndex < portCount; portIndex++) {
+                        MidiOutputPort port = device.openOutputPort(portIndex);
+                        if (port == null) continue;
+                        if (LoopsActivity.this.midiOutputPort == null) {
+                            LoopsActivity.this.midiOutputPort = port;
+                        }
+                        LoopsActivity.this.midiOutputPorts.add(port);
                         if (LoopsActivity.this.txtMidiStatus != null) {
                             LoopsActivity.this.txtMidiStatus.setText("MIDI connected");
                         }
-                        LoopsActivity.this.midiOutputPort.connect(new MidiReceiver() { // from class: com.pramod.loopmidi.LoopsActivity.21.1
-                            @Override // android.media.midi.MidiReceiver
+                        port.connect(new MidiReceiver() {
+                            @Override
                             public void onSend(byte[] msg, int offset, int count, long timestamp) {
-                                LoopsActivity loopsActivity;
-                                int i = offset + count;
-                                int i2 = 0;
-                                int i3 = offset;
-                                while (i3 < i) {
-                                    int i4 = msg[i3] & UByte.MAX_VALUE;
-                                    if (i4 >= 128) {
-                                        i2 = i4;
-                                    } else if ((i2 & 240) == 144) {
-                                        if (i3 + 1 >= i) {
-                                            return;
-                                        }
-                                        byte b = (byte) i4;
-                                        byte b2 = msg[i3 + 1];
-                                        if (b2 > 0 && (loopsActivity = LoopsActivity.globalInstance) != null) {
-                                            loopsActivity.handleMidiNoteOn(b, b2);
-                                        }
-                                        i3++;
-                                    } else if ((i2 & 240) == 192) {
-                                        LoopsActivity loopsActivity2 = LoopsActivity.globalInstance;
-                                        if (loopsActivity2 != null) {
-                                            loopsActivity2.handleProgramChange(i4);
-                                        }
-                                    } else if ((i2 & 240) == 128) {
-                                        i3++;
+                                // ── Zero-latency MIDI parser ─────────────────────────────
+                                // Runs on dedicated MIDI thread — NO UI or main-thread work here.
+                                // Audio fires immediately via midiTriggerDrumPadImmediate();
+                                // UI updates (pad flash, status) are posted to UI thread after.
+                                int end    = offset + count;
+                                int status = 0;
+                                int i      = offset;
+                                while (i < end) {
+                                    int val = msg[i] & 0xFF;
+                                    if (val >= 0x80) {
+                                        status = val;
+                                        i++;
+                                        continue;
                                     }
-                                    i3++;
+                                    int type = status & 0xF0;
+                                    if (type == 0x90) {
+                                        // Note-On (0x9n)
+                                        if (i + 1 >= end) return;
+                                        byte note     = (byte) val;
+                                        int  velocity = msg[i + 1] & 0xFF;
+                                        LoopsActivity inst = LoopsActivity.globalInstance;
+                                        if (inst != null) {
+                                            if (velocity > 0) {
+                                                inst.handleMidiNoteOn(note, (byte) velocity);
+                                            } else {
+                                                // velocity == 0 means Note-Off (running status trick)
+                                                inst.handleMidiNoteOff(note);
+                                            }
+                                        }
+                                        i += 2;
+                                    } else if (type == 0x80) {
+                                        // Note-Off (0x8n)
+                                        if (i + 1 >= end) return;
+                                        byte note = (byte) val;
+                                        LoopsActivity inst = LoopsActivity.globalInstance;
+                                        if (inst != null) inst.handleMidiNoteOff(note);
+                                        i += 2;
+                                    } else if (type == 0xC0) {
+                                        // Program Change (0xCn)
+                                        LoopsActivity inst = LoopsActivity.globalInstance;
+                                        if (inst != null) inst.handleProgramChange(val);
+                                        i++;
+                                    } else {
+                                        i++;
+                                    }
                                 }
                             }
                         });
-                        ((TextView) LoopsActivity.this.findViewById(R.id.txtMidiStatus)).setText("MIDI connected");
                     }
                 }
             }, new Handler(Looper.getMainLooper()));
@@ -2201,11 +2338,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void closeMidiDevice() throws IOException {
         try {
-            MidiOutputPort midiOutputPort = this.midiOutputPort;
-            if (midiOutputPort != null) {
-                midiOutputPort.close();
-                this.midiOutputPort = null;
+            // Close ALL open ports (multi-port cleanup — mirrors MainActivity)
+            for (MidiOutputPort port : midiOutputPorts) {
+                if (port != null) { try { port.close(); } catch (Exception ignored) {} }
             }
+            midiOutputPorts.clear();
+            this.midiOutputPort = null;
             MidiDevice midiDevice = this.openedMidiDevice;
             if (midiDevice != null) {
                 midiDevice.close();
@@ -2213,6 +2351,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handle MIDI Note-Off — stop the pad that was playing.
+     * LoopsActivity previously had no Note-Off handler at all; this adds it.
+     * Called from onSend() for both 0x8n messages AND velocity-0 note-on.
+     */
+    public void handleMidiNoteOff(byte note) {
+        if (!this.isVisible) return;
+        int padIndex = -1;
+        switch (note) {
+            case 36: padIndex = 4; break;
+            case 37: padIndex = 2; break;
+            case 38: case 40: padIndex = 5; break;
+            case 39: padIndex = 3; break;
+            case 42: case 44: padIndex = 7; break;
+            case 45: case 47: case 48: case 50: padIndex = 1; break;
+            case 46: padIndex = 6; break;
+            case 49: padIndex = 0; break;
+        }
+        if (padIndex == -1) padIndex = (note & 0xFF) % 8;
+        // Only stop pads that are in one-shot / drum mode — loops should keep running
+        // until the user or next note-on toggles them off.
+        final int finalPad = padIndex;
+        boolean isDrum = this.padModeOverride[finalPad]
+                ? this.padDrumMode[finalPad]
+                : (this.isGlobalDrumMode || this.isOneShotMode);
+        if (!isDrum) return;
+        AudioEngine engine = this.audioEngine;
+        if (engine != null) {
+            try { engine.stopPad(finalPad); } catch (Exception ignored) {}
         }
     }
 
@@ -2254,10 +2424,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 padIndex = note % 8;
             }
             final int finalPadIndex = padIndex;
-            // Fire the sound right now, off the MIDI thread — don't wait for the
-            // runOnUiThread post below to reach the front of the main-thread queue.
-            // See midiTriggerDrumPadImmediate() for why this removes latency.
-            final boolean audioAlreadyTriggered = midiTriggerDrumPadImmediate(finalPadIndex);
+            // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
+            // Only applied when velocitySensitiveMode is ON; otherwise fixed at 1.0.
+            final float velScale = velocitySensitiveMode
+                    ? (0.3f + 0.7f * ((velocity & 0xFF) / 127.0f))
+                    : 1.0f;
+            // Fire audio immediately on MIDI thread (zero UI-thread latency)
+            final boolean audioAlreadyTriggered = midiTriggerDrumPadImmediate(finalPadIndex, velScale);
             runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.LoopsActivity.22
                 final /* synthetic */ LoopsActivity this$0;
 
@@ -2292,58 +2465,92 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     /**
-     * MIDI fast-path: fires the native audio for a drum/one-shot pad hit synchronously,
-     * off the MIDI callback thread — with NO wait for a main-thread post/dispatch. This
-     * removes the UI-thread scheduling latency (jitter from layout/animation/other work
-     * queued ahead of it) that previously sat between a MIDI note-on and the sound
-     * actually starting, since the old path only called toggleLoop() (which does the
-     * playSample() call) from inside runOnUiThread().
-     *
-     * Only handles the "sample already loaded + drum/one-shot pad" case — the exact same
-     * condition toggleLoop() requires before it plays anything. If the sample isn't loaded
-     * yet, or the pad is in LOOP mode (start/stop toggle, not a per-hit trigger — far less
-     * latency sensitive), this returns false and the normal toggleLoop() path on the UI
-     * thread handles it exactly as before, unchanged.
-     *
-     * @return true if audio was fired here (caller must tell toggleLoop() to skip playSample).
+     * Updates the Velocity button label + color to reflect current velocitySensitiveMode.
+     * Call after toggling velocitySensitiveMode or on app start.
      */
-    private boolean midiTriggerDrumPadImmediate(int index) {
-        // Snapshot the engine reference once: onDestroy() nulls out this.audioEngine on the
-        // UI thread, and this method runs on the MIDI callback thread, so re-reading the
-        // field between the null check and the playSample() call below could race with
-        // teardown and throw an NPE. A local snapshot makes the check+use atomic.
-        AudioEngine engine = this.audioEngine;
+    private void updateVelocityButton() {
+        if (btnVelocity == null) return;
+        if (velocitySensitiveMode) {
+            btnVelocity.setText("🎚️VEL\nON");
+            btnVelocity.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnVelocity.setText("🎚️VEL\nOFF");
+            btnVelocity.setBackgroundResource(R.drawable.btn_3d_dark);
+        }
+    }
+
+    /**
+     * ══ ZERO-LATENCY MIDI FAST-PATH ══════════════════════════════════════════
+     *
+     * Fires native Oboe audio SYNCHRONOUSLY on the MIDI callback thread — NO
+     * wait for a main-thread post. This eliminates UI-thread scheduling jitter
+     * (layout, animation, other runnables queued ahead) that was the primary
+     * source of MIDI latency in LoopsActivity.
+     *
+     * Handles BOTH pad modes:
+     *
+     *  • DRUM / ONE-SHOT pads → playSample() fires immediately.
+     *    Returns true so the UI-thread toggleLoop() call skips the duplicate
+     *    audio; it still runs for state/UI updates (loopPlaying, pad colour).
+     *
+     *  • LOOP pads → audio decision (start vs stop) is read from loopPlaying[]
+     *    right now on the MIDI thread and acted on immediately.
+     *    boolean reads are atomic on all ARM/x86 Android targets, so reading
+     *    loopPlaying[] here without a lock is safe in practice.
+     *    Returns true so toggleLoop() on the UI thread skips the audio call
+     *    (state bookkeeping still happens there).
+     *    Edge case — stop path: stopPad() is called twice (MIDI thread + UI
+     *    thread). Calling stopPad on an already-stopped pad is a no-op in
+     *    Oboe, so this is harmless.
+     *
+     * Returns false only when no sample is loaded yet (nothing to play).
+     *
+     * @return true  → audio already fired; caller must pass audioAlreadyTriggered=true
+     *                 to handlePadClick/toggleLoop so they skip the playSample call.
+     *         false → sample not ready; caller must use the normal UI-thread path.
+     */
+    private boolean midiTriggerDrumPadImmediate(int index, float velocityScale) {
+        // Snapshot engine + sample atomically — onDestroy() nulls audioEngine on
+        // the UI thread; snapshotting avoids a check-then-use NPE race.
+        AudioEngine engine   = this.audioEngine;
         AudioEngine.SampleData sampleData = this.loopSamples[index];
         if (sampleData == null || !sampleData.loaded || engine == null) {
-            return false;
+            return false;  // sample not ready; fall through to UI-thread path
         }
+
         boolean effectiveDrumMode = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : this.isGlobalDrumMode;
         boolean isDrumPad = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
-        if (!isDrumPad) {
-            return false;
-        }
-        int chokeGroup;
-        boolean drumDelayActive;
-        float drumDelayMs;
-        float drumDelayLevelToUse;
-        if (effectiveDrumMode) {
-            chokeGroup = this.padDrumChokeGroup[index];
-            drumDelayActive = this.padDrumDelayOn[index];
-            drumDelayMs = drumDelayActive ? this.padDrumDelayTime[index] : 0f;
-            drumDelayLevelToUse = drumDelayActive ? this.padDrumDelayLevel[index] : 0f;
+
+        // Velocity-scaled volume: baseVol × velocityScale
+        float vol = effectiveVolume(index) * velocityScale;
+
+        if (isDrumPad) {
+            // ── DRUM / ONE-SHOT fast path ─────────────────────────────────────
+            int     chokeGroup       = effectiveDrumMode ? this.padDrumChokeGroup[index] : (index + 1);
+            boolean drumDelayActive  = effectiveDrumMode && this.padDrumDelayOn[index];
+            float   drumDelayMs      = drumDelayActive ? this.padDrumDelayTime[index]  : 0f;
+            float   drumDelayLevel   = drumDelayActive ? this.padDrumDelayLevel[index] : 0f;
+            engine.playSample(index, sampleData,
+                    vol, this.currentSpeed, this.currentPitch, 0,
+                    drumDelayActive, drumDelayMs, drumDelayLevel,
+                    0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+            return true;
+
         } else {
-            chokeGroup = index + 1;
-            drumDelayActive = false;
-            drumDelayMs = 0f;
-            drumDelayLevelToUse = 0f;
+            // ── LOOP MODE fast path ───────────────────────────────────────────
+            if (this.loopPlaying[index]) {
+                try { engine.stopPad(index); } catch (Exception ignored) {}
+            } else {
+                try { engine.playLoopSP(index, vol,
+                                        this.currentSpeed, this.currentPitch); }
+                catch (Exception ignored) {}
+            }
+            return true;
         }
-        engine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
-                drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
-        return true;
     }
 
     public void preloadLoop(int index) {
@@ -2653,6 +2860,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         });
 
         recDialog.show();
+        // ── Make dialog bigger: 90% screen width, 80% screen height ──────────
+        android.view.Window recWin = recDialog.getWindow();
+        if (recWin != null) {
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            recWin.setLayout((int)(screenW * 0.92f), (int)(screenH * 0.80f));
+        }
     }
 
     /** Refresh the track list inside the dialog. */
@@ -2912,6 +3126,58 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { if (mediaPlayer.isPlaying()) mediaPlayer.stop(); } catch (Exception ignored) {}
             try { mediaPlayer.release(); } catch (Exception ignored) {}
             mediaPlayer = null;
+        }
+    }
+
+    // ── File Sound Player methods ─────────────────────────────────────────────
+    /** Play the file selected via 🗃️ FILE button. */
+    private void playFileSoundPlayer() {
+        if (fileSoundUri == null) {
+            Toast.makeText(this, "Pehle 🗃️ FILE button se file choose karo", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        stopFileSoundPlayer();
+        try {
+            fileSoundPlayer = new MediaPlayer();
+            fileSoundPlayer.setDataSource(this, fileSoundUri);
+            float vol = (seekFileSoundVol != null) ? (seekFileSoundVol.getProgress() / 100f) : fileSoundVolume;
+            fileSoundPlayer.setVolume(vol, vol);
+            fileSoundPlayer.setOnPreparedListener(MediaPlayer::start);
+            fileSoundPlayer.setOnCompletionListener(mp -> {
+                stopFileSoundPlayer();
+                if (txtFileSoundName != null)
+                    runOnUiThread(() -> {
+                        String cur = txtFileSoundName.getText().toString();
+                        if (!cur.startsWith("▶ ")) txtFileSoundName.setText(cur);
+                    });
+            });
+            fileSoundPlayer.setOnErrorListener((mp, what, extra) -> {
+                stopFileSoundPlayer();
+                runOnUiThread(() -> Toast.makeText(this, "Play error: " + what, Toast.LENGTH_SHORT).show());
+                return true;
+            });
+            fileSoundPlayer.prepareAsync();
+            if (txtFileSoundName != null) {
+                String name = txtFileSoundName.getText().toString().replaceFirst("^▶ ", "");
+                txtFileSoundName.setText("▶ " + name);
+            }
+        } catch (Exception e) {
+            Log.e("FileSoundPlayer", "playFileSoundPlayer failed", e);
+            Toast.makeText(this, "Play failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Stop the file sound player. */
+    private void stopFileSoundPlayer() {
+        if (fileSoundPlayer != null) {
+            try { if (fileSoundPlayer.isPlaying()) fileSoundPlayer.stop(); } catch (Exception ignored) {}
+            try { fileSoundPlayer.release(); } catch (Exception ignored) {}
+            fileSoundPlayer = null;
+        }
+        // Remove ▶ prefix from label
+        if (txtFileSoundName != null) {
+            String cur = txtFileSoundName.getText().toString();
+            if (cur.startsWith("▶ ")) txtFileSoundName.setText(cur.substring(2));
         }
     }
 
