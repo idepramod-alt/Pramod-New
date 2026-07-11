@@ -61,7 +61,7 @@ import org.json.JSONObject;
 public class LoopsActivity extends Activity implements DialogInterface.OnClickListener {
     private static final String KEY_LOOP_INDEX = "current_loop_index";
     private static final int LOOP_PAD_COUNT = 8;
-    private static final int MAX_LOOPS = 50;
+    private static final int MAX_LOOPS = 100;
     private static final String PREF_NAME = "OctapadSettings";
     private static final int REQ_LOAD_LOOP_FOLDER = 6003;
     private static final int REQ_PICK_LOOP_WAV = 6001;
@@ -1098,7 +1098,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnNextLoop.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.6
             @Override // android.view.View.OnClickListener
             public void onClick(View v) throws IllegalStateException {
-                if (LoopsActivity.this.loopChannelIndex < 50) {
+                if (LoopsActivity.this.loopChannelIndex < 100) {
                     LoopsActivity.this.saveLoopsToMemory();
                     LoopsActivity.access$508(LoopsActivity.this);
                     LoopsActivity.this.prefs.edit().putInt(LoopsActivity.KEY_LOOP_INDEX, LoopsActivity.this.loopChannelIndex).apply();
