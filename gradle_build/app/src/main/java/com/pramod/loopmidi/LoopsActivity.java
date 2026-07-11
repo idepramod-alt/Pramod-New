@@ -206,6 +206,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private MediaPlayer   fileSoundPlayer  = null;
     private Uri           fileSoundUri     = null;
     private float         fileSoundVolume  = 0.8f;
+    // Persists the picked file's display name across dialog re-opens, since the
+    // FILE/PLAY/STOP/VOL/name row is now rebuilt fresh each time the 🔴 REC
+    // dialog opens (it lives inside showMultiTrackRecDialog(), not a fixed
+    // outer strip anymore).
+    private String        fileSoundDisplayName = "no file selected";
     private android.media.AudioRecord audioRecord     = null;
     private MediaPlayer              mediaPlayer      = null;
     private volatile boolean         isRecordingTrack = false;
@@ -671,6 +676,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } finally {
                 if (cursor != null) cursor.close();
             }
+            fileSoundDisplayName = displayName;
             if (txtFileSoundName != null) txtFileSoundName.setText(displayName);
             Toast.makeText(this, "✅ File loaded: " + displayName, Toast.LENGTH_SHORT).show();
         }
@@ -1286,33 +1292,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             });
         }
 
-        // ── File Sound Player strip buttons ───────────────────────────────────
-        if (this.btnFileSoundPick != null) {
-            this.btnFileSoundPick.setOnClickListener(v -> {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("audio/*");
-                startActivityForResult(intent, REQ_PICK_FILE_SOUND);
-            });
-        }
-        if (this.btnFileSoundPlay != null) {
-            this.btnFileSoundPlay.setOnClickListener(v -> playFileSoundPlayer());
-        }
-        if (this.btnFileSoundStop != null) {
-            this.btnFileSoundStop.setOnClickListener(v -> stopFileSoundPlayer());
-        }
-        if (this.seekFileSoundVol != null) {
-            this.seekFileSoundVol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                    fileSoundVolume = progress / 100f;
-                    if (fileSoundPlayer != null) {
-                        try { fileSoundPlayer.setVolume(fileSoundVolume, fileSoundVolume); } catch (Exception ignored) {}
-                    }
-                }
-                @Override public void onStartTrackingTouch(SeekBar sb) {}
-                @Override public void onStopTrackingTouch(SeekBar sb) {}
-            });
-        }
+        // ── File Sound Player controls now live INSIDE the 🔴 REC dialog ──────
+        // (built and wired in showMultiTrackRecDialog() / buildFileSoundPlayerRow())
+        // instead of the old outer strip below the Mode Bar, so this method no
+        // longer wires them here.
 
         // Apply initial mode UI state
         updateModeButtonsUI();
@@ -2639,6 +2622,124 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ═════════════════════════════════════════════════════════════════════════
 
     /** Show the multi-track recording dialog. */
+    /**
+     * Builds the FILE / PLAY / STOP / VOL / file-name row that used to live in
+     * a fixed strip below the Mode Bar (outer panel). It's now assembled fresh
+     * each time the 🔴 REC dialog opens and assigned to the same
+     * btnFileSoundPick / btnFileSoundPlay / btnFileSoundStop / seekFileSoundVol
+     * / txtFileSoundName fields, so onActivityResult(), playFileSoundPlayer(),
+     * and stopFileSoundPlayer() keep working unchanged.
+     */
+    private android.view.View buildFileSoundPlayerRow() {
+        android.widget.LinearLayout wrap = new android.widget.LinearLayout(this);
+        wrap.setOrientation(android.widget.LinearLayout.VERTICAL);
+        android.widget.LinearLayout.LayoutParams wrapLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        wrapLP.setMargins(0, 0, 0, 12);
+        wrap.setLayoutParams(wrapLP);
+
+        android.widget.TextView label = new android.widget.TextView(this);
+        label.setText("FILE SOUND PLAYER");
+        label.setTextColor(0xFF888888);
+        label.setTextSize(9f);
+        label.setPadding(0, 0, 0, 4);
+        wrap.addView(label);
+
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        btnFileSoundPick = new Button(this);
+        btnFileSoundPick.setText("🗃️ FILE");
+        btnFileSoundPick.setBackgroundColor(0xFF0055CC);
+        btnFileSoundPick.setTextColor(0xFFFFFFFF);
+        btnFileSoundPick.setTextSize(10f);
+        row.addView(btnFileSoundPick);
+
+        btnFileSoundPlay = new Button(this);
+        btnFileSoundPlay.setText("▶ PLAY");
+        btnFileSoundPlay.setBackgroundColor(0xFF333333);
+        btnFileSoundPlay.setTextColor(0xFFFFFFFF);
+        btnFileSoundPlay.setTextSize(10f);
+        android.widget.LinearLayout.LayoutParams playLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        playLP.setMarginStart(4);
+        btnFileSoundPlay.setLayoutParams(playLP);
+        row.addView(btnFileSoundPlay);
+
+        btnFileSoundStop = new Button(this);
+        btnFileSoundStop.setText("■ STOP");
+        btnFileSoundStop.setBackgroundColor(0xFFCC0000);
+        btnFileSoundStop.setTextColor(0xFFFFFFFF);
+        btnFileSoundStop.setTextSize(10f);
+        android.widget.LinearLayout.LayoutParams stopLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        stopLP.setMarginStart(4);
+        btnFileSoundStop.setLayoutParams(stopLP);
+        row.addView(btnFileSoundStop);
+
+        wrap.addView(row);
+
+        android.widget.LinearLayout volRow = new android.widget.LinearLayout(this);
+        volRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        volRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.LinearLayout.LayoutParams volRowLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        volRowLP.topMargin = 6;
+        volRow.setLayoutParams(volRowLP);
+
+        android.widget.TextView volLabel = new android.widget.TextView(this);
+        volLabel.setText("VOL");
+        volLabel.setTextColor(0xFFFFFFFF);
+        volLabel.setTextSize(9f);
+        volRow.addView(volLabel);
+
+        seekFileSoundVol = new SeekBar(this);
+        seekFileSoundVol.setMax(100);
+        seekFileSoundVol.setProgress((int) (fileSoundVolume * 100));
+        android.widget.LinearLayout.LayoutParams seekLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        seekLP.setMarginStart(4);
+        seekFileSoundVol.setLayoutParams(seekLP);
+        volRow.addView(seekFileSoundVol);
+
+        wrap.addView(volRow);
+
+        txtFileSoundName = new android.widget.TextView(this);
+        txtFileSoundName.setText(fileSoundDisplayName);
+        txtFileSoundName.setTextColor(0xFFAAAAAA);
+        txtFileSoundName.setTextSize(9f);
+        txtFileSoundName.setSingleLine(true);
+        txtFileSoundName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        android.widget.LinearLayout.LayoutParams nameLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        nameLP.topMargin = 4;
+        txtFileSoundName.setLayoutParams(nameLP);
+        wrap.addView(txtFileSoundName);
+
+        // Wiring — same behavior as the old outer strip.
+        btnFileSoundPick.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("audio/*");
+            startActivityForResult(intent, REQ_PICK_FILE_SOUND);
+        });
+        btnFileSoundPlay.setOnClickListener(v -> playFileSoundPlayer());
+        btnFileSoundStop.setOnClickListener(v -> stopFileSoundPlayer());
+        seekFileSoundVol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                fileSoundVolume = progress / 100f;
+                if (fileSoundPlayer != null) {
+                    try { fileSoundPlayer.setVolume(fileSoundVolume, fileSoundVolume); } catch (Exception ignored) {}
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+
+        return wrap;
+    }
+
     public void showMultiTrackRecDialog() {
         // Check RECORD_AUDIO permission at runtime (required Android 6+)
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
@@ -2726,6 +2827,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 : "Echo OFF — normal (dry) recording");
         });
         root.addView(btnEcho);
+
+        // ── File Sound Player row (moved in from the old outer strip below the
+        // Mode Bar — now lives inside this dialog so the pad grid gets that
+        // space back). Same FILE / PLAY / STOP / VOL / file-name controls,
+        // wired to the same underlying fields and methods as before. ─────────
+        root.addView(buildFileSoundPlayerRow());
 
         // ── Track list ────────────────────────────────────────────────────────
         final android.widget.ScrollView sv = new android.widget.ScrollView(this);
@@ -2860,12 +2967,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         });
 
         recDialog.show();
-        // ── Make dialog bigger: 90% screen width, 80% screen height ──────────
+        // ── Make dialog bigger: 97% screen width, 92% screen height ──────────
+        // Bumped up from the previous 92%/80% now that the FILE/PLAY/STOP/VOL/
+        // name row lives inside this dialog too — it needs the extra room.
         android.view.Window recWin = recDialog.getWindow();
         if (recWin != null) {
             int screenW = getResources().getDisplayMetrics().widthPixels;
             int screenH = getResources().getDisplayMetrics().heightPixels;
-            recWin.setLayout((int)(screenW * 0.92f), (int)(screenH * 0.80f));
+            recWin.setLayout((int)(screenW * 0.97f), (int)(screenH * 0.92f));
         }
     }
 
