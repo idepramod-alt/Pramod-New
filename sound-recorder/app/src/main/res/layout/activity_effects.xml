@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0D0D0D" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🎵 Audio Effects" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <TextView android:id="@+id/tvFileName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="No file selected" android:textColor="#AAAAAA" android:textSize="12sp" android:padding="10dp" android:background="#1A1A1A"/>
+            <Button android:id="@+id/btnPickFile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📂" android:textColor="#FFFFFF" android:background="#333333" android:layout_marginStart="6dp"/>
+        </LinearLayout>
+
+        <!-- Reverb -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="REVERB" android:textColor="#C2185B" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvReverbRoom" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Room Size: 50%" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbReverbRoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#C2185B" android:thumbTint="#C2185B"/>
+            <TextView android:id="@+id/tvReverbDecay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Decay: 50%" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbReverbDecay" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#C2185B" android:thumbTint="#C2185B"/>
+            <TextView android:id="@+id/tvReverbMix" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reverb Mix: 0%" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbReverbMix" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#C2185B" android:thumbTint="#C2185B"/>
+        </LinearLayout>
+
+        <!-- Delay -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DELAY / ECHO" android:textColor="#283593" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvDelayMs" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Delay: 300ms" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbDelayMs" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#283593" android:thumbTint="#5C6BC0"/>
+            <TextView android:id="@+id/tvDelayFeedback" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Feedback: 40%" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbDelayFeedback" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#283593" android:thumbTint="#5C6BC0"/>
+            <TextView android:id="@+id/tvDelayMix" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Delay Mix: 0%" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbDelayMix" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#283593" android:thumbTint="#5C6BC0"/>
+        </LinearLayout>
+
+        <!-- Chorus -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CHORUS" android:textColor="#00695C" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvChorusRate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Chorus Rate: 1.5 Hz" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbChorusRate" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+            <TextView android:id="@+id/tvChorusDepth" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Depth: 5ms" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbChorusDepth" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+            <TextView android:id="@+id/tvChorusMix" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Chorus Mix: 0%" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbChorusMix" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+        </LinearLayout>
+
+        <!-- Pitch + Fades + Stereo -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PITCH / FADES / WIDTH" android:textColor="#FF8F00" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvPitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Pitch: 0 st" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbPitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+            <TextView android:id="@+id/tvFadeIn" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Fade In: 0ms" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbFadeIn" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+            <TextView android:id="@+id/tvFadeOut" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Fade Out: 0ms" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbFadeOut" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+            <TextView android:id="@+id/tvStereoWidth" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Stereo Width: 1.0×" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbStereoWidth" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textColor="#888888" android:textSize="12sp" android:padding="8dp"/>
+        <Button android:id="@+id/btnApply" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🎵 Apply Effects" android:textColor="#FFFFFF" android:background="#C2185B" android:layout_marginBottom="8dp"/>
+        <TextView android:id="@+id/tvResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#CCCCCC" android:textSize="12sp" android:background="#1A1A1A" android:padding="12dp"/>
+    </LinearLayout>
+</ScrollView>

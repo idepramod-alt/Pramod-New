@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0D0D0D" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="16dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="⚙️ Settings" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <!-- Recording -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="RECORDING DEFAULTS" android:textColor="#E53935" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="12dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Default Format" android:textColor="#AAAAAA" android:textSize="12sp" android:paddingBottom="4dp"/>
+            <Spinner android:id="@+id/spDefaultFormat" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#222222" android:padding="8dp" android:layout_marginBottom="12dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sample Rate" android:textColor="#AAAAAA" android:textSize="12sp" android:paddingBottom="4dp"/>
+            <Spinner android:id="@+id/spDefaultSampleRate" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#222222" android:padding="8dp" android:layout_marginBottom="12dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Bit Depth" android:textColor="#AAAAAA" android:textSize="12sp" android:paddingBottom="4dp"/>
+            <Spinner android:id="@+id/spDefaultBitDepth" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#222222" android:padding="8dp"/>
+        </LinearLayout>
+
+        <!-- Processing -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AUTO PROCESSING" android:textColor="#FF8F00" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="10dp"/>
+            <CheckBox android:id="@+id/cbAutoTrimOnSave" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto-trim silence on save" android:textColor="#CCCCCC" android:buttonTint="#FF8F00"/>
+            <CheckBox android:id="@+id/cbNormalizeOnSave" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Normalize on save" android:textColor="#CCCCCC" android:buttonTint="#FF8F00" android:layout_marginTop="6dp"/>
+            <CheckBox android:id="@+id/cbShowWaveform" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Show live waveform during recording" android:textColor="#CCCCCC" android:buttonTint="#FF8F00" android:layout_marginTop="6dp" android:checked="true"/>
+        </LinearLayout>
+
+        <!-- Output -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="OUTPUT PATH" android:textColor="#0288D1" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <EditText android:id="@+id/etOutputPath" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#666666" android:background="#222222" android:padding="10dp" android:hint="Default (internal/recordings/)"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp">
+            <Button android:id="@+id/btnSave" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="💾 Save Settings" android:textColor="#FFFFFF" android:background="#E53935" android:layout_marginEnd="6dp"/>
+            <Button android:id="@+id/btnReset" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="↺ Reset Defaults" android:textColor="#FFFFFF" android:background="#333333"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="v2.0.0" android:textColor="#444444" android:textSize="11sp" android:gravity="center" android:padding="12dp"/>
+    </LinearLayout>
+</ScrollView>

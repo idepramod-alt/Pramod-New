@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="#0D0D0D" android:padding="12dp">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+        <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🥁 Octapad Tools" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+    </LinearLayout>
+
+    <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textColor="#AAAAAA" android:textSize="12sp" android:background="#1A1A1A" android:padding="10dp" android:layout_marginBottom="10dp"/>
+
+    <!-- Action Buttons -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="6dp">
+        <Button android:id="@+id/btnAnalyze" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📊 Analyze" android:textColor="#FFFFFF" android:background="#2E7D32" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+        <Button android:id="@+id/btnAutoPrepare" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="✨ Auto Prep" android:textColor="#FFFFFF" android:background="#1565C0" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+        <Button android:id="@+id/btnBuildKit" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🥁 Build Kit" android:textColor="#FFFFFF" android:background="#FF8F00" android:textSize="12sp"/>
+    </LinearLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp">
+        <Button android:id="@+id/btnExportKit" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📁 Export" android:textColor="#FFFFFF" android:background="#4527A0" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+        <Button android:id="@+id/btnShareKit" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📤 Share" android:textColor="#FFFFFF" android:background="#E53935" android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- Kit contents -->
+    <TextView android:id="@+id/tvKitInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Kit: 0 pads" android:textColor="#FF8F00" android:textSize="12sp" android:textStyle="bold" android:padding="6dp"/>
+
+    <ListView android:id="@+id/lvKitFiles" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="#111111" android:layout_marginBottom="6dp" android:divider="#1A1A1A" android:dividerHeight="1dp"/>
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="120dp">
+        <TextView android:id="@+id/tvLog" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#AAAAAA" android:textSize="10sp" android:background="#0A0A0A" android:padding="8dp" android:fontFamily="monospace"/>
+    </ScrollView>
+</LinearLayout>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0D0D0D" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🥁 Drum Sample Splitter" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Load a WAV file with multiple drum hits" android:textColor="#AAAAAA" android:textSize="12sp" android:background="#1A1A1A" android:padding="10dp" android:layout_marginBottom="8dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DETECTION SETTINGS" android:textColor="#FF8F00" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="10dp"/>
+            <TextView android:id="@+id/tvSensLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sensitivity: 60%" android:textColor="#FFFFFF" android:textSize="13sp"/>
+            <SeekBar android:id="@+id/sbSensitivity" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+            <TextView android:id="@+id/tvMinGapLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Min gap: 40ms" android:textColor="#FFFFFF" android:textSize="13sp" android:layout_marginTop="10dp"/>
+            <SeekBar android:id="@+id/sbMinGap" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#E53935" android:thumbTint="#E53935"/>
+            <TextView android:id="@+id/tvPostRollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Post-roll: 80ms" android:textColor="#FFFFFF" android:textSize="13sp" android:layout_marginTop="10dp"/>
+            <SeekBar android:id="@+id/sbPostRoll" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#0288D1" android:thumbTint="#0288D1"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <EditText android:id="@+id/etPrefix" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="File prefix (e.g. hit)" android:textColor="#FFFFFF" android:textColorHint="#666666" android:background="#222222" android:padding="10dp" android:layout_marginEnd="6dp"/>
+            <CheckBox android:id="@+id/cbAutoTrim" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto-trim" android:textColor="#CCCCCC" android:checked="true" android:buttonTint="#FF8F00"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <Button android:id="@+id/btnPickFile" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📂 Load WAV" android:textColor="#FFFFFF" android:background="#222222" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+            <Button android:id="@+id/btnSplit" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="✂️ Split Hits" android:textColor="#FFFFFF" android:background="#FF8F00" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+            <Button android:id="@+id/btnExportAll" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📤 Export" android:textColor="#FFFFFF" android:background="#2E7D32" android:textSize="12sp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvLog" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#AAAAAA" android:textSize="11sp" android:background="#111111" android:padding="10dp" android:fontFamily="monospace" android:layout_marginBottom="6dp"/>
+
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvResults" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#1A1A1A"/>
+    </LinearLayout>
+</ScrollView>

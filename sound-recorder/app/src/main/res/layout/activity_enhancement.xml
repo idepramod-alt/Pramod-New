@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0D0D0D" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="✨ Audio Enhancement" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <TextView android:id="@+id/tvFileName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="No file selected" android:textColor="#AAAAAA" android:textSize="12sp" android:padding="10dp" android:background="#1A1A1A"/>
+            <Button android:id="@+id/btnPickFile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📂" android:textColor="#FFFFFF" android:background="#333333" android:layout_marginStart="6dp"/>
+        </LinearLayout>
+
+        <!-- EQ Section -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="EQUALIZER" android:textColor="#00695C" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvLow" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Low: 0 dB" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbLow" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+            <TextView android:id="@+id/tvMid" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mid: 0 dB" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbMid" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+            <TextView android:id="@+id/tvHigh" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="High: 0 dB" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbHigh" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#00695C" android:thumbTint="#00695C"/>
+            <TextView android:id="@+id/tvBass" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Bass: 0 dB" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbBass" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#E65100" android:thumbTint="#E65100"/>
+            <TextView android:id="@+id/tvTreble" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Treble: 0 dB" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbTreble" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#0288D1" android:thumbTint="#0288D1"/>
+        </LinearLayout>
+
+        <!-- Compressor Section -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="COMPRESSOR" android:textColor="#7B1FA2" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvThreshold" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Threshold: -18 dB" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbThreshold" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#7B1FA2" android:thumbTint="#7B1FA2"/>
+            <TextView android:id="@+id/tvRatio" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ratio: 4.0:1" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbRatio" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#7B1FA2" android:thumbTint="#7B1FA2"/>
+            <TextView android:id="@+id/tvAttack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Attack: 5ms" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbAttack" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#7B1FA2" android:thumbTint="#7B1FA2"/>
+            <TextView android:id="@+id/tvRelease" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Release: 100ms" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbRelease" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#7B1FA2" android:thumbTint="#7B1FA2"/>
+            <TextView android:id="@+id/tvMakeup" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Makeup: +0 dB" android:textColor="#CCCCCC" android:textSize="12sp" android:layout_marginTop="8dp"/>
+            <SeekBar android:id="@+id/sbMakeup" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#7B1FA2" android:thumbTint="#7B1FA2"/>
+        </LinearLayout>
+
+        <!-- Noise + Options -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="NOISE &amp; OPTIONS" android:textColor="#E53935" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tvNoise" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Noise Reduction: 0%" android:textColor="#CCCCCC" android:textSize="12sp"/>
+            <SeekBar android:id="@+id/sbNoise" android:layout_width="match_parent" android:layout_height="wrap_content" android:progressTint="#E53935" android:thumbTint="#E53935" android:layout_marginBottom="10dp"/>
+            <CheckBox android:id="@+id/cbDcRemove" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DC Offset Removal" android:textColor="#CCCCCC" android:checked="true" android:buttonTint="#E53935"/>
+            <CheckBox android:id="@+id/cbDeEsser" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="De-Esser" android:textColor="#CCCCCC" android:buttonTint="#E53935"/>
+            <CheckBox android:id="@+id/cbLimiter" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Limiter (-0.1 dBFS)" android:textColor="#CCCCCC" android:buttonTint="#E53935"/>
+            <CheckBox android:id="@+id/cbNormalize" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Normalize to -1 dBFS" android:textColor="#CCCCCC" android:buttonTint="#E53935"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textColor="#888888" android:textSize="12sp" android:padding="8dp"/>
+        <Button android:id="@+id/btnApply" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="✨ Apply Enhancement" android:textColor="#FFFFFF" android:background="#00695C" android:layout_marginBottom="8dp"/>
+        <TextView android:id="@+id/tvResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#CCCCCC" android:textSize="13sp" android:background="#1A1A1A" android:padding="12dp" android:fontFamily="monospace"/>
+    </LinearLayout>
+</ScrollView>

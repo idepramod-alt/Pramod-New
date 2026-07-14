@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0D0D0D" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🎤 Vocal Remover / Stem Split" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp">
+            <TextView android:id="@+id/tvFileName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="No file selected" android:textColor="#AAAAAA" android:textSize="12sp" android:padding="10dp" android:background="#1A1A1A"/>
+            <Button android:id="@+id/btnPickFile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📂" android:textColor="#FFFFFF" android:background="#333333" android:layout_marginStart="6dp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#AAAAAA" android:textSize="12sp" android:background="#1A1A1A" android:padding="12dp" android:layout_marginBottom="10dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <Button android:id="@+id/btnPhaseSeparate" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🔬 Phase Cancel" android:textColor="#FFFFFF" android:background="#1565C0" android:layout_marginEnd="6dp"/>
+            <Button android:id="@+id/btnAiSeparate" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🤖 AI Stems (Setup)" android:textColor="#FFFFFF" android:background="#4527A0"/>
+        </LinearLayout>
+
+        <!-- Stems panel -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="10dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="STEMS" android:textColor="#888888" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="10dp"/>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+                <CheckBox android:id="@+id/cbVocals" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🎤 Vocals" android:textColor="#CCCCCC" android:buttonTint="#E53935" android:checked="true"/>
+                <TextView android:id="@+id/tvVocalsInfo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="" android:textColor="#666666" android:textSize="11sp" android:gravity="end"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+                <CheckBox android:id="@+id/cbDrums" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🥁 Drums / Instr." android:textColor="#CCCCCC" android:buttonTint="#FF8F00" android:checked="true"/>
+                <TextView android:id="@+id/tvDrumsInfo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="" android:textColor="#666666" android:textSize="11sp" android:gravity="end"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+                <CheckBox android:id="@+id/cbBass" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🎸 Bass (AI only)" android:textColor="#CCCCCC" android:buttonTint="#0288D1" android:enabled="false"/>
+                <TextView android:id="@+id/tvBassInfo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="" android:textColor="#666666" android:textSize="11sp" android:gravity="end"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <CheckBox android:id="@+id/cbOther" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🎹 Other (AI only)" android:textColor="#CCCCCC" android:buttonTint="#7B1FA2" android:enabled="false"/>
+                <TextView android:id="@+id/tvOtherInfo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="" android:textColor="#666666" android:textSize="11sp" android:gravity="end"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textColor="#888888" android:textSize="12sp" android:padding="8dp"/>
+        <Button android:id="@+id/btnExportAll" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="📤 Export All Stems" android:textColor="#FFFFFF" android:background="#2E7D32" android:enabled="false"/>
+    </LinearLayout>
+</ScrollView>

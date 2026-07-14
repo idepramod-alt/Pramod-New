@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D0D0D"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <!-- Header -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <Button android:id="@+id/btnBack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textColor="#FFFFFF" android:background="#222222" android:paddingStart="12dp" android:paddingEnd="12dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="⚡ Ultra Precision Auto-Trim" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:paddingStart="10dp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textColor="#AAAAAA" android:textSize="12sp" android:background="#1A1A1A" android:padding="10dp" android:layout_marginBottom="10dp"/>
+
+        <!-- Sensitivity -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="#1A1A1A" android:padding="14dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TRIM PRECISION" android:textColor="#E53935" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" android:paddingBottom="10dp"/>
+            <TextView android:id="@+id/tvSensLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sensitivity: 60%" android:textColor="#FFFFFF" android:textSize="13sp"/>
+            <SeekBar android:id="@+id/sbSensitivity" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#E53935" android:thumbTint="#E53935"/>
+            <TextView android:id="@+id/tvPreRollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Pre-roll: 5ms" android:textColor="#FFFFFF" android:textSize="13sp" android:layout_marginTop="12dp"/>
+            <SeekBar android:id="@+id/sbPreRoll" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#FF8F00" android:thumbTint="#FF8F00"/>
+            <TextView android:id="@+id/tvPostRollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Post-roll: 50ms" android:textColor="#FFFFFF" android:textSize="13sp" android:layout_marginTop="12dp"/>
+            <SeekBar android:id="@+id/sbPostRoll" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressTint="#0288D1" android:thumbTint="#0288D1"/>
+        </LinearLayout>
+
+        <!-- Buttons -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <Button android:id="@+id/btnPickFiles" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📂 Pick" android:textColor="#FFFFFF" android:background="#222222" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+            <Button android:id="@+id/btnTrim" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="⚡ Trim" android:textColor="#FFFFFF" android:background="#E53935" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+            <Button android:id="@+id/btnBatchTrim" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="📦 Batch" android:textColor="#FFFFFF" android:background="#333333" android:layout_marginEnd="4dp" android:textSize="12sp"/>
+            <Button android:id="@+id/btnUndo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="↩ Undo" android:textColor="#FFFFFF" android:background="#222222" android:textSize="12sp"/>
+        </LinearLayout>
+
+        <!-- File list -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvFiles"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1A1A1A"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Result -->
+        <TextView android:id="@+id/tvResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textColor="#CCCCCC" android:textSize="13sp" android:background="#1A1A1A" android:padding="14dp" android:fontFamily="monospace"/>
+
+    </LinearLayout>
+</ScrollView>
