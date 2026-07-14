@@ -1,1124 +1,135 @@
-name: Build APK
+name: Build Pramod Sound Studio APK
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+    paths:
+      - 'sound-recorder/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:          # Manual trigger from GitHub Actions UI
 
 jobs:
   build:
+    name: Build Debug + Release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout code
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ── 2. JDK 17 (required for AGP 8.x) ─────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
+      # ── 3. Android SDK (compileSdk 35) ─────────────────────────────────────
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
-        run: sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
+      - name: Install Android SDK Platform 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Rewrite root build.gradle
-        working-directory: gradle_build
+      # ── 4. Gradle Wrapper (project has no bundled gradlew) ─────────────────
+      - name: Create Gradle wrapper (8.9)
+        working-directory: sound-recorder
         run: |
-          cat > build.gradle << 'GRADLE'
-          plugins {
-              id 'com.android.application' version '8.6.0' apply false
-              id 'com.google.gms.google-services' version '4.4.2' apply false
-          }
-          GRADLE
-
-      - name: Rewrite app/build.gradle
-        working-directory: gradle_build
-        run: |
-          cat > app/build.gradle << 'GRADLE'
-          plugins {
-              id 'com.android.application'
-              id 'com.google.gms.google-services'
-          }
-          android {
-              namespace 'com.pramod.loopmidi'
-              compileSdk 34
-              ndkVersion '25.2.9519653'
-              defaultConfig {
-                  applicationId 'com.pramod.loopmidi'
-                  minSdk 23
-                  targetSdk 34
-                  versionCode 1
-                  versionName '1.0'
-                  ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
-                  externalNativeBuild { cmake { cppFlags '-std=c++17'; arguments '-DANDROID_STL=c++_shared' } }
-              }
-              signingConfigs {
-                  debug {
-                      storeFile file('keystore/debug.keystore')
-                      storePassword 'android'
-                      keyAlias 'androiddebugkey'
-                      keyPassword 'android'
-                      storeType 'PKCS12'
-                  }
-              }
-              buildTypes {
-                  debug {
-                      minifyEnabled false
-                      signingConfig signingConfigs.debug
-                  }
-                  release { minifyEnabled false }
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-              externalNativeBuild {
-                  cmake {
-                      path 'src/main/cpp/CMakeLists.txt'
-                      version '3.22.1'
-                  }
-              }
-              buildFeatures {
-                  prefab true
-              }
-              sourceSets {
-                  main {
-                      jniLibs.srcDirs = ['src/main/jniLibs']
-                  }
-              }
-              packagingOptions {
-                  resources {
-                      excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/NOTICE','META-INF/*.kotlin_module','META-INF/*.version','**/*.kotlin_builtins','**/*.kotlin_metadata']
-                  }
-              }
-          }
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-              implementation 'androidx.documentfile:documentfile:1.1.0'
-              implementation 'androidx.core:core:1.12.0'
-              implementation 'androidx.legacy:legacy-support-v4:1.0.0'
-              implementation 'com.google.android.material:material:1.11.0'
-              implementation 'com.google.firebase:firebase-database:20.3.1'
-              implementation 'com.google.firebase:firebase-auth:22.3.1'
-              implementation 'com.google.android.gms:play-services-base:18.3.0'
-              implementation 'com.google.android.gms:play-services-tasks:18.1.0'
-              implementation 'com.google.android.gms:play-services-auth:21.2.0'
-              implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.25'
-              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0'
-              implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-              implementation 'com.google.oboe:oboe:1.8.1'
-          }
-          GRADLE
-
-      - name: Rewrite settings.gradle
-        working-directory: gradle_build
-        run: |
-          cat > settings.gradle << 'GRADLE'
-          pluginManagement {
-              repositories {
-                  gradlePluginPortal()
-                  google()
-                  mavenCentral()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = 'PramodLoopMidi'
-          include ':app'
-          GRADLE
-
-      - name: Write clean AndroidManifest.xml
-        run: |
-          cat > gradle_build/app/src/main/AndroidManifest.xml << 'MANIFEST'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              android:versionCode="1"
-              android:versionName="1.0">
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-              <uses-feature android:name="android.hardware.usb.host"/>
-              <uses-feature android:name="android.software.midi" android:required="true"/>
-              <permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="signature"/>
-              <uses-permission android:name="com.pramod.loopmidi.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
-              <application
-                  android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
-                  android:label="Pramod Octapad Loops"
-                  android:icon="@mipmap/ic_launcher"
-                  android:allowBackup="true"
-                  android:appComponentFactory="androidx.core.app.CoreComponentFactory">
-                  <activity android:name="com.pramod.loopmidi.ActivationActivity" android:exported="true" android:screenOrientation="landscape"/>
-                  <activity android:name="com.pramod.loopmidi.LoginActivity" android:exported="true" android:screenOrientation="landscape">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-                  <activity android:name="com.pramod.loopmidi.LoopsActivity" android:exported="true" android:screenOrientation="landscape"/>
-                  <activity android:name="com.pramod.loopmidi.MainActivity" android:exported="false" android:screenOrientation="landscape"/>
-                  <service android:name="com.google.firebase.components.ComponentDiscoveryService" android:exported="false" android:directBootAware="true">
-                      <meta-data android:name="com.google.firebase.components:com.google.firebase.database.FirebaseDatabaseKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
-                      <meta-data android:name="com.google.firebase.components:com.google.firebase.database.DatabaseRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
-                      <meta-data android:name="com.google.firebase.components:com.google.firebase.ktx.FirebaseCommonLegacyRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
-                      <meta-data android:name="com.google.firebase.components:com.google.firebase.FirebaseCommonKtxRegistrar" android:value="com.google.firebase.components.ComponentRegistrar"/>
-                  </service>
-                  <provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:exported="false" android:authorities="com.pramod.loopmidi.firebaseinitprovider" android:initOrder="100" android:directBootAware="true"/>
-                  <activity android:theme="@android:style/Theme.Translucent.NoTitleBar" android:name="com.google.android.gms.common.api.GoogleApiActivity" android:exported="false"/>
-                  <meta-data android:name="com.google.android.gms.version" android:value="@integer/google_play_services_version"/>
-                  <provider android:name="androidx.startup.InitializationProvider" android:exported="false" android:authorities="com.pramod.loopmidi.androidx-startup">
-                      <meta-data android:name="androidx.emoji2.text.EmojiCompatInitializer" android:value="androidx.startup"/>
-                      <meta-data android:name="androidx.lifecycle.ProcessLifecycleInitializer" android:value="androidx.startup"/>
-                      <meta-data android:name="androidx.profileinstaller.ProfileInstallerInitializer" android:value="androidx.startup"/>
-                  </provider>
-                  <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" android:permission="android.permission.DUMP" android:enabled="true" android:exported="true" android:directBootAware="false">
-                      <intent-filter><action android:name="androidx.profileinstaller.action.INSTALL_PROFILE"/></intent-filter>
-                      <intent-filter><action android:name="androidx.profileinstaller.action.SKIP_FILE"/></intent-filter>
-                      <intent-filter><action android:name="androidx.profileinstaller.action.SAVE_PROFILE"/></intent-filter>
-                      <intent-filter><action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION"/></intent-filter>
-                  </receiver>
-              </application>
-          </manifest>
-          MANIFEST
-
-      - name: Create google-services.json
-        working-directory: gradle_build/app
-        run: |
-          cat > google-services.json << 'EOF'
-          {
-            "project_info": {
-              "project_number": "1070428492610",
-              "project_id": "pramod-octapad-loop",
-              "storage_bucket": "pramod-octapad-loop.firebasestorage.app"
-            },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:1070428492610:android:463803a2e3c8dff1b0eedb",
-                  "android_client_info": { "package_name": "com.pramod.loopmidi" }
-                },
-                "oauth_client": [
-                  {
-                    "client_id": "1070428492610-4ob9cmeo9es55p8uc6a4i51a9u1ni61l.apps.googleusercontent.com",
-                    "client_type": 1,
-                    "android_info": {
-                      "package_name": "com.pramod.loopmidi",
-                      "certificate_hash": "9324732a57a16f3f5244991f32a4bbd178ff6659"
-                    }
-                  },
-                  {
-                    "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
-                    "client_type": 3
-                  }
-                ],
-                "api_key": [{ "current_key": "AIzaSyAM5iLKu7EBcodDUgBiGadmIAsMv82yxhc" }],
-                "services": {
-                  "appinvite_service": {
-                    "other_platform_oauth_client": [
-                      {
-                        "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
-                        "client_type": 3
-                      }
-                    ]
-                  }
-                }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          EOF
-
-      - name: Remove .dex and binary files
-        run: |
-          rm -f gradle_build/app/src/main/classes*.dex
-          rm -f gradle_build/app/src/main/DebugProbesKt.bin
-
-      - name: Cleanup library resources (keep app drawables)
-        run: |
-          rm -rf gradle_build/app/src/main/res/color-v31/
-          rm -rf gradle_build/app/src/main/res/color-night/
-          rm -rf gradle_build/app/src/main/res/layout-land/
-          find gradle_build/app/src/main/res -maxdepth 1 -type d \( -name "values" -o -name "values-*" \) -exec rm -rf {} + 2>/dev/null || true
-          rm -rf gradle_build/app/src/main/res/anim/
-          rm -rf gradle_build/app/src/main/res/animator/
-          rm -rf gradle_build/app/src/main/res/interpolator/
-          rm -rf gradle_build/app/src/main/res/xml/
-          rm -rf gradle_build/app/src/main/res/drawable-watch/
-          rm -rf gradle_build/app/src/main/res/layout-watch/
-          rm -rf gradle_build/app/src/main/res/layout-v26/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-hdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-mdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xhdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxhdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-ldrtl-xxxhdpi/
-          rm -rf gradle_build/app/src/main/res/drawable-anydpi/
-          rm -rf gradle_build/app/src/main/res/drawable-anydpi-v24/
-          # mipmap-anydpi-v26/ (adaptive icon XML) references a foreground drawable
-          # that does not exist in this source tree, which breaks AAPT resource
-          # linking. Removing it makes Android fall back to the real per-density
-          # ic_launcher.png/ic_launcher_round.png generated below on all API levels.
-          rm -rf gradle_build/app/src/main/res/mipmap-anydpi-v26/
-          find gradle_build/app/src/main/res/layout -type f \
-            ! -name "activity_activation.xml" \
-            ! -name "activity_loops.xml" \
-            ! -name "activity_login.xml" \
-            ! -name "custom_dialog.xml" \
-            ! -name "main.xml" \
-            ! -name "notification_action.xml" \
-            ! -name "notification_action_tombstone.xml" \
-            ! -name "notification_template_custom_big.xml" \
-            ! -name "notification_template_icon_group.xml" \
-            ! -name "notification_template_part_chronometer.xml" \
-            ! -name "notification_template_part_time.xml" \
-            -delete 2>/dev/null || true
-          mkdir -p gradle_build/app/src/main/res/values
-          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">Pramod Octapad Loops</string>\n</resources>\n' > gradle_build/app/src/main/res/values/strings.xml
-
-      - name: Move native libs to jniLibs
-        run: |
-          mkdir -p gradle_build/app/src/main/jniLibs
-          # Copy only libdatastore_shared_counter.so — liboboe_audio_engine.so is built by CMake
-          find gradle_build/app/src/main/lib -name "libdatastore_shared_counter.so" | while read f; do
-            abi=$(basename $(dirname "$f"))
-            mkdir -p gradle_build/app/src/main/jniLibs/$abi
-            cp "$f" gradle_build/app/src/main/jniLibs/$abi/
-          done
-          rm -rf gradle_build/app/src/main/lib
-
-      - name: Remove binary kotlin metadata and META-INF
-        run: |
-          rm -rf gradle_build/app/src/main/kotlin
-          rm -rf gradle_build/app/src/main/META-INF
-
-      - name: Copy Java sources from decompiled
-        run: |
-          mkdir -p gradle_build/app/src/main/java/com/pramod/loopmidi
-          # Exclude AudioEngine.java and LoopsActivity.java — gradle_build/ already has
-          # patched versions with nativeUpdateLoopSpeedPitch / nativePlayLoopSP / playLoopSP /
-          # updateLoopSpeedPitch. Copying the decompiled versions would overwrite and lose them.
-          find decompiled_apk_jadx/sources/com/pramod/loopmidi -name "*.java" ! -name "R.java" \
-            ! -name "AudioEngine.java" ! -name "LoopsActivity.java" \
-            -exec cp {} gradle_build/app/src/main/java/com/pramod/loopmidi/ \;
-
-      - name: Create ActivationActivity stub
-        run: |
-          cat > gradle_build/app/src/main/java/com/pramod/loopmidi/ActivationActivity.java << 'EOF'
-          package com.pramod.loopmidi;
-          import android.app.Activity;
-          import android.os.Bundle;
-          public class ActivationActivity extends Activity {
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  finish();
-              }
-          }
-          EOF
-
-      - name: Fix UByte.MAX_VALUE
-        run: |
-          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
-          sed -i 's/import kotlin\.UByte;//g' $JAVA_DIR/*.java
-          sed -i 's/UByte\.MAX_VALUE/255/g' $JAVA_DIR/*.java
-
-      - name: Fix jadx decompilation artifacts (sed)
-        run: |
-          JAVA_DIR="gradle_build/app/src/main/java/com/pramod/loopmidi"
-
-          # Fix 1: Remove (this) arg from anonymous class constructors
-          sed -i 's/\(new [A-Za-z$.]*\)(this) {\( *\/\/ from class:\)/\1() {\2/g' $JAVA_DIR/*.java
-          # Fix 1b: Also handle anonymous interface classes WITHOUT trailing '// from class:' comment
-          # e.g. 'new View.OnTouchListener(this) {' at line 1230 of LoopsActivity.java
-          sed -i 's/\(new [A-Za-z$.]*\)(this) {$/\1() {/g' $JAVA_DIR/*.java
-
-          # Fix 2: Remove invalid outer-class self-assignment lines
-          sed -i '/this\.this\$0 = this;/d' $JAVA_DIR/*.java
-          sed -i '/this\.this\$1 = this;/d' $JAVA_DIR/*.java
-
-          # Fix 3: Remove synthetic AnonymousClassXX field declarations
-          sed -i '/final \/\* synthetic \*\/ AnonymousClass[0-9]* this\$[0-9]*;/d' $JAVA_DIR/*.java
-
-          # Fix 4: ConstraintLayout.LayoutParams.Table private constants
-          sed -i 's/ConstraintLayout\.LayoutParams\.Table\.[A-Z_]* \/\* \([0-9]*\) \*\//\1/g' $JAVA_DIR/*.java
-
-          # Fix 5: Remove 'private' from fields accessed by inner classes
-          sed -i '/\bloopPlaying\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
-          sed -i '/\baudioEngine\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
-          sed -i '/\bloopPads\b/s/\bprivate\b //' $JAVA_DIR/LoopsActivity.java
-
-          # Fix 6: Delete phantom eN = eM; lines (both sides have digits)
-          sed -i '/^\s*e[0-9]\+ = e[0-9]\+;$/d' $JAVA_DIR/*.java
-
-          # Fix 7: Replace nested outer-class reference chain (dotted or bare usage)
-          sed -i 's/this\.this\$1\.this\$0\b/LoopsActivity.this/g' $JAVA_DIR/LoopsActivity.java
-          sed -i 's/this\.this\$1\.this\$0\b/MainActivity.this/g' $JAVA_DIR/MainActivity.java
-
-          # Fix 8: Replace single-level outer-class reference usage with OuterClass.this (dotted or bare usage)
-          sed -i 's/this\.this\$0\b/LoopsActivity.this/g' $JAVA_DIR/LoopsActivity.java
-          sed -i 's/this\.this\$0\b/MainActivity.this/g' $JAVA_DIR/MainActivity.java
-
-          # Fix 9: Remove now-unused synthetic this$0 field declarations (any outer class name)
-          sed -i '/final \/\* synthetic \*\/ [A-Za-z0-9_]* this\$0;/d' $JAVA_DIR/*.java
-
-          echo "=== Sed fixes done ==="
-
-      - name: Fix jadx exception variable scoping (Python)
-        run: |
-          python3 << 'PYEOF'
-          import re, os
-
-          JAVA_DIR = 'gradle_build/app/src/main/java/com/pramod/loopmidi'
-
-          loops_path = os.path.join(JAVA_DIR, 'LoopsActivity.java')
-          with open(loops_path) as f:
-              lines = f.readlines()
-
-          result = []
-          already_hoisted = set()
-          for line in lines:
-              m = re.match(r'^(\s+)(e\d+) = e;', line)
-              if m:
-                  indent, var = m.group(1), m.group(2)
-                  result.append(line)
-                  if var not in already_hoisted:
-                      for j in range(len(result) - 1, -1, -1):
-                          if re.search(r'\btry\s*\{', result[j]):
-                              result.insert(j, f'{indent}Exception {var} = null;\n')
-                              break
-                      already_hoisted.add(var)
-              else:
-                  result.append(line)
-
-          with open(loops_path, 'w') as f:
-              f.writelines(result)
-          print(f'LoopsActivity.java: hoisted declarations for: {already_hoisted or "none"}')
-
-          main_path = os.path.join(JAVA_DIR, 'MainActivity.java')
-          with open(main_path) as f:
-              lines = f.readlines()
-
-          result = []
-          fixed_decl = 0
-          fixed_orphan = 0
-          for line in lines:
-              m = re.match(r'^(\s+)e = (e\d+);', line)
-              if m:
-                  result.append(f'{m.group(1)}Exception e = {m.group(2)};\n')
-                  fixed_decl += 1
-                  continue
-
-              m2 = re.match(r'^(\s+)(e\d+)\.printStackTrace\(\);\s*$', line)
-              if m2:
-                  result.append(f'{m2.group(1)}// {line.strip()} // jadx-out-of-scope\n')
-                  fixed_orphan += 1
-                  continue
-
-              result.append(line)
-
-          with open(main_path, 'w') as f:
-              f.writelines(result)
-          print(f'MainActivity.java: declared {fixed_decl} bare-e var(s), commented {fixed_orphan} orphaned printStackTrace()')
-
-          print('All exception variable fixes applied.')
-          PYEOF
-
-      - name: Verify loadLoopFromFolder is clean (no jadx e4/e5 scoping issues)
-        run: |
-          JAVA='gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          # The method was rewritten cleanly in the repo — verify it is present
-          grep -q 'DocumentFile loopFolder = null;' "$JAVA" \
-            && echo 'OK: loadLoopFromFolder uses clean DocumentFile loopFolder = null' \
-            || { echo 'FAIL: broken jadx loadLoopFromFolder still present'; exit 1; }
-          # Verify no unscoped e4/e5 references remain
-          ! grep -q 'e4 = e;|e4 = e[0-9]' "$JAVA" \
-            && echo 'OK: no broken e4 variable references' \
-            || { echo 'FAIL: broken e4 references found in LoopsActivity'; exit 1; }
-
-      - name: Patch audio_engine.cpp - independent speed/pitch (OLA granular synthesis)
-        run: |
-            python3 - << 'PYEOF'
-            import sys
-            CPP = 'gradle_build/app/src/main/cpp/audio_engine.cpp'
-            with open(CPP) as f:
-                src = f.read()
-            required = ['CMD_UPDATE_SPEED_PITCH', 'SYN_HOP', 'updateLoopSpeedPitch',
-                        'playLoopSP', 'nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP',
-                        'grainStartA', 'grainStartB', 'synPhase']
-            missing = [s for s in required if s not in src]
-            if missing:
-                print('MISSING symbols: ' + str(missing))
-                sys.exit(1)
-            print('audio_engine.cpp: all ' + str(len(required)) + ' required symbols verified OK')
-            PYEOF
-
-      - name: Patch AudioEngine.java - add independent speed/pitch native methods
-        run: |
-            python3 - << 'PYEOF'
-            import sys
-            JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java'
-            with open(JAVA) as f:
-                src = f.read()
-            required = ['nativeUpdateLoopSpeedPitch', 'nativePlayLoopSP', 'playLoopSP', 'updateLoopSpeedPitch']
-            missing = [s for s in required if s not in src]
-            if missing:
-                print('MISSING in AudioEngine.java: ' + str(missing))
-                sys.exit(1)
-            print('AudioEngine.java: all ' + str(len(required)) + ' required symbols verified OK')
-            PYEOF
-
-      - name: Patch LoopsActivity.java - use independent speed/pitch calls
-        run: |
-            python3 - << 'PYEOF'
-            import sys
-            JAVA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-            with open(JAVA) as f:
-                src = f.read()
-            required = ['playLoopSP', 'updateLoopSpeedPitch']
-            missing = [s for s in required if s not in src]
-            if missing:
-                print('MISSING in LoopsActivity.java: ' + str(missing))
-                sys.exit(1)
-            print('LoopsActivity.java: all ' + str(len(required)) + ' required symbols verified OK')
-            PYEOF
-
-      - name: Verify speed/pitch patch symbols in all files
-        run: |
-          echo "=== Checking audio_engine.cpp ==="
-          for sym in CMD_UPDATE_SPEED_PITCH SYN_HOP updateLoopSpeedPitch playLoopSP grainStartA synPhase nativeUpdateLoopSpeedPitch nativePlayLoopSP; do
-            grep -q "$sym" gradle_build/app/src/main/cpp/audio_engine.cpp \
-              && echo "  OK: $sym" || { echo "  MISSING: $sym"; exit 1; }
-          done
-          echo "=== Checking AudioEngine.java ==="
-          for sym in nativeUpdateLoopSpeedPitch nativePlayLoopSP playLoopSP updateLoopSpeedPitch; do
-            grep -q "$sym" gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java \
-              && echo "  OK: $sym" || { echo "  MISSING: $sym"; exit 1; }
-          done
-          echo "=== Checking LoopsActivity.java ==="
-          grep -q "playLoopSP" gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java \
-            && echo "  OK: playLoopSP" || { echo "  MISSING: playLoopSP"; exit 1; }
-          grep -q "updateLoopSpeedPitch" gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java \
-            && echo "  OK: updateLoopSpeedPitch" || { echo "  MISSING: updateLoopSpeedPitch"; exit 1; }
-          # Ensure no old coupled multiplication calls remain
-          ! grep -q "currentSpeed \* this\.currentPitch" gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java \
-            && echo "  OK: no stale speed*pitch multiplication" || { echo "  FAIL: old speed*pitch call still present"; exit 1; }
-          echo "=== All patch verifications passed ==="
-
-      - name: Create mipmap launcher icons
-        run: |
-          pip3 install --quiet --disable-pip-version-check Pillow
-          python3 - << 'PYEOF'
-          import os
-          from PIL import Image, ImageDraw
-
-          SRC = 'app_icon_source.png'
-          base = 'gradle_build/app/src/main/res'
-
-          # Standard Android mipmap sizes
-          sizes = {
-              'mipmap-mdpi':    48,
-              'mipmap-hdpi':    72,
-              'mipmap-xhdpi':   96,
-              'mipmap-xxhdpi':  144,
-              'mipmap-xxxhdpi': 192,
-          }
-
-          src_img = Image.open(SRC).convert('RGBA')
-          # Center-crop to a square so it isn't stretched
-          w, h = src_img.size
-          side = min(w, h)
-          left, top = (w - side) // 2, (h - side) // 2
-          src_img = src_img.crop((left, top, left + side, top + side))
-
-          for folder, px in sizes.items():
-              path = os.path.join(base, folder)
-              os.makedirs(path, exist_ok=True)
-
-              square = src_img.resize((px, px), Image.LANCZOS)
-              square.save(os.path.join(path, 'ic_launcher.png'))
-
-              # Circular mask for legacy round-icon variant (pre-Android 8 devices)
-              mask = Image.new('L', (px, px), 0)
-              ImageDraw.Draw(mask).ellipse((0, 0, px, px), fill=255)
-              round_icon = Image.new('RGBA', (px, px), (0, 0, 0, 0))
-              round_icon.paste(square, (0, 0), mask)
-              round_icon.save(os.path.join(path, 'ic_launcher_round.png'))
-
-              print(f'Created {folder}/ic_launcher.png + ic_launcher_round.png ({px}px) from real icon')
-
-          print('All mipmap icons created from app_icon_source.png.')
-          PYEOF
-
-      - name: Setup Gradle 8.9 wrapper
-        working-directory: gradle_build
-        run: gradle wrapper --gradle-version=8.9
-
-      - name: Clean stale committed build artifacts
-        run: |
-          # The repo ships pre-committed build outputs:
-          #   - R.java (stale, missing IDs added in recent commits)
-          #   - .gradle/ task-history cache (causes processDebugResources to be
-          #     skipped as UP-TO-DATE, so R class is never regenerated)
-          #   - app/build/ (intermediates, generated, outputs from prior builds)
-          #   - build/ (root project build cache)
-          # Gradle sees these and marks :app:processDebugResources UP-TO-DATE,
-          # skipping AAPT — so any new layout ID is missing from R, causing
-          # "cannot find symbol" compilation errors.
-          # Full removal forces a clean, reproducible resource-processing pass.
-          rm -f  gradle_build/app/src/main/java/com/pramod/loopmidi/R.java
-          rm -rf gradle_build/.gradle
-          rm -rf gradle_build/app/build
-          rm -rf gradle_build/build
-          # Verify stale artifacts are gone
-          [ ! -f gradle_build/app/src/main/java/com/pramod/loopmidi/R.java ] \
-            && echo "OK: stale R.java removed" \
-            || { echo "FAIL: R.java still present"; exit 1; }
-          [ ! -d gradle_build/.gradle ] \
-            && echo "OK: .gradle cache removed" \
-            || { echo "FAIL: .gradle still present"; exit 1; }
-          [ ! -d gradle_build/app/build ] \
-            && echo "OK: app/build removed" \
-            || { echo "FAIL: app/build still present"; exit 1; }
-          echo "All stale build artifacts cleaned — Gradle will run a full fresh build."
-
-
-      # ════════════════════════════════════════════════════════════════════════
-      # FEATURE BATCH: Roland SPD-SX style improvements
-      # 1. Drum rolling fix  2. Latency fix  3. Multi-track recording
-      # ════════════════════════════════════════════════════════════════════════
-
-      - name: Fix drum rolling - no-choke for rapid drum hits
-        run: |
-          JAVA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          # LoopsActivity.java now uses a mode-dependent, PER-PAD chokeGroup for
-          # drum/one-shot hits, matching MainActivity's own per-pad seekChokeGroup
-          # pattern exactly (progress value IS the chokeGroup, 0 = off):
-          #   - Real DRUM MODE -> chokeGroup = padDrumChokeGroup[index] (0-4, set by
-          #     the per-pad seekDrumChoke slider in the ADV panel). Default is 0
-          #     (choke disabled, per the native engine's `if (chokeGroup > 0)` guard)
-          #     so fast pad rolling / rapid re-hits let each hit ring out fully.
-          #   - ONE-SHOT MODE -> chokeGroup = index + 1 (unique per pad), unchanged,
-          #     so retapping the SAME pad still chokes (cuts off) its own previous
-          #     still-ringing hit, while different pads never choke each other.
-          # LOOP mode is untouched — it never used chokeGroup and still doesn't.
-          grep -n 'chokeGroup = this.padDrumChokeGroup\[index\]' "$JAVA" || { echo "ERROR: expected per-pad mode-dependent chokeGroup not found"; exit 1; }
-          echo "OK: drum-mode per-pad choke / one-shot per-pad choke confirmed"
-
-      - name: Fix drum latency - AAudio API + Sonification content type
-        run: |
-          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
-          grep -q 'setAudioApi' "$CPP" && { echo "already patched"; exit 0; }
-          sed -i '/->setBufferCapacityInFrames/a\            ->setAudioApi(oboe::AudioApi::AAudio)\n            ->setContentType(oboe::ContentType::Sonification)\n            ->setUsage(oboe::Usage::Game)' "$CPP"
-          sed -i 's/setBufferCapacityInFrames(framesPerBurst \* 3)/setBufferCapacityInFrames(framesPerBurst * 2)/' "$CPP"
-          grep -n 'setAudioApi\|Sonification' "$CPP" | head -3
-          echo "OK: latency fix done"
-
-      - name: Decode recording patch sources and helper scripts
-        run: |
-          echo 'ZW51bSBDbWRUeXBlIHsgQ01EX1BMQVksIENNRF9TVE9QX1BBRCwgQ01EX1NUT1BfQUxMLCBDTURfVVBEQVRFX1NQRUVEX1BJVENILAogICAgICAgICAgICAgICBDTURfUkVDX1NUQVJULCBDTURfUkVDX1NUT1AsIENNRF9QTEFZX1RSQUNLLCBDTURfU1RPUF9UUkFDSyB9Owo='     | base64 -d > /tmp/src_rec_enum.txt
-          echo 'ICAgIGludCAgICAgcmVjVHJhY2sgPSAwOwogICAgZmxvYXQgICB0cmFja1ZvbCA9IDEuZjsKICAgIGJvb2wgICAgdHJhY2tMb29wPSBmYWxzZTsK'      | base64 -d > /tmp/src_rec_cmd.txt
-          echo 'CiAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkZXIgKDQgdHJhY2tzIHggOTAgc2VjIG1heCBhdCBkZXZpY2UgU1IpIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgc3RhdGljIGNvbnN0IGludCBNQVhfUkVDX1RSQUNLUyA9IDQ7CiAgICBzdGF0aWMgY29uc3QgaW50IFJFQ19NQVhfU0VDICAgID0gOTA7CgogICAgc3RkOjp2ZWN0b3I8ZmxvYXQ+IHJlY1RyYWNrW01BWF9SRUNfVFJBQ0tTXTsgIC8vIHBlci10cmFjayBQQ00KICAgIGludCAgICAgICAgICAgICAgICByZWNMZW4gIFtNQVhfUkVDX1RSQUNLU10gPSB7fTsKCiAgICBzdGQ6OmF0b21pYzxpbnQ+ICByZWNBY3RpdmVUcmFjazsgICAvLyAtMSA9IGlkbGUKICAgIHN0ZDo6YXRvbWljPGJvb2w+IHJlY1J1bm5pbmc7CiAgICBpbnQgICAgICAgICAgICAgICByZWNXcml0ZVBvcyAgPSAwOwogICAgaW50ICAgICAgICAgICAgICAgcmVjTWF4RnJhbWVzID0gNDgwMDAgKiA5MDsKCiAgICBzdHJ1Y3QgUmVjUGxheVN0YXRlIHsKICAgICAgICBzdGQ6OmF0b21pYzxib29sPiAgYWN0aXZlOwogICAgICAgIGludCAgICAgICAgICAgICAgICByZWFkUG9zID0gMDsKICAgICAgICBzdGQ6OmF0b21pYzxmbG9hdD4gdm9sOwogICAgICAgIGJvb2wgICAgICAgICAgICAgICBsb29waW5nID0gZmFsc2U7CiAgICAgICAgUmVjUGxheVN0YXRlKCkgOiBhY3RpdmUoZmFsc2UpLCB2b2woMS5mKSB7fQogICAgfTsKICAgIFJlY1BsYXlTdGF0ZSByZWNQbGF5W01BWF9SRUNfVFJBQ0tTXTsKCiAgICBBdWRpb0VuZ2luZUltcGwoKSA6IHJlY0FjdGl2ZVRyYWNrKC0xKSwgcmVjUnVubmluZyhmYWxzZSkge30K'   | base64 -d > /tmp/src_rec_fields.txt
-          echo 'ICAgICAgICAvLyBQcmUtYWxsb2NhdGUgcmVjb3JkaW5nIHRyYWNrIGJ1ZmZlcnMgKGNhbGxlZCBvbiBpbml0L3JlaW5pdCkKICAgICAgICByZWNNYXhGcmFtZXMgPSBzYW1wbGVSYXRlICogUkVDX01BWF9TRUM7CiAgICAgICAgZm9yIChpbnQgdGkgPSAwOyB0aSA8IE1BWF9SRUNfVFJBQ0tTOyB0aSsrKQogICAgICAgICAgICByZWNUcmFja1t0aV0uYXNzaWduKHJlY01heEZyYW1lcywgMC5mKTsK'     | base64 -d > /tmp/src_rec_init.txt
-          echo 'ICAgICAgICAvLyDilIDilIAgTWl4IHBsYXlpbmcgcmVjb3JkZWQgdHJhY2tzIGludG8gb3V0cHV0IOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIGZvciAoaW50IHQgPSAwOyB0IDwgTUFYX1JFQ19UUkFDS1M7IHQrKykgewogICAgICAgICAgICBSZWNQbGF5U3RhdGUmIHJwID0gcmVjUGxheVt0XTsKICAgICAgICAgICAgaWYgKCFycC5hY3RpdmUubG9hZChzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKSkgY29udGludWU7CiAgICAgICAgICAgIGludCAgdGxlbiA9IHJlY0xlblt0XTsKICAgICAgICAgICAgaWYgKHRsZW4gPD0gMCkgeyBycC5hY3RpdmUuc3RvcmUoZmFsc2UpOyBjb250aW51ZTsgfQogICAgICAgICAgICBmbG9hdCBydiA9IHJwLnZvbC5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IG51bUZyYW1lczsgaSsrKSB7CiAgICAgICAgICAgICAgICBpZiAocnAucmVhZFBvcyA8IHRsZW4pIHsKICAgICAgICAgICAgICAgICAgICBvdXRbaV0gKz0gcmVjVHJhY2tbdF1bcnAucmVhZFBvcysrXSAqIHJ2OwogICAgICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgICAgICBpZiAocnAubG9vcGluZykgcnAucmVhZFBvcyA9IDA7CiAgICAgICAgICAgICAgICAgICAgZWxzZSB7IHJwLmFjdGl2ZS5zdG9yZShmYWxzZSwgc3RkOjptZW1vcnlfb3JkZXJfcmVsYXhlZCk7IGJyZWFrOyB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIC8vIOKUgOKUgCBDYXB0dXJlIG1peGVkIG91dHB1dCB0byBhY3RpdmUgcmVjb3JkaW5nIHRyYWNrIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIGludCBydHJhY2sgPSByZWNBY3RpdmVUcmFjay5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgIGlmIChydHJhY2sgPj0gMCAmJiBydHJhY2sgPCBNQVhfUkVDX1RSQUNLUyAmJiByZWNSdW5uaW5nLmxvYWQoKSkgewogICAgICAgICAgICBpbnQgcm1heCA9IHJlY01heEZyYW1lczsKICAgICAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBudW1GcmFtZXM7IGkrKykgewogICAgICAgICAgICAgICAgaWYgKHJlY1dyaXRlUG9zIDwgcm1heCkgewogICAgICAgICAgICAgICAgICAgIHJlY1RyYWNrW3J0cmFja11bcmVjV3JpdGVQb3MrK10gPSBvdXRbaV07CiAgICAgICAgICAgICAgICB9IGVsc2UgewogICAgICAgICAgICAgICAgICAgIHJlY1J1bm5pbmcuc3RvcmUoZmFsc2UsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICAgICAgICAgIHJlY0FjdGl2ZVRyYWNrLnN0b3JlKC0xLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKTsKICAgICAgICAgICAgICAgICAgICBicmVhazsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgICByZWNMZW5bcnRyYWNrXSA9IHJlY1dyaXRlUG9zOwogICAgICAgIH0KCg==' | base64 -d > /tmp/src_rec_callback.txt
-          echo 'CiAgICAgICAgY2FzZSBDTURfUkVDX1NUQVJUOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUykgewogICAgICAgICAgICAgICAgcmVjV3JpdGVQb3MgPSAwOwogICAgICAgICAgICAgICAgcmVjTGVuW2MucmVjVHJhY2tdID0gMDsKICAgICAgICAgICAgICAgIHN0ZDo6ZmlsbChyZWNUcmFja1tjLnJlY1RyYWNrXS5iZWdpbigpLCByZWNUcmFja1tjLnJlY1RyYWNrXS5lbmQoKSwgMC5mKTsKICAgICAgICAgICAgICAgIHJlY0FjdGl2ZVRyYWNrLnN0b3JlKGMucmVjVHJhY2ssIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGVhc2UpOwogICAgICAgICAgICAgICAgcmVjUnVubmluZy5zdG9yZSh0cnVlLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxlYXNlKTsKICAgICAgICAgICAgfQogICAgICAgICAgICBicmVhazsKCiAgICAgICAgY2FzZSBDTURfUkVDX1NUT1A6CiAgICAgICAgICAgIHJlY1J1bm5pbmcuc3RvcmUoZmFsc2UsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICByZWNBY3RpdmVUcmFjay5zdG9yZSgtMSwgc3RkOjptZW1vcnlfb3JkZXJfcmVsYXhlZCk7CiAgICAgICAgICAgIGJyZWFrOwoKICAgICAgICBjYXNlIENNRF9QTEFZX1RSQUNLOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUyAmJiByZWNMZW5bYy5yZWNUcmFja10gPiAwKSB7CiAgICAgICAgICAgICAgICBSZWNQbGF5U3RhdGUmIHJwID0gcmVjUGxheVtjLnJlY1RyYWNrXTsKICAgICAgICAgICAgICAgIHJwLnJlYWRQb3MgPSAwOwogICAgICAgICAgICAgICAgcnAudm9sLnN0b3JlKGMudHJhY2tWb2wsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGF4ZWQpOwogICAgICAgICAgICAgICAgcnAubG9vcGluZyA9IGMudHJhY2tMb29wOwogICAgICAgICAgICAgICAgcnAuYWN0aXZlLnN0b3JlKHRydWUsIHN0ZDo6bWVtb3J5X29yZGVyX3JlbGVhc2UpOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGJyZWFrOwoKICAgICAgICBjYXNlIENNRF9TVE9QX1RSQUNLOgogICAgICAgICAgICBpZiAoYy5yZWNUcmFjayA+PSAwICYmIGMucmVjVHJhY2sgPCBNQVhfUkVDX1RSQUNLUykKICAgICAgICAgICAgICAgIHJlY1BsYXlbYy5yZWNUcmFja10uYWN0aXZlLnN0b3JlKGZhbHNlLCBzdGQ6Om1lbW9yeV9vcmRlcl9yZWxheGVkKTsKICAgICAgICAgICAgYnJlYWs7Cg=='     | base64 -d > /tmp/src_rec_cmds.txt
-          echo 'CkpOSUVYUE9SVCB2b2lkIEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZVN0YXJ0UmVjb3JkKAogICAgICAgIEpOSUVudiogZW52LCBqb2JqZWN0IG9iaiwgamludCB0cmFjaykgewogICAgQXVkaW9FbmdpbmVJbXBsKiBlID0gZ2V0RW5naW5lKGVudiwgb2JqKTsKICAgIGlmICghZSkgcmV0dXJuOwogICAgQ21kIGNtZHt9OwogICAgY21kLnR5cGUgICAgID0gQ01EX1JFQ19TVEFSVDsKICAgIGNtZC5yZWNUcmFjayA9IChpbnQpdHJhY2s7CiAgICBlLT5jbWRRLnB1c2goY21kKTsKfQoKSk5JRVhQT1JUIHZvaWQgSk5JQ0FMTApKYXZhX2NvbV9wcmFtb2RfbG9vcG1pZGlfQXVkaW9FbmdpbmVfbmF0aXZlU3RvcFJlY29yZChKTklFbnYqIGVudiwgam9iamVjdCBvYmopIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlID0gQ01EX1JFQ19TVE9QOwogICAgZS0+Y21kUS5wdXNoKGNtZCk7Cn0KCkpOSUVYUE9SVCBqaW50IEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCgKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IEF1ZGlvRW5naW5lSW1wbDo6TUFYX1JFQ19UUkFDS1MpIHJldHVybiAwOwogICAgcmV0dXJuIChqaW50KWUtPnJlY0xlblsoaW50KXRyYWNrXTsKfQoKSk5JRVhQT1JUIGpmbG9hdEFycmF5IEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZUdldFJlY29yZGVkU2FtcGxlcygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IEF1ZGlvRW5naW5lSW1wbDo6TUFYX1JFQ19UUkFDS1MpIHJldHVybiBudWxscHRyOwogICAgaW50IGxlbiA9IGUtPnJlY0xlblsoaW50KXRyYWNrXTsKICAgIGlmIChsZW4gPD0gMCkgcmV0dXJuIG51bGxwdHI7CiAgICBqZmxvYXRBcnJheSBhcnIgPSBlbnYtPk5ld0Zsb2F0QXJyYXkobGVuKTsKICAgIGlmICghYXJyKSByZXR1cm4gbnVsbHB0cjsKICAgIGVudi0+U2V0RmxvYXRBcnJheVJlZ2lvbihhcnIsIDAsIGxlbiwgZS0+cmVjVHJhY2tbKGludCl0cmFja10uZGF0YSgpKTsKICAgIHJldHVybiBhcnI7Cn0KCkpOSUVYUE9SVCB2b2lkIEpOSUNBTEwKSmF2YV9jb21fcHJhbW9kX2xvb3BtaWRpX0F1ZGlvRW5naW5lX25hdGl2ZVN0YXJ0VHJhY2tQbGF5YmFjaygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2ssIGpmbG9hdCB2b2wsIGpib29sZWFuIGxvb3ApIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlICAgICAgPSBDTURfUExBWV9UUkFDSzsKICAgIGNtZC5yZWNUcmFjayAgPSAoaW50KXRyYWNrOwogICAgY21kLnRyYWNrVm9sICA9IChmbG9hdCl2b2w7CiAgICBjbWQudHJhY2tMb29wID0gKGJvb2wpbG9vcDsKICAgIGUtPmNtZFEucHVzaChjbWQpOwp9CgpKTklFWFBPUlQgdm9pZCBKTklDQUxMCkphdmFfY29tX3ByYW1vZF9sb29wbWlkaV9BdWRpb0VuZ2luZV9uYXRpdmVTdG9wVHJhY2tQbGF5YmFjaygKICAgICAgICBKTklFbnYqIGVudiwgam9iamVjdCBvYmosIGppbnQgdHJhY2spIHsKICAgIEF1ZGlvRW5naW5lSW1wbCogZSA9IGdldEVuZ2luZShlbnYsIG9iaik7CiAgICBpZiAoIWUpIHJldHVybjsKICAgIENtZCBjbWR7fTsKICAgIGNtZC50eXBlICAgICA9IENNRF9TVE9QX1RSQUNLOwogICAgY21kLnJlY1RyYWNrID0gKGludCl0cmFjazsKICAgIGUtPmNtZFEucHVzaChjbWQpOwp9Cg=='      | base64 -d > /tmp/src_rec_jni.txt
-          echo 'CiAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkaW5nIEpOSSBkZWNsYXJhdGlvbnMg4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0YXJ0UmVjb3JkKGludCB0cmFjayk7CiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0b3BSZWNvcmQoKTsKICAgIHByaXZhdGUgbmF0aXZlIGludCAgICAgbmF0aXZlR2V0UmVjb3JkZWRGcmFtZUNvdW50KGludCB0cmFjayk7CiAgICBwcml2YXRlIG5hdGl2ZSBmbG9hdFtdIG5hdGl2ZUdldFJlY29yZGVkU2FtcGxlcyhpbnQgdHJhY2spOwogICAgcHJpdmF0ZSBuYXRpdmUgdm9pZCAgICBuYXRpdmVTdGFydFRyYWNrUGxheWJhY2soaW50IHRyYWNrLCBmbG9hdCB2b2wsIGJvb2xlYW4gbG9vcCk7CiAgICBwcml2YXRlIG5hdGl2ZSB2b2lkICAgIG5hdGl2ZVN0b3BUcmFja1BsYXliYWNrKGludCB0cmFjayk7CgogICAgcHVibGljIHN0YXRpYyBmaW5hbCBpbnQgUkVDX1RSQUNLUyA9IDQ7CgogICAgcHVibGljIHZvaWQgc3RhcnRSZWNvcmRpbmcoaW50IHRyYWNrKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdGFydFJlY29yZCh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdGFydFJlY29yZCBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgdm9pZCBzdG9wUmVjb3JkaW5nKCkgewogICAgICAgIGlmICghbmF0aXZlQXZhaWxhYmxlKSByZXR1cm47CiAgICAgICAgdHJ5IHsgbmF0aXZlU3RvcFJlY29yZCgpOyB9CiAgICAgICAgY2F0Y2ggKFVuc2F0aXNmaWVkTGlua0Vycm9yIGUpIHsgTG9nLmUoVEFHLCAibmF0aXZlU3RvcFJlY29yZCBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgaW50IGdldFJlY29yZGVkRnJhbWVDb3VudChpbnQgdHJhY2spIHsKICAgICAgICBpZiAoIW5hdGl2ZUF2YWlsYWJsZSB8fCB0cmFjayA8IDAgfHwgdHJhY2sgPj0gUkVDX1RSQUNLUykgcmV0dXJuIDA7CiAgICAgICAgdHJ5IHsgcmV0dXJuIG5hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyByZXR1cm4gMDsgfQogICAgfQoKICAgIHB1YmxpYyB2b2lkIHN0YXJ0VHJhY2tQbGF5YmFjayhpbnQgdHJhY2ssIGZsb2F0IHZvbCwgYm9vbGVhbiBsb29waW5nKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdGFydFRyYWNrUGxheWJhY2sodHJhY2ssIHZvbCwgbG9vcGluZyk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdGFydFRyYWNrUGxheWJhY2sgbWlzc2luZyIsIGUpOyB9CiAgICB9CgogICAgcHVibGljIHZvaWQgc3RvcFRyYWNrUGxheWJhY2soaW50IHRyYWNrKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUgfHwgdHJhY2sgPCAwIHx8IHRyYWNrID49IFJFQ19UUkFDS1MpIHJldHVybjsKICAgICAgICB0cnkgeyBuYXRpdmVTdG9wVHJhY2tQbGF5YmFjayh0cmFjayk7IH0KICAgICAgICBjYXRjaCAoVW5zYXRpc2ZpZWRMaW5rRXJyb3IgZSkgeyBMb2cuZShUQUcsICJuYXRpdmVTdG9wVHJhY2tQbGF5YmFjayBtaXNzaW5nIiwgZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgaW50IHNhdmVUcmFja1RvV2F2KGludCB0cmFjaywgU3RyaW5nIGZpbGVQYXRoKSB7CiAgICAgICAgaWYgKCFuYXRpdmVBdmFpbGFibGUpIHJldHVybiAtMTsKICAgICAgICB0cnkgewogICAgICAgICAgICBpbnQgZnJhbWVDb3VudCA9IG5hdGl2ZUdldFJlY29yZGVkRnJhbWVDb3VudCh0cmFjayk7CiAgICAgICAgICAgIGlmIChmcmFtZUNvdW50IDw9IDApIHJldHVybiAwOwogICAgICAgICAgICBmbG9hdFtdIHNhbXBsZXMgPSBuYXRpdmVHZXRSZWNvcmRlZFNhbXBsZXModHJhY2spOwogICAgICAgICAgICBpZiAoc2FtcGxlcyA9PSBudWxsIHx8IHNhbXBsZXMubGVuZ3RoID09IDApIHJldHVybiAtMTsKICAgICAgICAgICAgc2hvcnRbXSBwY20gPSBuZXcgc2hvcnRbc2FtcGxlcy5sZW5ndGhdOwogICAgICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IHNhbXBsZXMubGVuZ3RoOyBpKyspCiAgICAgICAgICAgICAgICBwY21baV0gPSAoc2hvcnQpKE1hdGgubWF4KC0xZiwgTWF0aC5taW4oMWYsIHNhbXBsZXNbaV0pKSAqIDMyNzY3Zik7CiAgICAgICAgICAgIHdyaXRlV2F2RmlsZShmaWxlUGF0aCwgcGNtLCB0YXJnZXRTYW1wbGVSYXRlLCAxKTsKICAgICAgICAgICAgTG9nLmkoVEFHLCAiU2F2ZWQgdHJhY2sgIiArIHRyYWNrICsgIiA9PiAiICsgZmlsZVBhdGggKyAiICgiICsgZnJhbWVDb3VudCArICIgZnJhbWVzKSIpOwogICAgICAgICAgICByZXR1cm4gZnJhbWVDb3VudDsKICAgICAgICB9IGNhdGNoIChFeGNlcHRpb24gZSkgewogICAgICAgICAgICBMb2cuZShUQUcsICJzYXZlVHJhY2tUb1dhdiBmYWlsZWQiLCBlKTsKICAgICAgICAgICAgcmV0dXJuIC0xOwogICAgICAgIH0KICAgIH0KCiAgICBwcml2YXRlIHZvaWQgd3JpdGVXYXZGaWxlKFN0cmluZyBwYXRoLCBzaG9ydFtdIHBjbSwgaW50IHNyLCBpbnQgY2hhbm5lbHMpIHRocm93cyBqYXZhLmlvLklPRXhjZXB0aW9uIHsKICAgICAgICBpbnQgZGF0YUxlbiA9IHBjbS5sZW5ndGggKiAyOwogICAgICAgIGphdmEuaW8uRmlsZU91dHB1dFN0cmVhbSBmb3MgPSBuZXcgamF2YS5pby5GaWxlT3V0cHV0U3RyZWFtKHBhdGgpOwogICAgICAgIGphdmEuaW8uRGF0YU91dHB1dFN0cmVhbSBkb3MgPSBuZXcgamF2YS5pby5EYXRhT3V0cHV0U3RyZWFtKG5ldyBqYXZhLmlvLkJ1ZmZlcmVkT3V0cHV0U3RyZWFtKGZvcykpOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJSSUZGIik7ICB3cml0ZUxFMzIoZG9zLCAzNiArIGRhdGFMZW4pOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJXQVZFIik7CiAgICAgICAgZG9zLndyaXRlQnl0ZXMoImZtdCAiKTsgIHdyaXRlTEUzMihkb3MsIDE2KTsKICAgICAgICB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpMSk7IHdyaXRlTEUxNihkb3MsIChzaG9ydCljaGFubmVscyk7CiAgICAgICAgd3JpdGVMRTMyKGRvcywgc3IpOyAgICAgIHdyaXRlTEUzMihkb3MsIHNyICogY2hhbm5lbHMgKiAyKTsKICAgICAgICB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpKGNoYW5uZWxzICogMikpOyB3cml0ZUxFMTYoZG9zLCAoc2hvcnQpMTYpOwogICAgICAgIGRvcy53cml0ZUJ5dGVzKCJkYXRhIik7ICB3cml0ZUxFMzIoZG9zLCBkYXRhTGVuKTsKICAgICAgICBmb3IgKHNob3J0IHMgOiBwY20pIHdyaXRlTEUxNihkb3MsIHMpOwogICAgICAgIGRvcy5jbG9zZSgpOwogICAgfQogICAgcHJpdmF0ZSBzdGF0aWMgdm9pZCB3cml0ZUxFMzIoamF2YS5pby5EYXRhT3V0cHV0U3RyZWFtIGQsIGludCB2KSB0aHJvd3MgamF2YS5pby5JT0V4Y2VwdGlvbiB7CiAgICAgICAgZC53cml0ZSh2ICYgMHhGRik7IGQud3JpdGUoKHY+PjgpICYgMHhGRik7IGQud3JpdGUoKHY+PjE2KSAmIDB4RkYpOyBkLndyaXRlKCh2Pj4yNCkgJiAweEZGKTsKICAgIH0KICAgIHByaXZhdGUgc3RhdGljIHZvaWQgd3JpdGVMRTE2KGphdmEuaW8uRGF0YU91dHB1dFN0cmVhbSBkLCBzaG9ydCB2KSB0aHJvd3MgamF2YS5pby5JT0V4Y2VwdGlvbiB7CiAgICAgICAgZC53cml0ZSh2ICYgMHhGRik7IGQud3JpdGUoKHY+PjgpICYgMHhGRik7CiAgICB9Cg=='       | base64 -d > /tmp/src_ae_rec.java
-          echo 'ICAgIC8vIOKUgOKUgCBNdWx0aS10cmFjayByZWNvcmRlciBzdGF0ZSDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKICAgIHByaXZhdGUgc3RhdGljIGZpbmFsIGludCBSRUNfVFJBQ0tTICAgID0gNDsKICAgIHByaXZhdGUgYm9vbGVhbiAgIGlzUmVjb3JkaW5nICAgICAgICAgID0gZmFsc2U7CiAgICBwcml2YXRlIGludCAgICAgICBhY3RpdmVSZWNUcmFjayAgICAgICA9IDA7CiAgICBwcml2YXRlIGJvb2xlYW5bXSB0cmFja0hhc0RhdGEgICAgICAgICA9IG5ldyBib29sZWFuW1JFQ19UUkFDS1NdOwogICAgcHJpdmF0ZSBib29sZWFuW10gdHJhY2tQbGF5aW5nICAgICAgICAgPSBuZXcgYm9vbGVhbltSRUNfVFJBQ0tTXTsKICAgIHByaXZhdGUgQnV0dG9uICAgYnRuUmVjb3JkU3RhcnQ7CiAgICBwcml2YXRlIEJ1dHRvbiAgIGJ0blJlY29yZFN0b3A7CiAgICBwcml2YXRlIEJ1dHRvbltdIGJ0blRyYWNrUGxheSAgICAgICAgICA9IG5ldyBCdXR0b25bUkVDX1RSQUNLU107CiAgICBwcml2YXRlIEJ1dHRvbiAgIGJ0blNhdmVSZWNvcmRpbmc7CiAgICBwcml2YXRlIFRleHRWaWV3IHR4dFJlY1N0YXR1czsK'    | base64 -d > /tmp/src_la_fields.java
-          echo 'ICAgICAgICAvLyDilIDilIAgTXVsdGktdHJhY2sgcmVjb3JkaW5nIGNvbnRyb2xzIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogICAgICAgIHRoaXMuYnRuUmVjb3JkU3RhcnQgICA9IChCdXR0b24pICAgZmluZFZpZXdCeUlkKFIuaWQuYnRuUmVjb3JkU3RhcnQpOwogICAgICAgIHRoaXMuYnRuUmVjb3JkU3RvcCAgICA9IChCdXR0b24pICAgZmluZFZpZXdCeUlkKFIuaWQuYnRuUmVjb3JkU3RvcCk7CiAgICAgICAgdGhpcy5idG5TYXZlUmVjb3JkaW5nID0gKEJ1dHRvbikgICBmaW5kVmlld0J5SWQoUi5pZC5idG5TYXZlUmVjb3JkaW5nKTsKICAgICAgICB0aGlzLnR4dFJlY1N0YXR1cyAgICAgPSAoVGV4dFZpZXcpIGZpbmRWaWV3QnlJZChSLmlkLnR4dFJlY1N0YXR1cyk7CiAgICAgICAgZm9yIChpbnQgcmkgPSAwOyByaSA8IFJFQ19UUkFDS1M7IHJpKyspIHsKICAgICAgICAgICAgZmluYWwgaW50IHJJZHggPSByaTsKICAgICAgICAgICAgaW50IGJ0blJlc0lkID0gZ2V0UmVzb3VyY2VzKCkuZ2V0SWRlbnRpZmllcigiYnRuUGxheVRyYWNrIiArIChyaSArIDEpLCAiaWQiLCBnZXRQYWNrYWdlTmFtZSgpKTsKICAgICAgICAgICAgaWYgKGJ0blJlc0lkICE9IDApIHsKICAgICAgICAgICAgICAgIHRoaXMuYnRuVHJhY2tQbGF5W3JpXSA9IChCdXR0b24pIGZpbmRWaWV3QnlJZChidG5SZXNJZCk7CiAgICAgICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbcmldICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbcmldLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IG9uUGxheVRyYWNrQ2xpY2socklkeCkpOwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgICAgIGlmICh0aGlzLmJ0blJlY29yZFN0YXJ0ICAhPSBudWxsKSB0aGlzLmJ0blJlY29yZFN0YXJ0LnNldE9uQ2xpY2tMaXN0ZW5lcih2ICAtPiBvblJlY29yZFN0YXJ0Q2xpY2soKSk7CiAgICAgICAgaWYgKHRoaXMuYnRuUmVjb3JkU3RvcCAgICE9IG51bGwpIHRoaXMuYnRuUmVjb3JkU3RvcC5zZXRPbkNsaWNrTGlzdGVuZXIodiAgIC0+IG9uUmVjb3JkU3RvcENsaWNrKCkpOwogICAgICAgIGlmICh0aGlzLmJ0blNhdmVSZWNvcmRpbmchPSBudWxsKSB0aGlzLmJ0blNhdmVSZWNvcmRpbmcuc2V0T25DbGlja0xpc3RlbmVyKHYtPiBvblNhdmVSZWNvcmRpbmdDbGljaygpKTsK'    | base64 -d > /tmp/src_la_wiring.java
-          echo 'CiAgICAvLyDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZAKICAgIC8vIE11bHRpLXRyYWNrIHJlY29yZGluZyBVSSBoYW5kbGVycwogICAgLy8g4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQCgogICAgcHJpdmF0ZSB2b2lkIG9uUmVjb3JkU3RhcnRDbGljaygpIHsKICAgICAgICBpZiAodGhpcy5hdWRpb0VuZ2luZSA9PSBudWxsKSB7CiAgICAgICAgICAgIFRvYXN0Lm1ha2VUZXh0KHRoaXMsICJBdWRpbyBlbmdpbmUgbm90IHJlYWR5IiwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCk7IHJldHVybjsKICAgICAgICB9CiAgICAgICAgaWYgKHRoaXMuaXNSZWNvcmRpbmcpIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdG9wUmVjb3JkaW5nKCk7CiAgICAgICAgICAgIHRoaXMuaXNSZWNvcmRpbmcgPSBmYWxzZTsKICAgICAgICB9CiAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdGFydFJlY29yZGluZyh0aGlzLmFjdGl2ZVJlY1RyYWNrKTsKICAgICAgICB0aGlzLmlzUmVjb3JkaW5nID0gdHJ1ZTsKICAgICAgICB1cGRhdGVSZWNVSSgpOwogICAgICAgIGlmICh0aGlzLnR4dFJlY1N0YXR1cyAhPSBudWxsKQogICAgICAgICAgICB0aGlzLnR4dFJlY1N0YXR1cy5zZXRUZXh0KCJSRUMgVCIgKyAodGhpcy5hY3RpdmVSZWNUcmFjayArIDEpKTsKICAgIH0KCiAgICBwcml2YXRlIHZvaWQgb25SZWNvcmRTdG9wQ2xpY2soKSB7CiAgICAgICAgaWYgKHRoaXMuYXVkaW9FbmdpbmUgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgIGlmICh0aGlzLmlzUmVjb3JkaW5nKSB7CiAgICAgICAgICAgIHRoaXMuYXVkaW9FbmdpbmUuc3RvcFJlY29yZGluZygpOwogICAgICAgICAgICB0aGlzLmlzUmVjb3JkaW5nID0gZmFsc2U7CiAgICAgICAgICAgIGludCBmYyA9IHRoaXMuYXVkaW9FbmdpbmUuZ2V0UmVjb3JkZWRGcmFtZUNvdW50KHRoaXMuYWN0aXZlUmVjVHJhY2spOwogICAgICAgICAgICBpZiAoZmMgPiAwKSB7CiAgICAgICAgICAgICAgICB0aGlzLnRyYWNrSGFzRGF0YVt0aGlzLmFjdGl2ZVJlY1RyYWNrXSA9IHRydWU7CiAgICAgICAgICAgICAgICBmbG9hdCBzZWNzID0gZmMgLyAoZmxvYXQpIHRoaXMuYXVkaW9FbmdpbmUuZ2V0U2FtcGxlUmF0ZSgpOwogICAgICAgICAgICAgICAgaWYgKHRoaXMudHh0UmVjU3RhdHVzICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgdGhpcy50eHRSZWNTdGF0dXMuc2V0VGV4dCgiVCIgKyAodGhpcy5hY3RpdmVSZWNUcmFjayArIDEpICsgIiAiICsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIFN0cmluZy5mb3JtYXQoIiUuMWYiLCBzZWNzKSArICJzIik7CiAgICAgICAgICAgICAgICBmb3IgKGludCBpID0gMTsgaSA8PSBSRUNfVFJBQ0tTOyBpKyspIHsKICAgICAgICAgICAgICAgICAgICBpbnQgbmV4dCA9ICh0aGlzLmFjdGl2ZVJlY1RyYWNrICsgaSkgJSBSRUNfVFJBQ0tTOwogICAgICAgICAgICAgICAgICAgIGlmICghdGhpcy50cmFja0hhc0RhdGFbbmV4dF0pIHsgdGhpcy5hY3RpdmVSZWNUcmFjayA9IG5leHQ7IGJyZWFrOyB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgICAgICBpZiAodGhpcy50eHRSZWNTdGF0dXMgIT0gbnVsbCkgdGhpcy50eHRSZWNTdGF0dXMuc2V0VGV4dCgiRW1wdHkiKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IFJFQ19UUkFDS1M7IGkrKykgewogICAgICAgICAgICBpZiAodGhpcy50cmFja1BsYXlpbmdbaV0gJiYgdGhpcy5hdWRpb0VuZ2luZSAhPSBudWxsKSB7CiAgICAgICAgICAgICAgICB0aGlzLmF1ZGlvRW5naW5lLnN0b3BUcmFja1BsYXliYWNrKGkpOwogICAgICAgICAgICAgICAgdGhpcy50cmFja1BsYXlpbmdbaV0gPSBmYWxzZTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICB1cGRhdGVSZWNVSSgpOwogICAgfQoKICAgIHByaXZhdGUgdm9pZCBvblBsYXlUcmFja0NsaWNrKGludCB0cmFjaykgewogICAgICAgIGlmICh0aGlzLmF1ZGlvRW5naW5lID09IG51bGwgfHwgIXRoaXMudHJhY2tIYXNEYXRhW3RyYWNrXSkgewogICAgICAgICAgICBUb2FzdC5tYWtlVGV4dCh0aGlzLCAiVCIgKyAodHJhY2sgKyAxKSArICI6IG5vdGhpbmcgcmVjb3JkZWQiLAogICAgICAgICAgICAgICAgICAgIFRvYXN0LkxFTkdUSF9TSE9SVCkuc2hvdygpOyByZXR1cm47CiAgICAgICAgfQogICAgICAgIGlmICh0aGlzLnRyYWNrUGxheWluZ1t0cmFja10pIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdG9wVHJhY2tQbGF5YmFjayh0cmFjayk7CiAgICAgICAgICAgIHRoaXMudHJhY2tQbGF5aW5nW3RyYWNrXSA9IGZhbHNlOwogICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbdHJhY2tdICE9IG51bGwpCiAgICAgICAgICAgICAgICB0aGlzLmJ0blRyYWNrUGxheVt0cmFja10uc2V0VGV4dCgiVCIgKyAodHJhY2sgKyAxKSk7CiAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgdGhpcy5hdWRpb0VuZ2luZS5zdGFydFRyYWNrUGxheWJhY2sodHJhY2ssIDEuMGYsIGZhbHNlKTsKICAgICAgICAgICAgdGhpcy50cmFja1BsYXlpbmdbdHJhY2tdID0gdHJ1ZTsKICAgICAgICAgICAgaWYgKHRoaXMuYnRuVHJhY2tQbGF5W3RyYWNrXSAhPSBudWxsKQogICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbdHJhY2tdLnNldFRleHQoIlQiICsgKHRyYWNrICsgMSkgKyAiIFAiKTsKICAgICAgICB9CiAgICB9CgogICAgcHJpdmF0ZSB2b2lkIG9uU2F2ZVJlY29yZGluZ0NsaWNrKCkgewogICAgICAgIGlmICh0aGlzLmF1ZGlvRW5naW5lID09IG51bGwpIHJldHVybjsKICAgICAgICBpbnQgc2F2ZVRyYWNrID0gLTE7CiAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBSRUNfVFJBQ0tTOyBpKyspIGlmICh0aGlzLnRyYWNrSGFzRGF0YVtpXSkgeyBzYXZlVHJhY2sgPSBpOyBicmVhazsgfQogICAgICAgIGlmIChzYXZlVHJhY2sgPCAwKSB7CiAgICAgICAgICAgIFRvYXN0Lm1ha2VUZXh0KHRoaXMsICJOb3RoaW5nIHRvIHNhdmUhIiwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCk7IHJldHVybjsKICAgICAgICB9CiAgICAgICAgZmluYWwgaW50IHRyYWNrID0gc2F2ZVRyYWNrOwogICAgICAgIG5ldyBUaHJlYWQoKCkgLT4gewogICAgICAgICAgICB0cnkgewogICAgICAgICAgICAgICAgamF2YS5pby5GaWxlIGRpciA9IG5ldyBqYXZhLmlvLkZpbGUoCiAgICAgICAgICAgICAgICAgICAgYW5kcm9pZC5vcy5FbnZpcm9ubWVudC5nZXRFeHRlcm5hbFN0b3JhZ2VQdWJsaWNEaXJlY3RvcnkoCiAgICAgICAgICAgICAgICAgICAgICAgIGFuZHJvaWQub3MuRW52aXJvbm1lbnQuRElSRUNUT1JZX01VU0lDKSwgIk9jdGFwYWRMb29wcyIpOwogICAgICAgICAgICAgICAgaWYgKCFkaXIuZXhpc3RzKCkpIGRpci5ta2RpcnMoKTsKICAgICAgICAgICAgICAgIFN0cmluZyBmbmFtZSA9ICJyZWNvcmRpbmdfVCIgKyAodHJhY2sgKyAxKSArICJfIiArIFN5c3RlbS5jdXJyZW50VGltZU1pbGxpcygpICsgIi53YXYiOwogICAgICAgICAgICAgICAgamF2YS5pby5GaWxlIG91dCA9IG5ldyBqYXZhLmlvLkZpbGUoZGlyLCBmbmFtZSk7CiAgICAgICAgICAgICAgICBpbnQgZnJhbWVzID0gdGhpcy5hdWRpb0VuZ2luZS5zYXZlVHJhY2tUb1dhdih0cmFjaywgb3V0LmdldEFic29sdXRlUGF0aCgpKTsKICAgICAgICAgICAgICAgIGFuZHJvaWQubWVkaWEuTWVkaWFTY2FubmVyQ29ubmVjdGlvbi5zY2FuRmlsZSh0aGlzLAogICAgICAgICAgICAgICAgICAgIG5ldyBTdHJpbmdbXXtvdXQuZ2V0QWJzb2x1dGVQYXRoKCl9LCBuZXcgU3RyaW5nW117ImF1ZGlvL3dhdiJ9LCBudWxsKTsKICAgICAgICAgICAgICAgIHJ1bk9uVWlUaHJlYWQoKCkgLT4gVG9hc3QubWFrZVRleHQodGhpcywKICAgICAgICAgICAgICAgICAgICBmcmFtZXMgPiAwID8gIlNhdmVkOiAiICsgZm5hbWUgOiAiU2F2ZSBmYWlsZWQhIiwKICAgICAgICAgICAgICAgICAgICBUb2FzdC5MRU5HVEhfTE9ORykuc2hvdygpKTsKICAgICAgICAgICAgfSBjYXRjaCAoRXhjZXB0aW9uIGUpIHsKICAgICAgICAgICAgICAgIHJ1bk9uVWlUaHJlYWQoKCkgLT4gVG9hc3QubWFrZVRleHQodGhpcywKICAgICAgICAgICAgICAgICAgICAiRXJyb3I6ICIgKyBlLmdldE1lc3NhZ2UoKSwgVG9hc3QuTEVOR1RIX1NIT1JUKS5zaG93KCkpOwogICAgICAgICAgICB9CiAgICAgICAgfSkuc3RhcnQoKTsKICAgIH0KCiAgICBwcml2YXRlIHZvaWQgdXBkYXRlUmVjVUkoKSB7CiAgICAgICAgaWYgKHRoaXMuYnRuUmVjb3JkU3RhcnQgIT0gbnVsbCkKICAgICAgICAgICAgdGhpcy5idG5SZWNvcmRTdGFydC5zZXRUZXh0KHRoaXMuaXNSZWNvcmRpbmcgPyAiUkVDLi4uIiA6ICJSRUMiKTsKICAgICAgICBmb3IgKGludCBpID0gMDsgaSA8IFJFQ19UUkFDS1M7IGkrKykgewogICAgICAgICAgICBpZiAodGhpcy5idG5UcmFja1BsYXlbaV0gIT0gbnVsbCkgewogICAgICAgICAgICAgICAgdGhpcy5idG5UcmFja1BsYXlbaV0uc2V0RW5hYmxlZCh0aGlzLnRyYWNrSGFzRGF0YVtpXSk7CiAgICAgICAgICAgICAgICB0aGlzLmJ0blRyYWNrUGxheVtpXS5zZXRBbHBoYSh0aGlzLnRyYWNrSGFzRGF0YVtpXSA/IDEuMGYgOiAwLjRmKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0K'   | base64 -d > /tmp/src_la_methods.java
-          echo 'ICAgIDxMaW5lYXJMYXlvdXQgYW5kcm9pZDpvcmllbnRhdGlvbj0iaG9yaXpvbnRhbCIgYW5kcm9pZDpsYXlvdXRfd2lkdGg9Im1hdGNoX3BhcmVudCIKICAgICAgICBhbmRyb2lkOmxheW91dF9oZWlnaHQ9IjQ0ZHAiIGFuZHJvaWQ6bGF5b3V0X21hcmdpblRvcD0iMmRwIiBhbmRyb2lkOmxheW91dF9tYXJnaW5Cb3R0b209IjJkcCIKICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IiNmZjBhMGEwYSIgYW5kcm9pZDpwYWRkaW5nPSIyZHAiPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5SZWNvcmRTdGFydCIKICAgICAgICAgICAgYW5kcm9pZDp0ZXh0U2l6ZT0iOXNwIiBhbmRyb2lkOnRleHRTdHlsZT0iYm9sZCIgYW5kcm9pZDp0ZXh0Q29sb3I9IiNmZmZmZmZmZiIKICAgICAgICAgICAgYW5kcm9pZDpiYWNrZ3JvdW5kPSJAZHJhd2FibGUvYnRuXzNkX2RhcmsiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dpZHRoPSIwZHAiIGFuZHJvaWQ6bGF5b3V0X2hlaWdodD0ibWF0Y2hfcGFyZW50IgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93ZWlnaHQ9IjEuMyIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiIGFuZHJvaWQ6dGV4dD0iUkVDIi8+CiAgICAgICAgPEJ1dHRvbiBhbmRyb2lkOmlkPSJAK2lkL2J0blJlY29yZFN0b3AiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dFNpemU9IjlzcCIgYW5kcm9pZDp0ZXh0U3R5bGU9ImJvbGQiIGFuZHJvaWQ6dGV4dENvbG9yPSIjZmZmZmZmZmYiCiAgICAgICAgICAgIGFuZHJvaWQ6YmFja2dyb3VuZD0iQGRyYXdhYmxlL2J0bl8zZF9yZWQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dpZHRoPSIwZHAiIGFuZHJvaWQ6bGF5b3V0X2hlaWdodD0ibWF0Y2hfcGFyZW50IgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93ZWlnaHQ9IjEuMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiIGFuZHJvaWQ6dGV4dD0iU1RPUCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2sxIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDEiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2syIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDIiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2szIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDMiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5QbGF5VHJhY2s0IgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fM2RfYmx1ZSIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2lkdGg9IjBkcCIgYW5kcm9pZDpsYXlvdXRfaGVpZ2h0PSJtYXRjaF9wYXJlbnQiCiAgICAgICAgICAgIGFuZHJvaWQ6bGF5b3V0X3dlaWdodD0iMSIgYW5kcm9pZDpsYXlvdXRfbWFyZ2luRW5kPSIyZHAiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dD0iVDQiIGFuZHJvaWQ6YWxwaGE9IjAuNCIvPgogICAgICAgIDxCdXR0b24gYW5kcm9pZDppZD0iQCtpZC9idG5TYXZlUmVjb3JkaW5nIgogICAgICAgICAgICBhbmRyb2lkOnRleHRTaXplPSI5c3AiIGFuZHJvaWQ6dGV4dFN0eWxlPSJib2xkIiBhbmRyb2lkOnRleHRDb2xvcj0iI2ZmZmZmZmZmIgogICAgICAgICAgICBhbmRyb2lkOmJhY2tncm91bmQ9IkBkcmF3YWJsZS9idG5fZ2xvc3N5XzNkIgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93aWR0aD0iMGRwIiBhbmRyb2lkOmxheW91dF9oZWlnaHQ9Im1hdGNoX3BhcmVudCIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2VpZ2h0PSIxLjMiIGFuZHJvaWQ6bGF5b3V0X21hcmdpbkVuZD0iMmRwIiBhbmRyb2lkOnRleHQ9IlNBVkUiLz4KICAgICAgICA8VGV4dFZpZXcgYW5kcm9pZDppZD0iQCtpZC90eHRSZWNTdGF0dXMiCiAgICAgICAgICAgIGFuZHJvaWQ6dGV4dFNpemU9IjhzcCIgYW5kcm9pZDp0ZXh0Q29sb3I9IiNmZjAwZmY4OCIgYW5kcm9pZDpncmF2aXR5PSJjZW50ZXIiCiAgICAgICAgICAgIGFuZHJvaWQ6YmFja2dyb3VuZD0iI2ZmMTExMTExIgogICAgICAgICAgICBhbmRyb2lkOmxheW91dF93aWR0aD0iMGRwIiBhbmRyb2lkOmxheW91dF9oZWlnaHQ9Im1hdGNoX3BhcmVudCIKICAgICAgICAgICAgYW5kcm9pZDpsYXlvdXRfd2VpZ2h0PSIxLjUiIGFuZHJvaWQ6dGV4dD0iUkVBRFkiIGFuZHJvaWQ6cGFkZGluZz0iMmRwIi8+CiAgICA8L0xpbmVhckxheW91dD4K'      | base64 -d > /tmp/src_xml_row.xml
-          echo 'aW1wb3J0IHN5cywgcmUKcGF0aCA9IHN5cy5hcmd2WzFdCndpdGggb3BlbihwYXRoKSBhcyBmOiBzcmMgPSBmLnJlYWQoKQoKIyAyLiBFeHRlbmQgQ21kIHN0cnVjdCB3aXRoIHJlY29yZGluZyBmaWVsZHMKY21kX2ZpZWxkcyA9IG9wZW4oJy90bXAvc3JjX3JlY19jbWQudHh0JykucmVhZCgpCm1hcmtlciA9ICcgICAgYm9vbCAgICBpc0xvb3A7JwppZHggPSBzcmMuZmluZChtYXJrZXIpCmlmIGlkeCA+PSAwOgogICAgZW5kID0gc3JjLmZpbmQoJ307JywgaWR4KQogICAgaWYgZW5kID49IDAgYW5kICdyZWNUcmFjaycgbm90IGluIHNyYzoKICAgICAgICBzcmMgPSBzcmNbOmVuZF0gKyBjbWRfZmllbGRzICsgc3JjW2VuZDpdCiAgICAgICAgcHJpbnQoJzIuIENtZCBzdHJ1Y3QgZXh0ZW5kZWQnKQogICAgZWxzZTogcHJpbnQoJ1dBUk4gMicpCmVsc2U6IHByaW50KCdXQVJOIDJiJykKCiMgMy4gQWRkIHJlY29yZGluZyBmaWVsZHMgdG8gQXVkaW9FbmdpbmVJbXBsCnJlY19maWVsZHMgPSBvcGVuKCcvdG1wL3NyY19yZWNfZmllbGRzLnR4dCcpLnJlYWQoKQpTQ1JBVENIID0gJyAgICBmbG9hdCBmZWVkQnVmW1NDUkFUQ0hfU0laRV07JwppZiBTQ1JBVENIIGluIHNyYyBhbmQgJ01BWF9SRUNfVFJBQ0tTJyBub3QgaW4gc3JjOgogICAgc3JjID0gc3JjLnJlcGxhY2UoU0NSQVRDSCwgU0NSQVRDSCArIHJlY19maWVsZHMsIDEpCiAgICBwcmludCgnMy4gcmVjb3JkaW5nIGZpZWxkcyBhZGRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDMnKQoKIyA0LiBBZGQgaW5pdCBjb2RlIGZvciByZWNvcmRpbmcgYnVmZmVycwpyZWNfaW5pdCA9IG9wZW4oJy90bXAvc3JjX3JlY19pbml0LnR4dCcpLnJlYWQoKQpMT09QX0lOSVQgPSAnZm9yIChpbnQgaSA9IDA7IGkgPCBMT09QX1ZPSUNFUzsgaSsrKSB7JwppZiBMT09QX0lOSVQgaW4gc3JjIGFuZCAncmVjTWF4RnJhbWVzID0gc2FtcGxlUmF0ZScgbm90IGluIHNyYzoKICAgIHBvcyA9IHNyYy5maW5kKExPT1BfSU5JVCkKICAgIHNyYyA9IHNyY1s6cG9zXSArIHJlY19pbml0ICsgJ1xuJyArIHNyY1twb3M6XQogICAgcHJpbnQoJzQuIGluaXQgY29kZSBpbnNlcnRlZCcpCmVsc2U6IHByaW50KCdXQVJOIDQnKQoKIyA1LiBBZGQgcmVjb3JkaW5nIG1peCtjYXB0dXJlIGluIG9uQXVkaW9SZWFkeSAoYmVmb3JlIGRlbGF5IHdyaXRlKQpyZWNfY2IgPSBvcGVuKCcvdG1wL3NyY19yZWNfY2FsbGJhY2sudHh0JykucmVhZCgpCkRFTEFZX1dSSVRFID0gJyAgICAgICAgLy8gV3JpdGUgdG8gZGVsYXkgYnVmZmVyJwppZiBERUxBWV9XUklURSBpbiBzcmMgYW5kICdydHJhY2snIG5vdCBpbiBzcmM6CiAgICBzcmMgPSBzcmMucmVwbGFjZShERUxBWV9XUklURSwgcmVjX2NiICsgREVMQVlfV1JJVEUsIDEpCiAgICBwcmludCgnNS4gY2FsbGJhY2sgYWRkZWQnKQplbHNlOiBwcmludCgnV0FSTiA1JykKCiMgNi4gQWRkIHByb2Nlc3NDbWQgcmVjb3JkaW5nIGNhc2VzIGJlZm9yZSBDTURfU1RPUF9QQUQKcmVjX2NtZHMgPSBvcGVuKCcvdG1wL3NyY19yZWNfY21kcy50eHQnKS5yZWFkKCkKQ01EX1NUT1AgPSAnICAgICAgICBjYXNlIENNRF9TVE9QX1BBRDonCmlmICdDTURfUkVDX1NUQVJUJyBub3QgaW4gc3JjIGFuZCBDTURfU1RPUCBpbiBzcmM6CiAgICBzcmMgPSBzcmMucmVwbGFjZShDTURfU1RPUCwgcmVjX2NtZHMgKyBDTURfU1RPUCwgMSkKICAgIHByaW50KCc2LiBwcm9jZXNzQ21kIGNhc2VzIGFkZGVkJykKZWxzZTogcHJpbnQoJ1dBUk4gNicpCgojIDcuIEFkZCBKTkkgbWV0aG9kcyBiZWZvcmUgZXh0ZXJuIEMgY2xvc2luZyBicmFjZQpyZWNfam5pID0gb3BlbignL3RtcC9zcmNfcmVjX2puaS50eHQnKS5yZWFkKCkKRVhURVJOX0MgPSAnfSAvLyBleHRlcm4gIkMiJwppZiAnbmF0aXZlU3RhcnRSZWNvcmQnIG5vdCBpbiBzcmMgYW5kIEVYVEVSTl9DIGluIHNyYzoKICAgIHNyYyA9IHNyYy5yZXBsYWNlKEVYVEVSTl9DLCByZWNfam5pICsgRVhURVJOX0MpCiAgICBwcmludCgnNy4gSk5JIGFkZGVkJykKZWxzZTogcHJpbnQoJ1dBUk4gNycpCgp3aXRoIG9wZW4ocGF0aCwgJ3cnKSBhcyBmOiBmLndyaXRlKHNyYykKcHJpbnQoJ0RvbmUuIFN5bWJvbHM6JykKZm9yIHN5bSBpbiBbJ0NNRF9SRUNfU1RBUlQnLCdyZWNBY3RpdmVUcmFjaycsJ25hdGl2ZVN0YXJ0UmVjb3JkJywnUmVjUGxheVN0YXRlJ106CiAgICBwcmludChmJyAge3N5bX06IHtzcmMuY291bnQoc3ltKX14JykK'   | base64 -d > /tmp/apply_cpp_patches.py
-          echo 'aW1wb3J0IHN5cwpwYXRoID0gc3lzLmFyZ3ZbMV0Kd2l0aCBvcGVuKHBhdGgpIGFzIGY6IHNyYyA9IGYucmVhZCgpCgojIDEuIEFkZCBzdGF0ZSBmaWVsZHMgYmVmb3JlIGxvb3BQYWRzIGFycmF5CiMgTk9URTogZWFybGllciBzZWQgc3RyaXBzICdwcml2YXRlJyBmcm9tIGxvb3BQYWRzIGRlY2xhcmF0aW9uLCBzbyBhbmNob3IgaGFzIG5vICdwcml2YXRlJwpmaWVsZHMgPSBvcGVuKCcvdG1wL3NyY19sYV9maWVsZHMuamF2YScpLnJlYWQoKQpQQURTID0gJyAgICBCdXR0b25bXSBsb29wUGFkcyA9IG5ldyBCdXR0b25bOF07JwppZiBQQURTIGluIHNyYyBhbmQgJ2lzUmVjb3JkaW5nJyBub3QgaW4gc3JjOgogICAgc3JjID0gc3JjLnJlcGxhY2UoUEFEUywgZmllbGRzICsgUEFEUykKICAgIHByaW50KCcxLiBzdGF0ZSBmaWVsZHMgYWRkZWQnKQplbHNlOgogICAgIyBUcnkgd2l0aCBwcml2YXRlIGp1c3QgaW4gY2FzZSB0aGUgc2VkIG9yZGVyIGRpZmZlcnMKICAgIFBBRFMyID0gJyAgICBwcml2YXRlIEJ1dHRvbltdIGxvb3BQYWRzID0gbmV3IEJ1dHRvbls4XTsnCiAgICBpZiBQQURTMiBpbiBzcmMgYW5kICdpc1JlY29yZGluZycgbm90IGluIHNyYzoKICAgICAgICBzcmMgPSBzcmMucmVwbGFjZShQQURTMiwgZmllbGRzICsgUEFEUzIpCiAgICAgICAgcHJpbnQoJzEuIHN0YXRlIGZpZWxkcyBhZGRlZCAocHJpdmF0ZSB2YXJpYW50KScpCiAgICBlbHNlOgogICAgICAgIHByaW50KCdXQVJOIDE6IGxvb3BQYWRzIGFuY2hvciBub3QgZm91bmQsIGlzUmVjb3JkaW5nIHByZXNlbnQ6JywgJ2lzUmVjb3JkaW5nJyBpbiBzcmMpCiAgICAgICAgIyBQcmludCBjb250ZXh0IHRvIGhlbHAgZGVidWcKICAgICAgICBpZHggPSBzcmMuZmluZCgnbG9vcFBhZHMnKQogICAgICAgIGlmIGlkeCA+PSAwOgogICAgICAgICAgICBwcmludCgnICBsb29wUGFkcyBjb250ZXh0OicsIHJlcHIoc3JjW21heCgwLGlkeC0yMCk6aWR4KzUwXSkpCgojIDIuIEFkZCB3aXJpbmcgdG8gb25DcmVhdGUgYWZ0ZXIgYnRuRHJ1bU9jdGFwYWQKd2lyaW5nID0gb3BlbignL3RtcC9zcmNfbGFfd2lyaW5nLmphdmEnKS5yZWFkKCkKRFJVTV9CVE4gPSAndGhpcy5idG5EcnVtT2N0YXBhZCA9IChCdXR0b24pIGZpbmRWaWV3QnlJZChSLmlkLmJ0bkRydW1PY3RhcGFkKTsnCmlmIERSVU1fQlROIGluIHNyYyBhbmQgJ2J0blJlY29yZFN0YXJ0JyBub3QgaW4gc3JjOgogICAgc3JjID0gc3JjLnJlcGxhY2UoRFJVTV9CVE4sIERSVU1fQlROICsgd2lyaW5nKQogICAgcHJpbnQoJzIuIHdpcmluZyBhZGRlZCcpCmVsc2U6CiAgICBwcmludCgnV0FSTiAyOiB3aXJpbmcgYW5jaG9yIGlzc3VlLCBidG5SZWNvcmRTdGFydCBwcmVzZW50OicsICdidG5SZWNvcmRTdGFydCcgaW4gc3JjKQoKIyAzLiBBZGQgaGFuZGxlciBtZXRob2RzIGJlZm9yZSBsYXN0IGNsb3NpbmcgYnJhY2UKIyBDaGVjayBmb3IgbWV0aG9kIERFQ0xBUkFUSU9OIHNwZWNpZmljYWxseSAobm90IGxhbWJkYSByZWZlcmVuY2VzIGluIHdpcmluZykKbWV0aG9kcyA9IG9wZW4oJy90bXAvc3JjX2xhX21ldGhvZHMuamF2YScpLnJlYWQoKQppZiAncHJpdmF0ZSB2b2lkIG9uUmVjb3JkU3RhcnRDbGljaygpJyBub3QgaW4gc3JjOgogICAgbGFzdCA9IHNyYy5yZmluZChjaHIoMTApICsgJ30nKQogICAgc3JjID0gc3JjWzpsYXN0XSArIG1ldGhvZHMgKyBzcmNbbGFzdDpdCiAgICBwcmludCgnMy4gcmVjb3JkaW5nIG1ldGhvZHMgYWRkZWQnKQplbHNlOgogICAgcHJpbnQoJ1dBUk4gMzogb25SZWNvcmRTdGFydENsaWNrIGFscmVhZHkgZGVjbGFyZWQnKQoKd2l0aCBvcGVuKHBhdGgsICd3JykgYXMgZjogZi53cml0ZShzcmMpCnByaW50KCdMb29wc0FjdGl2aXR5IHBhdGNoaW5nIGNvbXBsZXRlJykK'    | base64 -d > /tmp/apply_la_patches.py
-          ls -lh /tmp/src_* /tmp/apply_*.py
-          echo "All patch sources decoded"
-
-      - name: Apply multi-track recording to audio_engine.cpp
-        run: |
-          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
-          grep -q 'CMD_REC_START' "$CPP" && { echo "already patched"; exit 0; }
-          # 1. Expand CmdType enum via Python (sed can't reliably handle multi-line replacement)
-          python3 -c "
-          import sys
-          with open('$CPP') as f: s=f.read()
-          old='enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH };'
-          new=open('/tmp/src_rec_enum.txt').read().strip()
-          if old in s: s=s.replace(old,new); print('1. enum expanded')
-          else: print('WARN 1: enum not found')
-          with open('$CPP','w') as f: f.write(s)"
-          # 2-7. Apply remaining patches
-          python3 /tmp/apply_cpp_patches.py "$CPP"
-
-      - name: Fix duplicate AudioEngineImpl constructor
-        run: |
-          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
-          grep -q 'recActiveTrack' "$CPP" || { echo "skip: recording not patched yet"; exit 0; }
-          python3 - "$CPP" << 'PYEOF'
-          import sys, re
-          with open(sys.argv[1]) as f:
-              src = f.read()
-          # The recording patch (step 3) inserts rec_fields immediately after
-          # "float feedBuf[SCRATCH_SIZE];" via str.replace. rec_fields ends with
-          # a new empty AudioEngineImpl() ctor. readBuf declaration that was
-          # originally just after feedBuf is now sandwiched between the two ctors:
-          #   AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {}  <- empty dup
-          #   float readBuf[SCRATCH_SIZE];                                  <- misplaced
-          #   <blank line>
-          #   AudioEngineImpl() {                                           <- real ctor
-          # Fix: remove the empty dup ctor line, keep everything in between
-          # (readBuf + blank line), and add the initializer list to the real ctor.
-          pat = re.compile(
-              r'    AudioEngineImpl\(\) : recActiveTrack\(-1\), recRunning\(false\) \{\}\n'
-              r'(.*?)'
-              r'    AudioEngineImpl\(\) \{',
-              re.DOTALL
-          )
-          m = pat.search(src)
-          if m:
-              between = m.group(1)  # readBuf line + blank line
-              replacement = between + '    AudioEngineImpl() : recActiveTrack(-1), recRunning(false) {'
-              src = src[:m.start()] + replacement + src[m.end():]
-              print('Fixed: removed empty ctor, kept readBuf, merged init-list into real ctor')
-          else:
-              print('OK: no duplicate constructor pattern found')
-          with open(sys.argv[1], 'w') as f:
-              f.write(src)
-          PYEOF
-
-      - name: Apply recording API to AudioEngine.java
-        run: |
-          AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
-          grep -q 'nativeStartRecord' "$AE" && { echo "skip"; exit 0; }
-          python3 -c "
-          with open('$AE') as f: s=f.read()
-          ins=open('/tmp/src_ae_rec.java').read()
-          a='    private native void nativeReinitStream(int nativeSR, int nativeBurst);'
-          if a in s: s=s.replace(a,a+ins); print('OK: recording API added')
-          else: print('WARN: anchor not found')
-          with open('$AE','w') as f: f.write(s)"
-
-      - name: Apply recording UI to LoopsActivity.java
-        run: |
-          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          grep -q 'btnRecordStart' "$LA" && { echo "skip"; exit 0; }
-          python3 /tmp/apply_la_patches.py "$LA"
-
-      - name: Add recording row to activity_loops.xml
-        run: |
-          XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
-          grep -q 'btnRecordStart' "$XML" && { echo "skip"; exit 0; }
-          python3 -c "
-          with open('$XML') as f: c=f.read()
-          row=open('/tmp/src_xml_row.xml').read()
-          anchor='<LinearLayout android:orientation=\"vertical\" android:id=\"@+id/loopPadArea\"'
-          if anchor in c: c=c.replace(anchor,row.rstrip()+chr(10)+'    '+anchor); print('OK: before loopPadArea')
-          else:
-            last=c.rfind('</LinearLayout>'); c=c[:last]+row+'</LinearLayout>'; print('OK: fallback')
-          with open('$XML','w') as f: f.write(c)"
-
-
-      - name: Fix recording - use internal engine audio not MIC
-        run: |
-          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          grep -q 'audioEngine.startRecording' "$LA" && { echo "already patched"; exit 0; }
-          python3 - << 'PYEOF'
-          import re, sys
-
-          LA = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          with open(LA) as f: src = f.read()
-
-          # 1. Add internal-audio state fields after isRecording field
-          field_anchor = '    private boolean isRecording         = false;'
-          new_fields = (
-              '    private int       activeRecTrack   = 0;\n'
-              '    private boolean[] trackHasData     = new boolean[4];\n'
-              '    private boolean[] trackPlaying     = new boolean[4];\n'
-          )
-          if field_anchor in src and 'activeRecTrack' not in src:
-              src = src.replace(field_anchor, field_anchor + '\n' + new_fields, 1)
-              print('1. internal-audio fields added')
-          elif 'activeRecTrack' in src:
-              print('1. fields already present')
-          else:
-              print('FATAL: isRecording field anchor not found'); sys.exit(1)
-
-          def replace_method(src, sig, new_body):
-              m = re.search(re.escape(sig), src)
-              if not m:
-                  print('FATAL: method not found: ' + sig[:70]); sys.exit(1)
-              start = m.start()
-              try:
-                  brace_i = src.index('{', start)
-              except ValueError:
-                  print('FATAL: no opening brace after: ' + sig[:70]); sys.exit(1)
-              depth = 0; i = brace_i; end = -1
-              while i < len(src):
-                  if src[i] == '{': depth += 1
-                  elif src[i] == '}':
-                      depth -= 1
-                      if depth == 0: end = i + 1; break
-                  i += 1
-              if end == -1:
-                  print('FATAL: matching brace not found for: ' + sig[:70]); sys.exit(1)
-              src = src[:start] + new_body + '\n' + src[end:]
-              print('OK replaced: ' + sig[:65])
-              return src
-
-          src = replace_method(src, '    public void startMicRecording() {', (
-              '    /** Record engine mixed output - not the microphone. */\n'
-              '    public void startMicRecording() {\n'
-              '        if (this.audioEngine == null) {\n'
-              '            Toast.makeText(this, "Audio engine not ready", Toast.LENGTH_SHORT).show(); return;\n'
-              '        }\n'
-              '        if (this.isRecording) { this.audioEngine.stopRecording(); this.isRecording = false; }\n'
-              '        int t = this.activeRecTrack;\n'
-              '        for (int i = 0; i < 4; i++) { if (!this.trackHasData[i]) { t = i; break; } }\n'
-              '        this.activeRecTrack = t;\n'
-              '        this.audioEngine.startRecording(this.activeRecTrack);\n'
-              '        this.isRecording = true;\n'
-              '        this.hasRecording = false;\n'
-              '        if (this.btnRecordStart != null) {\n'
-              '            this.btnRecordStart.setBackgroundColor(0xFFFF0000);\n'
-              '            this.btnRecordStart.setText("REC T" + (this.activeRecTrack + 1));\n'
-              '        }\n'
-              '        if (this.txtRecStatus != null)\n'
-              '            this.txtRecStatus.setText("RECORDING TRACK " + (this.activeRecTrack + 1) + " - tap STOP when done");\n'
-              '    }'
-          ))
-
-          src = replace_method(src, '    public void stopMicRecording() {', (
-              '    /** Stop engine-level recording and advance to next track. */\n'
-              '    public void stopMicRecording() {\n'
-              '        if (!this.isRecording || this.audioEngine == null) return;\n'
-              '        this.audioEngine.stopRecording();\n'
-              '        this.isRecording = false;\n'
-              '        int frames = this.audioEngine.getRecordedFrameCount(this.activeRecTrack);\n'
-              '        if (frames > 0) {\n'
-              '            this.trackHasData[this.activeRecTrack] = true;\n'
-              '            this.hasRecording = true;\n'
-              '            float secs = frames / 44100.0f;\n'
-              '            if (this.btnRecordStart != null) {\n'
-              '                this.btnRecordStart.setBackgroundColor(0xFFCC0000);\n'
-              '                this.btnRecordStart.setText("REC");\n'
-              '            }\n'
-              '            if (this.txtRecStatus != null)\n'
-              '                this.txtRecStatus.setText("Track " + (this.activeRecTrack + 1) + " " +\n'
-              '                    String.format("%.1f", secs) + "s saved - tap PLAY");\n'
-              '            for (int i = 1; i <= 4; i++) {\n'
-              '                int next = (this.activeRecTrack + i) % 4;\n'
-              '                if (!this.trackHasData[next]) { this.activeRecTrack = next; break; }\n'
-              '            }\n'
-              '        } else {\n'
-              '            if (this.txtRecStatus != null) this.txtRecStatus.setText("Empty - tap REC");\n'
-              '            if (this.btnRecordStart != null) this.btnRecordStart.setText("REC");\n'
-              '        }\n'
-              '    }'
-          ))
-
-          src = replace_method(src, '    public void playRecording() {', (
-              '    /** Play the most-recently recorded engine track. */\n'
-              '    public void playRecording() {\n'
-              '        if (this.audioEngine == null) return;\n'
-              '        if (!this.hasRecording) {\n'
-              '            Toast.makeText(this, "No recording - tap REC first!", Toast.LENGTH_SHORT).show(); return;\n'
-              '        }\n'
-              '        if (this.isRecording) {\n'
-              '            Toast.makeText(this, "Stop recording first!", Toast.LENGTH_SHORT).show(); return;\n'
-              '        }\n'
-              '        for (int i = 0; i < 4; i++) {\n'
-              '            if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
-              '        }\n'
-              '        int playTrack = 0;\n'
-              '        for (int i = 3; i >= 0; i--) { if (this.trackHasData[i]) { playTrack = i; break; } }\n'
-              '        this.audioEngine.startTrackPlayback(playTrack, 1.0f, false);\n'
-              '        this.trackPlaying[playTrack] = true;\n'
-              '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY T" + (playTrack + 1));\n'
-              '        if (this.txtRecStatus != null)\n'
-              '            this.txtRecStatus.setText("Playing Track " + (playTrack + 1) + "...");\n'
-              '    }'
-          ))
-
-          src = replace_method(src, '    public void stopPlayback() {', (
-              '    /** Stop all engine track playback. */\n'
-              '    public void stopPlayback() {\n'
-              '        if (this.audioEngine != null) {\n'
-              '            for (int i = 0; i < 4; i++) {\n'
-              '                if (this.trackPlaying[i]) { this.audioEngine.stopTrackPlayback(i); this.trackPlaying[i] = false; }\n'
-              '            }\n'
-              '        }\n'
-              '        if (this.btnPlayRecording != null) this.btnPlayRecording.setText("PLAY");\n'
-              '        if (this.txtRecStatus != null && this.hasRecording)\n'
-              '            this.txtRecStatus.setText("Recording ready - tap PLAY to listen");\n'
-              '    }'
-          ))
-
-          with open(LA, 'w') as f: f.write(src)
-          print('Recording methods patched to use internal engine audio')
-
-          PYEOF
-          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: recording patch failed (rc=$rc)"; exit 1; }
-          grep -c 'audioEngine.startRecording\|audioEngine.stopRecording' "$LA" || true
-
-      - name: Add ADD MODE button plus Loop-Drum to ADV panel
-        if: false
-        run: |
-          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
-          grep -q 'btnAddMode' "$LA" && { echo "already patched"; exit 0; }
-          python3 - << 'PYEOF'
-          import re, sys
-
-          LA  = 'gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java'
-          XML = 'gradle_build/app/src/main/res/layout/activity_loops.xml'
-
-          # 1. XML: replace btnDrumOctapad with LOOP + DRUM + ADD MODE buttons
-          with open(XML) as f: xsrc = f.read()
-          if 'btnAddMode' not in xsrc:
-              if 'btnDrumOctapad' not in xsrc:
-                  print('FATAL: btnDrumOctapad not found in XML'); sys.exit(1)
-              new_buttons = (
-                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-                  ' android:id="@+id/btnDrumOctapad"'
-                  ' android:background="@drawable/btn_3d_blue"'
-                  ' android:layout_width="0dp" android:layout_height="36dp"'
-                  ' android:layout_marginStart="4dp" android:text="LOOP" android:layout_weight="1.0"/>'
-                  '\n            '
-                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-                  ' android:id="@+id/btnDrumModeAdv"'
-                  ' android:background="@drawable/btn_3d_dark"'
-                  ' android:layout_width="0dp" android:layout_height="36dp"'
-                  ' android:layout_marginStart="4dp" android:text="DRUM" android:layout_weight="1.0"/>'
-                  '\n            '
-                  '<Button android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"'
-                  ' android:id="@+id/btnAddMode"'
-                  ' android:background="@drawable/btn_3d_purple"'
-                  ' android:layout_width="0dp" android:layout_height="36dp"'
-                  ' android:layout_marginStart="4dp" android:text="+ ADD MODE" android:layout_weight="1.2"/>'
-              )
-              lines = xsrc.split('\n')
-              new_lines = []
-              replaced = False
-              for line in lines:
-                  if 'btnDrumOctapad' in line:
-                      indent_str = '            '
-                      new_lines.append(indent_str + new_buttons)
-                      replaced = True
-                  else:
-                      new_lines.append(line)
-              if not replaced:
-                  print('FATAL: btnDrumOctapad line not replaced'); sys.exit(1)
-              xsrc = '\n'.join(new_lines)
-              with open(XML, 'w') as f: f.write(xsrc)
-              print('XML: replaced btnDrumOctapad with LOOP + DRUM + ADD MODE buttons')
-          else:
-              print('XML: btnAddMode already present - skip')
-
-          # 2. Java: add isAddMode, btnAddMode, btnDrumModeAdv fields
-          with open(LA) as f: src = f.read()
-
-          if 'isAddMode' not in src:
-              anchor = '    private Button btnDrumMode = null;'
-              if anchor not in src:
-                  print('FATAL: btnDrumMode field anchor not found'); sys.exit(1)
-              new_fields = (
-                  '    private boolean isAddMode      = false;\n'
-                  '    private Button  btnAddMode     = null;\n'
-                  '    private Button  btnDrumModeAdv = null;\n'
-              )
-              src = src.replace(anchor, anchor + '\n' + new_fields, 1)
-              print('2. isAddMode / btnAddMode / btnDrumModeAdv fields added')
-
-          # 3. Wire btnAddMode + btnDrumModeAdv in onCreate
-          if 'void toggleAddMode()' not in src:
-              wire_anchor = '                    LoopsActivity.this.toggleDrumOctapadMode();'
-              idx = src.find(wire_anchor)
-              if idx < 0:
-                  print('FATAL: toggleDrumOctapadMode anchor not found'); sys.exit(1)
-              close = src.find('});', idx)
-              if close < 0:
-                  print('FATAL: cannot find }); after toggleDrumOctapadMode'); sys.exit(1)
-              wiring = (
-                  '\n        // ADV panel: LOOP / DRUM / ADD MODE buttons\n'
-                  '        this.btnDrumModeAdv = (Button) findViewById(R.id.btnDrumModeAdv);\n'
-                  '        if (this.btnDrumModeAdv != null)\n'
-                  '            this.btnDrumModeAdv.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(true));\n'
-                  '\n'
-                  '        this.btnAddMode = (Button) findViewById(R.id.btnAddMode);\n'
-                  '        if (this.btnAddMode != null)\n'
-                  '            this.btnAddMode.setOnClickListener(v -> LoopsActivity.this.toggleAddMode());\n'
-                  '\n'
-                  '        // btnDrumOctapad now acts as explicit LOOP MODE setter\n'
-                  '        if (this.btnDrumOctapad != null)\n'
-                  '            this.btnDrumOctapad.setOnClickListener(v -> LoopsActivity.this.setGlobalDrumMode(false));\n'
-              )
-              src = src[:close+3] + wiring + src[close+3:]
-              print('3. btnAddMode / btnDrumModeAdv / btnDrumOctapad wired in onCreate')
-
-          # 4. Intercept handlePadClick when isAddMode is true
-          pad_anchor = '        this.selectedPad = index;\n        if (this.editMode) {'
-          if pad_anchor in src and 'showPadConfigDialog' not in src[:src.find(pad_anchor)+20]:
-              intercept = '        if (this.isAddMode) { showPadConfigDialog(index); return; }\n'
-              src = src.replace(pad_anchor, intercept + pad_anchor, 1)
-              print('4. handlePadClick intercepted for ADD MODE')
-          elif 'showPadConfigDialog' in src:
-              print('4. handlePadClick already intercepted')
-          else:
-              print('WARN 4: handlePadClick anchor not found - skipping intercept')
-
-          # 5. Add toggleAddMode + showPadConfigDialog methods
-          if 'void toggleAddMode()' not in src:
-              methods = (
-                  '\n'
-                  '    // ADD MODE: tap a pad to configure it as LOOP or DRUM\n'
-                  '    public void toggleAddMode() {\n'
-                  '        this.isAddMode = !this.isAddMode;\n'
-                  '        if (this.btnAddMode != null) {\n'
-                  '            this.btnAddMode.setBackgroundResource(\n'
-                  '                this.isAddMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_purple);\n'
-                  '            this.btnAddMode.setText(this.isAddMode ? "SET PAD" : "+ ADD MODE");\n'
-                  '        }\n'
-                  '        if (this.btnDrumOctapad != null)\n'
-                  '            this.btnDrumOctapad.setBackgroundResource(\n'
-                  '                this.isGlobalDrumMode ? R.drawable.btn_3d_dark : R.drawable.btn_3d_blue);\n'
-                  '        if (this.btnDrumModeAdv != null)\n'
-                  '            this.btnDrumModeAdv.setBackgroundResource(\n'
-                  '                this.isGlobalDrumMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);\n'
-                  '        if (this.isAddMode) {\n'
-                  '            Toast.makeText(this, "Tap a pad to set LOOP or DRUM mode", Toast.LENGTH_SHORT).show();\n'
-                  '            if (this.txtLoopStatus != null)\n'
-                  '                this.txtLoopStatus.setText("+ ADD MODE: tap a pad to configure");\n'
-                  '            // Just highlight pads to invite a tap — do NOT touch padDrumMode or\n'
-                  '            // padModeOverride here. Overwriting every pad every time ADD MODE is\n'
-                  '            // opened used to wipe out earlier per-pad choices (e.g. configuring\n'
-                  '            // pad 1 as DRUM, then opening ADD MODE again for pad 2 silently reset\n'
-                  '            // pad 1 back to the global mode). Each pad keeps whatever mode it has\n'
-                  '            // (default or previously-overridden) until the user actually taps it.\n'
-                  '            for (int i = 0; i < 8; i++) {\n'
-                  '                if (this.loopPads[i] != null)\n'
-                  '                    this.loopPads[i].setBackgroundResource(R.drawable.pad_orange_selector);\n'
-                  '            }\n'
-                  '        } else {\n'
-                  '            if (this.txtLoopStatus != null) this.txtLoopStatus.setText("ADD MODE off");\n'
-                  '            for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-                  '        }\n'
-                  '    }\n'
-                  '\n'
-                  '    private void showPadConfigDialog(final int padIndex) {\n'
-                  '        final String[] options = {"LOOP MODE (continuous loop)", "DRUM MODE (one-shot hit)"};\n'
-                  '        // Preselect whatever this pad is EFFECTIVELY doing right now (its own\n'
-                  '        // override if it has one, otherwise the current global mode) so the\n'
-                  '        // dialog never lies about the pad state.\n'
-                  '        final boolean effectiveDrum = this.padModeOverride[padIndex]\n'
-                  '                ? this.padDrumMode[padIndex]\n'
-                  '                : (this.isGlobalDrumMode || this.isOneShotMode);\n'
-                  '        final int current = effectiveDrum ? 1 : 0;\n'
-                  '        new android.app.AlertDialog.Builder(this)\n'
-                  '            .setTitle("Configure PAD " + (padIndex + 1))\n'
-                  '            .setSingleChoiceItems(options, current, (dialog, which) -> {\n'
-                  '                boolean setDrum = (which == 1);\n'
-                  '                this.padDrumMode[padIndex] = setDrum;\n'
-                  '                // Explicit choice — this pad now overrides the global LOOP/DRUM\n'
-                  '                // toggle and keeps this exact mode until changed again here or\n'
-                  '                // via long-press.\n'
-                  '                this.padModeOverride[padIndex] = true;\n'
-                  '                if (setDrum && this.loopPlaying[padIndex]) {\n'
-                  '                    if (this.audioEngine != null) this.audioEngine.stopPad(padIndex);\n'
-                  '                    this.loopPlaying[padIndex] = false;\n'
-                  '                }\n'
-                  '                this.prefs.edit()\n'
-                  '                    .putBoolean("pad_drum_mode_" + padIndex, setDrum)\n'
-                  '                    .putBoolean("pad_mode_override_" + padIndex, true)\n'
-                  '                    .apply();\n'
-                  '                dialog.dismiss();\n'
-                  '                this.isAddMode = false;\n'
-                  '                if (this.btnAddMode != null) {\n'
-                  '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
-                  '                    this.btnAddMode.setText("+ ADD MODE");\n'
-                  '                }\n'
-                  '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-                  '                String modeName = setDrum ? "DRUM MODE" : "LOOP MODE";\n'
-                  '                Toast.makeText(this, "PAD " + (padIndex + 1) + " -> " + modeName, Toast.LENGTH_SHORT).show();\n'
-                  '                if (this.txtLoopStatus != null)\n'
-                  '                    this.txtLoopStatus.setText("PAD " + (padIndex + 1) + " set to " + modeName);\n'
-                  '            })\n'
-                  '            .setNegativeButton("Cancel", (d, w) -> {\n'
-                  '                this.isAddMode = false;\n'
-                  '                if (this.btnAddMode != null) {\n'
-                  '                    this.btnAddMode.setBackgroundResource(R.drawable.btn_3d_purple);\n'
-                  '                    this.btnAddMode.setText("+ ADD MODE");\n'
-                  '                }\n'
-                  '                for (int i = 0; i < 8; i++) { if (this.loopPads[i] != null) updatePadLabel(i); }\n'
-                  '            })\n'
-                  '            .show();\n'
-                  '    }\n'
-              )
-              last_brace = src.rfind('\n}')
-              if last_brace < 0:
-                  print('FATAL: cannot find closing brace of class'); sys.exit(1)
-              src = src[:last_brace] + methods + '\n}' + src[last_brace+2:]
-              print('5. toggleAddMode + showPadConfigDialog methods added')
-
-          with open(LA, 'w') as f: f.write(src)
-          print('ADD MODE patch complete')
-
-          PYEOF
-          rc=$?; [ $rc -ne 0 ] && { echo "FATAL: ADD MODE patch failed (rc=$rc)"; exit 1; }
-          grep -c 'btnAddMode\|toggleAddMode\|showPadConfigDialog\|isAddMode' "$LA" || true
-          grep -c 'btnAddMode' "$XML" || true
-
-
-      - name: Verify all feature patches
-        run: |
-          CPP="gradle_build/app/src/main/cpp/audio_engine.cpp"
-          AE="gradle_build/app/src/main/java/com/pramod/loopmidi/AudioEngine.java"
-          LA="gradle_build/app/src/main/java/com/pramod/loopmidi/LoopsActivity.java"
-          XML="gradle_build/app/src/main/res/layout/activity_loops.xml"
-          echo "=== Per-pad choke (chokeGroup = index + 1) ==="
-          grep -n 'chokeGroup' "$LA" | head -2 || echo "not found"
-          echo "=== Latency (AAudio) ==="
-          grep -n 'setAudioApi' "$CPP" | head -2 || echo "not found"
-          echo "=== C++ recording symbols ==="
-          for s in CMD_REC_START recActiveTrack nativeStartRecord; do
-            echo "  $s: $(grep -c $s $CPP || echo 0) occurrences"
-          done
-          echo "=== AudioEngine.java ==="
-          grep -c 'startRecording' "$AE" || echo 0
-          echo "=== LoopsActivity.java ==="
-          grep -c 'btnRecordStart' "$LA" || echo 0
-          echo "=== activity_loops.xml ==="
-          grep -c 'btnRecordStart' "$XML" || echo 0
-          echo "All feature verifications done"
-
+          gradle wrapper --gradle-version 8.9 --distribution-type all
+          chmod +x gradlew
+
+      # ── 5. Cache Gradle files ──────────────────────────────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('sound-recorder/**/*.gradle*', 'sound-recorder/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 6. Build Debug APK ─────────────────────────────────────────────────
       - name: Build Debug APK
-        working-directory: gradle_build
+        working-directory: sound-recorder
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all \
+            2>&1 | tee /tmp/build_debug.log
 
-      - name: Show build errors
-        if: always()
+      # ── 7. Build Release APK (unsigned) ───────────────────────────────────
+      - name: Build Release APK (unsigned)
+        working-directory: sound-recorder
         run: |
-          if [ -f /tmp/build.log ]; then
-            echo "===== Last 200 lines of build log ====="
-            tail -n 200 /tmp/build.log
-          else
-            echo "No build log found."
-          fi
+          set -o pipefail
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            2>&1 | tee /tmp/build_release.log
 
-      - name: Upload APK artifact
+      # ── 8. Show logs on failure ────────────────────────────────────────────
+      - name: Show build log on failure
+        if: failure()
+        run: |
+          echo "===== DEBUG BUILD LOG (last 300 lines) ====="
+          tail -n 300 /tmp/build_debug.log 2>/dev/null || true
+          echo "===== RELEASE BUILD LOG (last 100 lines) ====="
+          tail -n 100 /tmp/build_release.log 2>/dev/null || true
+
+      # ── 9. Rename APKs with version + commit SHA ──────────────────────────
+      - name: Rename APK files
+        if: success()
+        run: |
+          SHA="${{ github.sha }}"
+          SHORT="${SHA:0:7}"
+          DEBUG_SRC="sound-recorder/app/build/outputs/apk/debug/app-debug.apk"
+          REL_SRC="sound-recorder/app/build/outputs/apk/release/app-release-unsigned.apk"
+          mkdir -p artifacts
+          [ -f "$DEBUG_SRC"   ] && cp "$DEBUG_SRC"   "artifacts/PramodSoundStudio-v2.0.0-debug-${SHORT}.apk"
+          [ -f "$REL_SRC"     ] && cp "$REL_SRC"     "artifacts/PramodSoundStudio-v2.0.0-release-unsigned-${SHORT}.apk"
+          echo "=== Built APKs ==="
+          ls -lh artifacts/
+
+      # ── 10. Upload Debug APK ───────────────────────────────────────────────
+      - name: Upload Debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: gradle_build/app/build/outputs/apk/debug/app-debug.apk
+          name: PramodSoundStudio-Debug-APK
+          path: artifacts/PramodSoundStudio-v2.0.0-debug-*.apk
+          retention-days: 30
           if-no-files-found: warn
+
+      # ── 11. Upload Release APK (unsigned) ─────────────────────────────────
+      - name: Upload Release APK (unsigned)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PramodSoundStudio-Release-Unsigned-APK
+          path: artifacts/PramodSoundStudio-v2.0.0-release-unsigned-*.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── 12. Build summary ──────────────────────────────────────────────────
+      - name: Print build summary
+        if: always()
+        run: |
+          echo "## 📦 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          for f in artifacts/*.apk; do
+            [ -f "$f" ] && echo "| \`$(basename $f)\` | $(du -sh $f | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
