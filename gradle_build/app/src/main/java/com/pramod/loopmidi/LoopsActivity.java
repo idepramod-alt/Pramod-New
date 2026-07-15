@@ -225,6 +225,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private int                      dialogEngineRecTrack  = 0;
     // Dialog reference so we can refresh its UI from background threads
     private android.app.AlertDialog  recDialog        = null;
+    // Track-list and status-label references kept alive so the recording thread's
+    // Handler.post() can refresh the dialog without re-opening it.
+    private android.widget.LinearLayout currentRecTrackList = null;
+    private android.widget.TextView     currentRecTvStatus  = null;
     // ── System-audio capture (Android 10+) ───────────────────────────────────
     private MediaProjectionManager   mpManager        = null;
     private MediaProjection          mediaProjection  = null;
@@ -1756,7 +1760,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.loopPads[i].setSoundEffectsEnabled(false);
             final int index = i;
 
-            // Touch listener: ACTION_DOWN = play, UP/CANCEL = release press visual
+            // Touch listener: ACTION_DOWN = play immediately; 2-second hold = toggle
+            // LOOP/DRUM mode. Note: because ACTION_DOWN returns true (consumed), Android's
+            // built-in setOnLongClickListener never fires — we implement the 2-sec hold
+            // ourselves with Handler.postDelayed so both behaviours work correctly.
+            final android.os.Handler lpHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+            final Runnable[] lpRunnable = new Runnable[]{null};
             this.loopPads[i].setOnTouchListener(new View.OnTouchListener(this) {
                 final LoopsActivity this$0 = LoopsActivity.this;
 
@@ -1766,42 +1775,46 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         // ── Audio BEFORE visual — fires sound with zero UI overhead ──
                         this.this$0.handlePadClick(index);
                         v.setPressed(true);
+                        // Schedule 2-second hold: toggle this pad between LOOP and DRUM mode
+                        lpRunnable[0] = () -> {
+                            boolean currentlyDrum = LoopsActivity.this.padModeOverride[index]
+                                    ? LoopsActivity.this.padDrumMode[index]
+                                    : (LoopsActivity.this.isGlobalDrumMode || LoopsActivity.this.isOneShotMode);
+                            LoopsActivity.this.padDrumMode[index] = !currentlyDrum;
+                            // Explicit choice — this pad now overrides the global LOOP/DRUM
+                            // toggle and keeps this exact mode until changed again.
+                            LoopsActivity.this.padModeOverride[index] = true;
+                            // Stop the pad if it was looping — drum mode is one-shot only
+                            if (LoopsActivity.this.padDrumMode[index] && LoopsActivity.this.loopPlaying[index]) {
+                                if (LoopsActivity.this.audioEngine != null)
+                                    LoopsActivity.this.audioEngine.stopPad(index);
+                                LoopsActivity.this.loopPlaying[index] = false;
+                            }
+                            LoopsActivity.this.updatePadLabel(index);
+                            LoopsActivity.this.prefs.edit()
+                                .putBoolean("pad_drum_mode_" + index, LoopsActivity.this.padDrumMode[index])
+                                .putBoolean("pad_mode_override_" + index, true)
+                                .apply();
+                            String modeStr = LoopsActivity.this.padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
+                            LoopsActivity.this.txtLoopStatus.setText(
+                                "PAD " + (index + 1) + " → " + modeStr + " MODE (2-sec hold to toggle)");
+                            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                        };
+                        lpHandler.postDelayed(lpRunnable[0], 2000);
                         return true;
                     } else if (event.getAction() == MotionEvent.ACTION_UP
                             || event.getAction() == MotionEvent.ACTION_CANCEL) {
                         v.setPressed(false);
+                        // Cancel the 2-sec toggle if finger lifted before 2 seconds
+                        if (lpRunnable[0] != null) lpHandler.removeCallbacks(lpRunnable[0]);
                         return true;
                     }
                     return false;
                 }
             });
-
-            // Long-press: toggle this pad between LOOP mode and DRUM mode
-            this.loopPads[i].setOnLongClickListener(v -> {
-                // Long-press toggles the pad's EFFECTIVE mode (override-aware), so
-                // toggling always flips what the pad is actually doing right now —
-                // not just the raw padDrumMode flag underneath a global override.
-                boolean currentlyDrum = padModeOverride[index]
-                        ? padDrumMode[index]
-                        : (isGlobalDrumMode || isOneShotMode);
-                padDrumMode[index] = !currentlyDrum;
-                // Explicit choice — this pad now overrides the global LOOP/DRUM
-                // toggle and keeps this exact mode until changed again.
-                padModeOverride[index] = true;
-                // Stop the pad if it was looping — drum mode is one-shot only
-                if (padDrumMode[index] && loopPlaying[index]) {
-                    if (audioEngine != null) audioEngine.stopPad(index);
-                    loopPlaying[index] = false;
-                }
-                updatePadLabel(index);
-                prefs.edit()
-                    .putBoolean("pad_drum_mode_" + index, padDrumMode[index])
-                    .putBoolean("pad_mode_override_" + index, true)
-                    .apply();
-                String modeStr = padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
-                txtLoopStatus.setText("PAD " + (index + 1) + " → " + modeStr + " MODE (long-press to toggle)");
-                return true;   // consume the long-press (don't fire the tap handler)
-            });
+            // setOnLongClickListener intentionally removed — ACTION_DOWN is consumed by
+            // onTouch above, which prevents the system long-click from ever firing.
+            // The 2-second hold toggle is handled entirely in the touch listener above.
 
             // Apply initial visual state (orange border for drum mode, dark for loop mode)
             updatePadLabel(index);
@@ -2827,6 +2840,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final android.widget.LinearLayout trackList = new android.widget.LinearLayout(this);
         trackList.setOrientation(android.widget.LinearLayout.VERTICAL);
         sv.addView(trackList);
+        // Store references so the recording thread can refresh this dialog without
+        // requiring the user to close and reopen it.
+        currentRecTrackList = trackList;
+        currentRecTvStatus  = tvStatus;
         android.view.ViewGroup.LayoutParams svLP =
             new android.view.ViewGroup.LayoutParams(-1, android.util.TypedValue.applyDimension(
                 android.util.TypedValue.COMPLEX_UNIT_DIP, 120,
@@ -3131,6 +3148,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     trackCount++;
                     trackPaths.add(outPath);
                     Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM, " + channels + "ch)");
+                    // FIX: Refresh the dialog track list immediately so the new recording
+                    // appears without needing to close and reopen the dialog.
+                    if (currentRecTrackList != null && recDialog != null && recDialog.isShowing()) {
+                        refreshTrackList(currentRecTrackList, currentRecTvStatus);
+                        if (currentRecTvStatus != null)
+                            currentRecTvStatus.setText("✅ Track " + trackCount + " save ho gaya! Aur tracks record karo ya ▶ PLAY ALL karo.");
+                    }
                 });
             } catch (Exception e) {
                 Log.e("LoopsRec", "WAV write failed", e);
