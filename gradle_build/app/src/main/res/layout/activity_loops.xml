@@ -99,6 +99,12 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="🎚️VEL\nOFF" android:layout_weight="1"/>
 
+        <!-- MIDI Key Mapping: manual ON/OFF + per-pad note assignment dialog -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnMidiMap" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp" android:text="🎹MAP\nOFF" android:layout_weight="1"/>
+
         <!-- Brand name: no plate, just bold yellow text with a black stroke -->
         <TextView android:id="@+id/txtBrandName"
             android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffff00"

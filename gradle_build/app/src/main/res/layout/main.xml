@@ -19,6 +19,8 @@
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnLoadKit" android:background="@drawable/btn_glossy_3d" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="LOAD" android:layout_weight="1.2"/>
         <!-- Velocity Sensitivity toggle: ON = MIDI velocity scales volume, OFF = fixed volume -->
         <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnVelocity" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="🎚️VEL&#10;OFF" android:layout_weight="1.2"/>
+        <!-- MIDI Key Mapping: manual ON/OFF + per-pad note assignment dialog -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnMidiMap" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="🎹MAP&#10;OFF" android:layout_weight="1.2"/>
     </LinearLayout>
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@+id/fxControlBar" android:background="#ff111111" android:padding="2dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="40dp">
         <CheckBox android:textSize="10sp" android:textColor="#ff00ffff" android:id="@+id/chkDelay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DLY"/>

@@ -77,6 +77,13 @@ public class MainActivity extends Activity {
     // Velocity Sensitivity: when ON, MIDI velocity (0-127) scales the hit volume
     private boolean velocitySensitiveMode = false;
     private Button btnVelocity = null;
+    // ── MIDI Key Mapping System ───────────────────────────────────────────────
+    private static final int[] MIDI_NOTE_MAP_DEFAULT = {49, 45, 37, 39, 36, 38, 46, 42};
+    private boolean         midiKeyMappingEnabled = false;
+    private int[]           midiNoteMap           = MIDI_NOTE_MAP_DEFAULT.clone();
+    private volatile boolean midiLearnMode        = false;
+    private volatile int     midiLearnTargetPad   = -1;
+    private Button           btnMidiMap           = null;
     private MidiManager midiManager;
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
@@ -359,41 +366,48 @@ public class MainActivity extends Activity {
     }
 
     public void handleMidiNoteOn(byte note, byte velocity) {
+        // ── MIDI Learn: capture incoming note for the pad being learned ────────
+        if (midiLearnMode && midiLearnTargetPad >= 0) {
+            final int learnPad  = midiLearnTargetPad;
+            final int learnNote = note & 0xFF;
+            midiLearnMode      = false;
+            midiLearnTargetPad = -1;
+            midiNoteMap[learnPad] = learnNote;
+            saveMidiNoteMap();
+            runOnUiThread(() -> {
+                Toast.makeText(this,
+                    "PAD " + (learnPad + 1) + " → Note " + learnNote + " mapped! ✅",
+                    Toast.LENGTH_SHORT).show();
+                updateMidiMapButton();
+            });
+        }
+
         if (this.isVisible) {
             int padIndex = -1;
-            switch (note) {
-                case 36:
-                    padIndex = 4;
-                    break;
-                case 37:
-                    padIndex = 2;
-                    break;
-                case 38:
-                case 40:
-                    padIndex = 5;
-                    break;
-                case 39:
-                    padIndex = 3;
-                    break;
-                case 42:
-                case 44:
-                    padIndex = 7;
-                    break;
-                case 45:
-                case 47:
-                case ConstraintLayout.LayoutParams.Table.LAYOUT_CONSTRAINT_VERTICAL_CHAINSTYLE /* 48 */:
-                case 50:
-                    padIndex = 1;
-                    break;
-                case 46:
-                    padIndex = 6;
-                    break;
-                case ConstraintLayout.LayoutParams.Table.LAYOUT_EDITOR_ABSOLUTEX /* 49 */:
-                    padIndex = 0;
-                    break;
-            }
-            if (padIndex == -1) {
-                padIndex = note % 8;
+
+            if (midiKeyMappingEnabled) {
+                // ── Custom mapping: scan midiNoteMap[] for a match ────────────
+                int noteVal = note & 0xFF;
+                for (int i = 0; i < 8; i++) {
+                    if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
+                }
+                if (padIndex == -1) padIndex = noteVal % 8;
+            } else {
+                // ── Original hardcoded mapping (unchanged / always safe) ──────
+                switch (note) {
+                    case 36: padIndex = 4; break;
+                    case 37: padIndex = 2; break;
+                    case 38: case 40: padIndex = 5; break;
+                    case 39: padIndex = 3; break;
+                    case 42: case 44: padIndex = 7; break;
+                    case 45:
+                    case 47:
+                    case ConstraintLayout.LayoutParams.Table.LAYOUT_CONSTRAINT_VERTICAL_CHAINSTYLE /* 48 */:
+                    case 50: padIndex = 1; break;
+                    case 46: padIndex = 6; break;
+                    case ConstraintLayout.LayoutParams.Table.LAYOUT_EDITOR_ABSOLUTEX /* 49 */: padIndex = 0; break;
+                }
+                if (padIndex == -1) padIndex = (note & 0xFF) % 8;
             }
             final int finalPadIndex = padIndex;
             // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
@@ -472,6 +486,185 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIDI Key Mapping helpers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void loadMidiNoteMap() {
+        midiKeyMappingEnabled = prefs.getBoolean("midi_key_mapping_on", false);
+        for (int i = 0; i < 8; i++) {
+            midiNoteMap[i] = prefs.getInt("midi_note_map_" + i, MIDI_NOTE_MAP_DEFAULT[i]);
+        }
+    }
+
+    private void saveMidiNoteMap() {
+        SharedPreferences.Editor ed = prefs.edit();
+        ed.putBoolean("midi_key_mapping_on", midiKeyMappingEnabled);
+        for (int i = 0; i < 8; i++) ed.putInt("midi_note_map_" + i, midiNoteMap[i]);
+        ed.apply();
+    }
+
+    private void updateMidiMapButton() {
+        if (btnMidiMap == null) return;
+        midiLearnMode = false;
+        if (midiKeyMappingEnabled) {
+            btnMidiMap.setText("🎹MAP\nON");
+            btnMidiMap.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnMidiMap.setText("🎹MAP\nOFF");
+            btnMidiMap.setBackgroundResource(R.drawable.btn_3d_dark);
+        }
+    }
+
+    private void showMidiKeyMappingDialog() {
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(24, 16, 24, 8);
+        root.setBackgroundColor(0xFF1a1a2e);
+
+        // ON/OFF toggle
+        final Button btnToggle = new Button(this);
+        btnToggle.setText(midiKeyMappingEnabled ? "✅ CUSTOM MAPPING: ON  (tap to turn OFF)" : "❌ CUSTOM MAPPING: OFF  (tap to turn ON)");
+        btnToggle.setBackgroundColor(midiKeyMappingEnabled ? 0xFF006600 : 0xFF333333);
+        btnToggle.setTextColor(0xFFFFFFFF);
+        btnToggle.setTextSize(12f);
+        android.widget.LinearLayout.LayoutParams toggleLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        toggleLP.setMargins(0, 0, 0, 16);
+        btnToggle.setLayoutParams(toggleLP);
+        root.addView(btnToggle);
+
+        android.widget.TextView tvInfo = new android.widget.TextView(this);
+        tvInfo.setTextColor(0xFF888888);
+        tvInfo.setTextSize(11f);
+        tvInfo.setText("Har pad ke liye MIDI note number set karo (0–127).\nLEARN: MIDI controller se koi button dabao — auto-assign hoga.");
+        android.widget.LinearLayout.LayoutParams infoLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        infoLP.setMargins(0, 0, 0, 12);
+        tvInfo.setLayoutParams(infoLP);
+        root.addView(tvInfo);
+
+        final android.widget.EditText[] noteEdits = new android.widget.EditText[8];
+        final Button[] learnBtns = new Button[8];
+        for (int i = 0; i < 8; i++) {
+            final int padIdx = i;
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            android.widget.LinearLayout.LayoutParams rowLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+            rowLP.setMargins(0, 4, 0, 4);
+            row.setLayoutParams(rowLP);
+
+            android.widget.TextView lbl = new android.widget.TextView(this);
+            lbl.setText("PAD " + (i + 1) + " →");
+            lbl.setTextColor(0xFFCCCCCC);
+            lbl.setTextSize(12f);
+            lbl.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
+
+            android.widget.EditText et = new android.widget.EditText(this);
+            et.setText(String.valueOf(midiNoteMap[i]));
+            et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            et.setTextColor(0xFFFFFFFF);
+            et.setBackgroundColor(0xFF222244);
+            et.setTextSize(13f);
+            et.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams etLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+            etLP.setMargins(8, 0, 8, 0);
+            et.setLayoutParams(etLP);
+            noteEdits[i] = et;
+
+            Button btnLearn = new Button(this);
+            btnLearn.setText("🎹 LEARN");
+            btnLearn.setBackgroundColor(0xFF003399);
+            btnLearn.setTextColor(0xFFFFFFFF);
+            btnLearn.setTextSize(10f);
+            btnLearn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
+            learnBtns[i] = btnLearn;
+            btnLearn.setOnClickListener(vv -> {
+                for (Button b : learnBtns) if (b != null) b.setBackgroundColor(0xFF003399);
+                midiLearnTargetPad = padIdx;
+                midiLearnMode      = true;
+                btnLearn.setBackgroundColor(0xFFCC8800);
+                btnLearn.setText("⏳ WAIT...");
+                Toast.makeText(this, "PAD " + (padIdx + 1) + ": MIDI controller se koi note dabao...", Toast.LENGTH_SHORT).show();
+            });
+
+            row.addView(lbl);
+            row.addView(et);
+            row.addView(btnLearn);
+            root.addView(row);
+        }
+
+        android.widget.LinearLayout bottomRow = new android.widget.LinearLayout(this);
+        bottomRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.LinearLayout.LayoutParams bottomLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        bottomLP.setMargins(0, 16, 0, 0);
+        bottomRow.setLayoutParams(bottomLP);
+
+        Button btnApply = new Button(this);
+        btnApply.setText("💾 APPLY");
+        btnApply.setBackgroundColor(0xFF006600);
+        btnApply.setTextColor(0xFFFFFFFF);
+        btnApply.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        Button btnReset = new Button(this);
+        btnReset.setText("↩ RESET");
+        btnReset.setBackgroundColor(0xFF550000);
+        btnReset.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams resetLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        resetLP.setMargins(8, 0, 0, 0);
+        btnReset.setLayoutParams(resetLP);
+
+        bottomRow.addView(btnApply);
+        bottomRow.addView(btnReset);
+        root.addView(bottomRow);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle("🎹 MIDI Key Mapping")
+            .setView(sv)
+            .setNegativeButton("CLOSE", null)
+            .create();
+
+        btnToggle.setOnClickListener(vv -> {
+            midiKeyMappingEnabled = !midiKeyMappingEnabled;
+            btnToggle.setText(midiKeyMappingEnabled ? "✅ CUSTOM MAPPING: ON  (tap to turn OFF)" : "❌ CUSTOM MAPPING: OFF  (tap to turn ON)");
+            btnToggle.setBackgroundColor(midiKeyMappingEnabled ? 0xFF006600 : 0xFF333333);
+            saveMidiNoteMap();
+            updateMidiMapButton();
+        });
+
+        btnApply.setOnClickListener(vv -> {
+            for (int i = 0; i < 8; i++) {
+                try {
+                    int val = Integer.parseInt(noteEdits[i].getText().toString().trim());
+                    midiNoteMap[i] = Math.max(0, Math.min(127, val));
+                    noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
+                } catch (NumberFormatException ignored) {}
+            }
+            saveMidiNoteMap();
+            Toast.makeText(this, "✅ Mapping save ho gaya!", Toast.LENGTH_SHORT).show();
+        });
+
+        btnReset.setOnClickListener(vv -> new android.app.AlertDialog.Builder(this)
+            .setTitle("Reset to Default?")
+            .setMessage("Sab pads ke notes wapas default par aa jayenge.")
+            .setPositiveButton("RESET", (d, w) -> {
+                System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 8);
+                for (int i = 0; i < 8; i++) noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
+                saveMidiNoteMap();
+                Toast.makeText(this, "↩ Default mapping restore ho gaya!", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show());
+
+        dlg.show();
+        android.view.Window w = dlg.getWindow();
+        if (w != null) {
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            w.setLayout((int)(screenW * 0.95f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
     /** Updates the Velocity button label + color to match velocitySensitiveMode. */
     private void updateVelocityButton() {
         if (btnVelocity == null) return;
@@ -507,6 +700,8 @@ public class MainActivity extends Activity {
         this.btnEq = (Button) findViewById(R.id.btnEq);
         // Velocity Sensitivity toggle button
         this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
+        // MIDI Key Mapping button
+        this.btnMidiMap = (Button) findViewById(R.id.btnMidiMap);
         Button button = (Button) findViewById(R.id.btnLoops);
         this.btnLoops = button;
         if (button != null) {
@@ -609,12 +804,19 @@ public class MainActivity extends Activity {
         // Restore velocity sensitivity mode from prefs
         this.velocitySensitiveMode = this.prefs.getBoolean("velocity_sensitive_mode", false);
         updateVelocityButton();
+        // Restore MIDI key mapping
+        loadMidiNoteMap();
+        updateMidiMapButton();
         if (this.btnVelocity != null) {
             this.btnVelocity.setOnClickListener(v -> {
                 velocitySensitiveMode = !velocitySensitiveMode;
                 prefs.edit().putBoolean("velocity_sensitive_mode", velocitySensitiveMode).apply();
                 updateVelocityButton();
             });
+        }
+        // ── MIDI Key Mapping button ────────────────────────────────────────────
+        if (this.btnMidiMap != null) {
+            this.btnMidiMap.setOnClickListener(v -> showMidiKeyMappingDialog());
         }
         this.editMode = this.prefs.getBoolean(KEY_EDIT_MODE, false);
         int i = this.prefs.getInt(KEY_KIT_INDEX, 1);
