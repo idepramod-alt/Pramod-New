@@ -1,10 +1,4 @@
-// Root build file. buildscript {
-    repositories { google(); mavenCentral() }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.2'
-        classpath 'com.google.gms:google-services:4.4.1'
-    }
-}
-allprojects {
-    repositories { google(); mavenCentral() }
-}Android plugin is configured in module build files.
+// Root build file.
+// Plugin versions and repositories are declared in settings.gradle
+// (pluginManagement + dependencyResolutionManagement), so this file
+// stays minimal — no buildscript{} block needed with the plugins DSL.
