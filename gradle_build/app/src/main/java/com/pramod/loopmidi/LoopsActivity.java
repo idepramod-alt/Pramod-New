@@ -2437,7 +2437,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
             // Only applied when velocitySensitiveMode is ON; otherwise fixed at 1.0.
             final float velScale = velocitySensitiveMode
-                    ? (0.3f + 0.7f * ((velocity & 0xFF) / 127.0f))
+                    ? Math.min(1.4f, 0.2f + 1.2f * ((velocity & 0xFF) / 127.0f))
                     : 1.0f;
             // Fire audio immediately on MIDI thread (zero UI-thread latency)
             final boolean audioAlreadyTriggered = midiTriggerDrumPadImmediate(finalPadIndex, velScale);

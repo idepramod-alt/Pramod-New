@@ -412,7 +412,7 @@ public class MainActivity extends Activity {
             final int finalPadIndex = padIndex;
             // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
             final float velScale = velocitySensitiveMode
-                    ? (0.3f + 0.7f * ((velocity & 0xFF) / 127.0f))
+                    ? Math.min(1.4f, 0.2f + 1.2f * ((velocity & 0xFF) / 127.0f))
                     : 1.0f;
             playPadSoundImmediate(finalPadIndex, velScale);
             runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.MainActivity.3
