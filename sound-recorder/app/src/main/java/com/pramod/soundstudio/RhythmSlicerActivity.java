@@ -21,6 +21,8 @@ import java.util.*;
  */
 public class RhythmSlicerActivity extends AppCompatActivity {
 
+    private static final int REQUEST_DEVICE_FILE = 9001;
+
     // ── UI refs ──────────────────────────────────────────────────────────────
     private TextView       tvStatus, tvSummary, tvSelectedFile, tvLog;
     private Button         btnPickFile, btnDetect, btnExportAll, btnBuildKit,
@@ -129,20 +131,48 @@ public class RhythmSlicerActivity extends AppCompatActivity {
     private void pickFile() {
         File dir = new File(getFilesDir(), "recordings");
         File[] wavs = dir.exists() ? dir.listFiles(f -> f.isFile() && f.getName().endsWith(".wav")) : null;
-        if (wavs == null || wavs.length == 0) { toast("No WAV files in recordings/"); return; }
-        Arrays.sort(wavs, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-        String[] names = new String[wavs.length];
-        for (int i = 0; i < wavs.length; i++) names[i] = wavs[i].getName();
-        final File[] fw = wavs;
+        List<File> all = new ArrayList<>();
+        if (wavs != null) {
+            Arrays.sort(wavs, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            all.addAll(Arrays.asList(wavs));
+        }
+
+        List<String> names = new ArrayList<>();
+        for (File f : all) names.add(f.getName());
+        names.add("📱 Browse Device Storage…");
+        final int browseIndex = names.size() - 1;
+        final File[] fw = all.toArray(new File[0]);
+
         new AlertDialog.Builder(this).setTitle("📂 Select WAV File")
-            .setItems(names, (d, w) -> {
-                selectedFile = fw[w];
-                tvSelectedFile.setText("📄 " + selectedFile.getName()
-                        + "  (" + UniversalExportHelper.formatSize(selectedFile.length()) + ")");
-                tvStatus.setText("File selected. Adjust settings and tap Detect Slices.");
-                result = null; sliceLabels.clear(); sliceAdapter.notifyDataSetChanged();
-                setExportEnabled(false); clearLog();
+            .setItems(names.toArray(new String[0]), (d, w) -> {
+                if (w == browseIndex) {
+                    DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, false);
+                } else {
+                    onFileChosen(fw[w]);
+                }
             }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void onFileChosen(File f) {
+        selectedFile = f;
+        tvSelectedFile.setText("📄 " + selectedFile.getName()
+                + "  (" + UniversalExportHelper.formatSize(selectedFile.length()) + ")");
+        tvStatus.setText("File selected. Adjust settings and tap Detect Slices.");
+        result = null; sliceLabels.clear(); sliceAdapter.notifyDataSetChanged();
+        setExportEnabled(false); clearLog();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            if (!imported.isEmpty()) {
+                onFileChosen(imported.get(0));
+                toast("Imported " + imported.get(0).getName());
+            }
+        }
     }
 
     // ── Detect ────────────────────────────────────────────────────────────────

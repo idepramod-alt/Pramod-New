@@ -23,6 +23,8 @@ import java.util.*;
  */
 public class AutoTrimActivity extends AppCompatActivity {
 
+    private static final int REQUEST_DEVICE_FILE = 9001;
+
     private AutoTrimEngine       engine       = new AutoTrimEngine();
     private List<File>           selectedFiles = new ArrayList<>();
     private TextView             tvStatus, tvResult;
@@ -141,23 +143,42 @@ public class AutoTrimActivity extends AppCompatActivity {
     }
 
     private void showFilePicker() {
-        // Show list of WAV files to select
+        // Show list of WAV files to select (internal recordings + option to browse the device)
         File dir   = new File(getFilesDir(), "recordings");
-        File[] all = dir.listFiles(f -> f.getName().endsWith(".wav"));
-        if (all == null || all.length == 0) { showMsg("No WAV files found"); return; }
+        File[] internal = dir.exists() ? dir.listFiles(f -> f.getName().endsWith(".wav")) : null;
+        List<File> all = new ArrayList<>();
+        if (internal != null) all.addAll(Arrays.asList(internal));
 
-        String[] names = new String[all.length];
-        for (int i = 0; i < all.length; i++) names[i] = all[i].getName();
-        final File[] files = all;
+        List<String> names = new ArrayList<>();
+        for (File f : all) names.add(f.getName());
+        names.add("📱 Browse Device Storage…");
+        final int browseIndex = names.size() - 1;
+        final File[] files = all.toArray(new File[0]);
 
         new AlertDialog.Builder(this)
             .setTitle("Select files")
-            .setItems(names, (d, which) -> {
-                if (!selectedFiles.contains(files[which])) {
+            .setItems(names.toArray(new String[0]), (d, which) -> {
+                if (which == browseIndex) {
+                    DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true);
+                } else if (!selectedFiles.contains(files[which])) {
                     selectedFiles.add(files[which]);
                     adapter.notifyDataSetChanged();
                 }
             }).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            for (File f : imported) if (!selectedFiles.contains(f)) selectedFiles.add(f);
+            if (!imported.isEmpty()) {
+                adapter.notifyDataSetChanged();
+                showMsg("Imported " + imported.size() + " file(s)");
+            }
+        }
     }
 
     private void trimSingle(File f) {

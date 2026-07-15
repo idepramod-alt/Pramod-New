@@ -1,5 +1,6 @@
 package com.pramod.soundstudio;
 
+import android.content.Intent;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -9,6 +10,8 @@ import java.io.File;
 import java.util.*;
 
 public class DrumSplitterActivity extends AppCompatActivity {
+
+    private static final int REQUEST_DEVICE_FILE = 9001;
 
     private DrumSplitter splitter = new DrumSplitter();
     private List<File>   files    = new ArrayList<>();
@@ -86,15 +89,38 @@ public class DrumSplitterActivity extends AppCompatActivity {
     private void pickFile() {
         File dir = new File(getFilesDir(), "recordings");
         File[] wavs = dir.exists() ? dir.listFiles(f -> f.getName().endsWith(".wav")) : null;
-        if (wavs == null || wavs.length == 0) { toast("No WAV files found"); return; }
-        String[] names = new String[wavs.length];
-        for (int i = 0; i < wavs.length; i++) names[i] = wavs[i].getName();
-        final File[] copy = wavs;
+        List<File> all = new ArrayList<>();
+        if (wavs != null) all.addAll(Arrays.asList(wavs));
+
+        List<String> names = new ArrayList<>();
+        for (File f : all) names.add(f.getName());
+        names.add("📱 Browse Device Storage…");
+        final int browseIndex = names.size() - 1;
+        final File[] copy = all.toArray(new File[0]);
+
         new AlertDialog.Builder(this).setTitle("Select WAV")
-            .setItems(names, (d, which) -> {
-                files.clear(); files.add(copy[which]);
-                tvStatus.setText("Loaded: " + copy[which].getName());
+            .setItems(names.toArray(new String[0]), (d, which) -> {
+                if (which == browseIndex) {
+                    DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, false);
+                } else {
+                    files.clear(); files.add(copy[which]);
+                    tvStatus.setText("Loaded: " + copy[which].getName());
+                }
             }).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            if (!imported.isEmpty()) {
+                files.clear(); files.add(imported.get(0));
+                tvStatus.setText("Loaded: " + imported.get(0).getName());
+                toast("Imported " + imported.get(0).getName());
+            }
+        }
     }
 
     private void splitSelected() {

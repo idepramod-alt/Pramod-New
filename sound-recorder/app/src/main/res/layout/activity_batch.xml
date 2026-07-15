@@ -11,7 +11,8 @@
     <!-- Operation + File count -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
         <Spinner android:id="@+id/spOperation" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:background="#1A1A1A" android:padding="8dp" android:layout_marginEnd="6dp"/>
-        <Button android:id="@+id/btnSelectAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="All" android:textColor="#FFFFFF" android:background="#333333"/>
+        <Button android:id="@+id/btnSelectAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="All" android:textColor="#FFFFFF" android:background="#333333" android:layout_marginEnd="6dp"/>
+        <Button android:id="@+id/btnBrowseDevice" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📱 Device" android:textColor="#FFFFFF" android:background="#333333"/>
     </LinearLayout>
 
     <TextView android:id="@+id/tvFileCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="0 files" android:textColor="#888888" android:textSize="11sp" android:padding="6dp" android:layout_marginBottom="4dp"/>

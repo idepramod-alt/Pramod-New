@@ -1,5 +1,6 @@
 package com.pramod.soundstudio;
 
+import android.content.Intent;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -9,6 +10,8 @@ import java.util.*;
 
 /** Format Converter Activity — WAV ↔ AAC/M4A, resample, mono/stereo. */
 public class ConverterActivity extends AppCompatActivity {
+
+    private static final int REQUEST_DEVICE_FILE = 9001;
 
     private AudioConverter converter = new AudioConverter();
     private List<File>     selectedFiles = new ArrayList<>();
@@ -84,18 +87,47 @@ public class ConverterActivity extends AppCompatActivity {
     private void pickFiles() {
         File dir = new File(getFilesDir(), "recordings");
         File[] all = dir.exists() ? dir.listFiles() : null;
-        if (all == null || all.length == 0) { toast("No files found"); return; }
-        String[] names = new String[all.length];
-        for (int i = 0; i < all.length; i++) names[i] = all[i].getName();
-        boolean[] checked = new boolean[all.length];
-        final File[] files = all;
+        List<File> list = new ArrayList<>();
+        if (all != null) list.addAll(Arrays.asList(all));
+
+        if (list.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Select files")
+                .setMessage("No files in recordings yet.")
+                .setPositiveButton("📱 Browse Device Storage", (d, w) ->
+                        DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true))
+                .setNegativeButton("Cancel", null).show();
+            return;
+        }
+
+        String[] names = new String[list.size()];
+        for (int i = 0; i < list.size(); i++) names[i] = list.get(i).getName();
+        boolean[] checked = new boolean[list.size()];
+        final File[] files = list.toArray(new File[0]);
         new AlertDialog.Builder(this).setTitle("Select files")
             .setMultiChoiceItems(names, checked, (d, which, isChecked) -> checked[which] = isChecked)
             .setPositiveButton("OK", (d, w) -> {
                 selectedFiles.clear();
                 for (int i = 0; i < files.length; i++) if (checked[i]) selectedFiles.add(files[i]);
                 tvFileCount.setText(selectedFiles.size() + " file(s) selected");
-            }).show();
+            })
+            .setNeutralButton("📱 Browse Device Storage", (d, w) ->
+                    DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            for (File f : imported) if (!selectedFiles.contains(f)) selectedFiles.add(f);
+            if (!imported.isEmpty()) {
+                tvFileCount.setText(selectedFiles.size() + " file(s) selected");
+                toast("Imported " + imported.size() + " file(s)");
+            }
+        }
     }
 
     private void convert() {

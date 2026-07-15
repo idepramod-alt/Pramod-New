@@ -1,5 +1,6 @@
 package com.pramod.soundstudio;
 
+import android.content.Intent;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -9,6 +10,8 @@ import java.util.*;
 
 /** Audio Effects Activity — Reverb, Delay, Chorus, Pitch Shift, Stereo Width, Fade. */
 public class EffectsActivity extends AppCompatActivity {
+
+    private static final int REQUEST_DEVICE_FILE = 9001;
 
     private AudioEffectsEngine fxEngine = new AudioEffectsEngine();
     private File selectedFile;
@@ -105,12 +108,37 @@ public class EffectsActivity extends AppCompatActivity {
     private void pickFile() {
         File dir = new File(getFilesDir(), "recordings");
         File[] all = dir.exists() ? dir.listFiles(f -> f.getName().endsWith(".wav")) : null;
-        if (all == null || all.length == 0) { toast("No WAV files"); return; }
-        String[] names = new String[all.length];
-        for (int i=0;i<all.length;i++) names[i]=all[i].getName();
-        final File[] files = all;
+        List<File> list = new ArrayList<>();
+        if (all != null) list.addAll(Arrays.asList(all));
+
+        List<String> names = new ArrayList<>();
+        for (File f : list) names.add(f.getName());
+        names.add("📱 Browse Device Storage…");
+        final int browseIndex = names.size() - 1;
+        final File[] files = list.toArray(new File[0]);
+
         new AlertDialog.Builder(this).setTitle("Select WAV")
-            .setItems(names,(d,w)->{selectedFile=files[w];tvFileName.setText(files[w].getName());}).show();
+            .setItems(names.toArray(new String[0]), (d, w) -> {
+                if (w == browseIndex) {
+                    DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, false);
+                } else {
+                    selectedFile = files[w]; tvFileName.setText(files[w].getName());
+                }
+            }).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            if (!imported.isEmpty()) {
+                selectedFile = imported.get(0);
+                tvFileName.setText(selectedFile.getName());
+                toast("Imported " + selectedFile.getName());
+            }
+        }
     }
 
     private void applyFx() {

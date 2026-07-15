@@ -16,6 +16,8 @@ import java.util.*;
 
 public class FilesActivity extends AppCompatActivity {
 
+    private static final int REQUEST_DEVICE_FILE = 9001;
+
     private RecyclerView    recyclerView;
     private FilesAdapter    adapter;
     private List<File>      fileList = new ArrayList<>();
@@ -37,6 +39,24 @@ public class FilesActivity extends AppCompatActivity {
         View fab = findViewById(R.id.fabRecord);
         if (fab != null) fab.setOnClickListener(v ->
                 startActivity(new Intent(this, RecordActivity.class)));
+
+        // FAB: import an audio file from anywhere on the device
+        View fabImport = findViewById(R.id.fabImport);
+        if (fabImport != null) fabImport.setOnClickListener(v ->
+                DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true));
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            if (!imported.isEmpty()) {
+                loadFiles();
+                Toast.makeText(this, "Imported " + imported.size() + " file(s)", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.pramod.soundstudio;
 
+import android.content.Intent;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -11,11 +12,13 @@ import java.util.*;
 /** Batch Processing Activity — auto-trim, normalize, convert, rename, apply effects to all files. */
 public class BatchActivity extends AppCompatActivity {
 
+    private static final int REQUEST_DEVICE_FILE = 9001;
+
     private BatchProcessor processor = new BatchProcessor();
     private List<File>     files     = new ArrayList<>();
     private TextView       tvStatus, tvLog, tvFileCount;
     private Spinner        spOperation;
-    private Button         btnSelectAll, btnRun;
+    private Button         btnSelectAll, btnRun, btnBrowseDevice;
     private RecyclerView   rvFiles;
     private FilesCheckAdapter adapter;
     private final Handler  handler = new Handler(Looper.getMainLooper());
@@ -32,6 +35,7 @@ public class BatchActivity extends AppCompatActivity {
         tvFileCount = findViewById(R.id.tvFileCount);
         spOperation = findViewById(R.id.spOperation);
         btnSelectAll= findViewById(R.id.btnSelectAll);
+        btnBrowseDevice = findViewById(R.id.btnBrowseDevice);
         btnRun      = findViewById(R.id.btnRun);
         rvFiles     = findViewById(R.id.rvFiles);
 
@@ -45,6 +49,7 @@ public class BatchActivity extends AppCompatActivity {
         rvFiles.setAdapter(adapter);
 
         btnSelectAll.setOnClickListener(v -> { for (File f : files) adapter.checked.add(f); adapter.notifyDataSetChanged(); });
+        btnBrowseDevice.setOnClickListener(v -> DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true));
         btnRun.setOnClickListener(v -> runBatch());
         loadFiles();
     }
@@ -108,6 +113,24 @@ public class BatchActivity extends AppCompatActivity {
                     break;
             }
         }).start();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_DEVICE_FILE && resultCode == RESULT_OK && data != null) {
+            File dir = new File(getFilesDir(), "recordings");
+            List<File> imported = DeviceFileImporter.handleResult(this, data, dir);
+            for (File f : imported) {
+                if (!files.contains(f)) files.add(f);
+                adapter.checked.add(f);
+            }
+            if (!imported.isEmpty()) {
+                adapter.notifyDataSetChanged();
+                tvFileCount.setText(files.size() + " files available");
+                toast("Imported " + imported.size() + " file(s)");
+            }
+        }
     }
 
     private void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_SHORT).show(); }
