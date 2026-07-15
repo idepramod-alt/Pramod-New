@@ -35,14 +35,16 @@ jobs:
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       # ── 4. Create Gradle wrapper (AGP 9.0 needs Gradle 8.11+) ─────────────
-      # Create wrapper in a temp empty project to avoid evaluating the
-      # app's build.gradle with the system Gradle (version mismatch risk).
+      # Gradle 9.x requires a settings file even for an empty project,
+      # so we create one before running 'gradle wrapper' in the temp dir.
       - name: Create Gradle wrapper
         run: |
-          mkdir -p /tmp/gradle-init && cd /tmp/gradle-init
+          mkdir -p /tmp/gradle-init
+          echo 'rootProject.name = "tmp"' > /tmp/gradle-init/settings.gradle
+          cd /tmp/gradle-init
           gradle wrapper --gradle-version 8.11.1 --distribution-type all
-          chmod +x gradlew
           cp -r gradle gradlew gradlew.bat $GITHUB_WORKSPACE/gradle_build/
+          chmod +x $GITHUB_WORKSPACE/gradle_build/gradlew
 
       # ── 5. Cache Gradle files ──────────────────────────────────────────────
       - name: Cache Gradle packages
