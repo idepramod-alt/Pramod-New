@@ -31,8 +31,8 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Platform 34
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Install Android SDK Platform 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       # ── 4. Create Gradle wrapper (AGP 9.0 needs Gradle 8.11+) ─────────────
       # Gradle 9.x requires a settings file even for an empty project,
