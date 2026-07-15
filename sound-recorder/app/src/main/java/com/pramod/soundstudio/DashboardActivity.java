@@ -4,7 +4,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.*;
 import android.widget.*;
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.*;
 import androidx.cardview.widget.CardView;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -12,24 +12,28 @@ import java.io.File;
 import java.util.*;
 
 /**
- * DashboardActivity — Main entry point.
- * Shows all professional modules as cards + quick access to recent files.
- * All existing features (Recorder, Trim) are accessible from here.
+ * DashboardActivity — Main launcher (v3.0, backward-compatible).
+ *
+ * Changes from v2.0:
+ *  • 🎯 AI Rhythm Slicer module added (top-3 priority position)
+ *  • Recorder card opens a dialog: Normal mode → RecordActivity (unchanged)
+ *                                   Echo mode  → EchoRecordActivity (new)
+ *  • All existing modules and their targets are untouched.
  */
 public class DashboardActivity extends AppCompatActivity {
 
-    // ── Module definitions ────────────────────────────────────────────────────
-
     static class Module {
         final String icon, title, subtitle;
-        final int accentColor;
+        final int    accentColor;
         final Class<?> target;
-
-        Module(String icon, String title, String subtitle, int accent, Class<?> target) {
-            this.icon = icon; this.title = title; this.subtitle = subtitle;
-            this.accentColor = accent; this.target = target;
+        final int    actionId;   // 0 = direct launch, >0 = custom action
+        Module(String i, String t, String s, int c, Class<?> cls) { this(i,t,s,c,cls,0); }
+        Module(String i, String t, String s, int c, Class<?> cls, int a) {
+            icon=i; title=t; subtitle=s; accentColor=c; target=cls; actionId=a;
         }
     }
+
+    private static final int ACTION_RECORDER = 1;
 
     private static final int RED    = 0xFFE53935;
     private static final int AMBER  = 0xFFFF8F00;
@@ -41,77 +45,63 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int INDIGO = 0xFF283593;
     private static final int PINK   = 0xFFC2185B;
     private static final int BROWN  = 0xFF4E342E;
+    private static final int DEEP_O = 0xFFBF360C;
 
     private final List<Module> modules = Arrays.asList(
-        new Module("🎙️", "Recorder",       "High-quality audio recording",       RED,    RecordActivity.class),
-        new Module("📁", "My Files",        "Browse & manage recordings",          BLUE,   FilesActivity.class),
-        new Module("⚡", "Auto Trim",       "Precision drum sample auto-trim",     AMBER,  AutoTrimActivity.class),
-        new Module("🥁", "Drum Splitter",   "Split hits into separate samples",    ORANGE, DrumSplitterActivity.class),
-        new Module("🎤", "Vocal Remover",   "Separate vocals, drums, bass...",     PURPLE, VocalRemoverActivity.class),
-        new Module("✨", "Enhancement",     "EQ, compressor, de-noise, normalize", TEAL,   EnhancementActivity.class),
-        new Module("🎛️", "Audio Editor",   "Cut, copy, fade, markers, merge",     INDIGO, EditorLauncherActivity.class),
-        new Module("📊", "Analysis",        "BPM, frequency, loudness, peaks",     GREEN,  AnalysisActivity.class),
-        new Module("🎵", "Effects",         "Reverb, echo, pitch, chorus",         PINK,   EffectsActivity.class),
-        new Module("🔄", "Converter",       "WAV · MP3 · FLAC · AAC · OGG",       BROWN,  ConverterActivity.class),
-        new Module("📦", "Batch Process",   "Auto-trim, normalize, export all",    0xFF37474F, BatchActivity.class),
-        new Module("🥁", "Octapad Tools",   "Kit builder, sample prep, export",    0xFF1B5E20, OctapadToolsActivity.class),
-        new Module("⚙️", "Settings",        "Format defaults, paths, theme",        0xFF424242, SettingsActivity.class)
+        new Module("🎙️", "Recorder",       "Normal · Echo · Waveform · USB",          RED,    null,                    ACTION_RECORDER),
+        new Module("📁", "My Files",        "Browse · Play · Share · Delete",           BLUE,   FilesActivity.class),
+        new Module("🎯", "AI Rhythm Slicer","Drum hits · BPM · Octapad kit export",    DEEP_O, RhythmSlicerActivity.class),
+        new Module("⚡", "Auto Trim",       "Ultra-precision silence removal",           AMBER,  AutoTrimActivity.class),
+        new Module("🥁", "Drum Splitter",   "Onset detection · Per-hit WAV export",     ORANGE, DrumSplitterActivity.class),
+        new Module("🎤", "Vocal Remover",   "Phase cancel · AI stem separation",        PURPLE, VocalRemoverActivity.class),
+        new Module("✨", "Enhancement",     "EQ · Compressor · Noise reduction",        TEAL,   EnhancementActivity.class),
+        new Module("🎛️", "Audio Editor",   "Cut · Copy · Fade · Markers · Merge",      INDIGO, EditorLauncherActivity.class),
+        new Module("📊", "Analysis",        "BPM · LUFS · Peak · Clipping",             GREEN,  AnalysisActivity.class),
+        new Module("🎵", "Effects",         "Reverb · Echo · Pitch · Chorus",           PINK,   EffectsActivity.class),
+        new Module("🔄", "Converter",       "WAV · MP3 · FLAC · AAC · OGG",             BROWN,  ConverterActivity.class),
+        new Module("📦", "Batch Process",   "Trim · Normalize · Convert · Export all",  0xFF37474F, BatchActivity.class),
+        new Module("🥁", "Octapad Tools",   "Kit builder · Sample prep · Export",       0xFF1B5E20, OctapadToolsActivity.class),
+        new Module("⚙️", "Settings",        "Format · Sample rate · Paths · Theme",      0xFF424242, SettingsActivity.class)
     );
 
     private RecyclerView  rvModules;
     private TextView      tvRecentHeader;
     private LinearLayout  llRecentFiles;
-    private ModuleAdapter adapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_dashboard);
-
-        rvModules       = findViewById(R.id.rvModules);
-        tvRecentHeader  = findViewById(R.id.tvRecentHeader);
-        llRecentFiles   = findViewById(R.id.llRecentFiles);
-
-        // 2-column grid
+        rvModules      = findViewById(R.id.rvModules);
+        tvRecentHeader = findViewById(R.id.tvRecentHeader);
+        llRecentFiles  = findViewById(R.id.llRecentFiles);
         rvModules.setLayoutManager(new GridLayoutManager(this, 2));
-        adapter = new ModuleAdapter();
-        rvModules.setAdapter(adapter);
-
+        rvModules.setAdapter(new ModuleAdapter());
         loadRecentFiles();
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        loadRecentFiles();
-    }
+    @Override protected void onResume() { super.onResume(); loadRecentFiles(); }
 
-    // ── Recent files ─────────────────────────────────────────────────────────
-
+    // ── Recent files ──────────────────────────────────────────────────────────
     private void loadRecentFiles() {
         llRecentFiles.removeAllViews();
         File dir = new File(getFilesDir(), "recordings");
         List<File> recent = new ArrayList<>();
-
         if (dir.exists()) {
-            File[] files = dir.listFiles(f ->
-                f.getName().endsWith(".wav") || f.getName().endsWith(".m4a") ||
-                f.getName().endsWith(".mp3") || f.getName().endsWith(".flac") ||
-                f.getName().endsWith(".aac") || f.getName().endsWith(".ogg"));
+            File[] files = dir.listFiles(f -> f.isFile() &&
+                (f.getName().endsWith(".wav") || f.getName().endsWith(".m4a") ||
+                 f.getName().endsWith(".mp3") || f.getName().endsWith(".flac") ||
+                 f.getName().endsWith(".aac") || f.getName().endsWith(".ogg")));
             if (files != null) {
                 Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
                 for (int i = 0; i < Math.min(5, files.length); i++) recent.add(files[i]);
             }
         }
-
         tvRecentHeader.setVisibility(recent.isEmpty() ? View.GONE : View.VISIBLE);
-
         for (File f : recent) {
             View row = getLayoutInflater().inflate(R.layout.item_recent_file, llRecentFiles, false);
-            TextView tvName = row.findViewById(R.id.tvRecentName);
-            TextView tvSize = row.findViewById(R.id.tvRecentSize);
-            tvName.setText(f.getName());
-            tvSize.setText(f.length() / 1024 + " KB");
+            ((TextView) row.findViewById(R.id.tvRecentName)).setText(f.getName());
+            ((TextView) row.findViewById(R.id.tvRecentSize)).setText(UniversalExportHelper.formatSize(f.length()));
             row.setOnClickListener(v -> {
                 Intent i = new Intent(this, EditorActivity.class);
                 i.putExtra(EditorActivity.EXTRA_FILE_PATH, f.getAbsolutePath());
@@ -121,35 +111,45 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
+    // ── Module tap ────────────────────────────────────────────────────────────
+    private void onModuleTapped(Module m) {
+        if (m.actionId == ACTION_RECORDER) showRecorderDialog();
+        else if (m.target != null)         startActivity(new Intent(this, m.target));
+    }
+
+    private void showRecorderDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("🎙️ Choose Recording Mode")
+            .setItems(new CharSequence[]{
+                "🎙️  Normal  —  High-quality mic / USB recording",
+                "🔊  Echo    —  Real-time delay · feedback · dry/wet"
+            }, (d, which) -> startActivity(new Intent(this,
+                    which == 0 ? RecordActivity.class : EchoRecordActivity.class)))
+            .setNegativeButton("Cancel", null).show();
+    }
+
     // ── RecyclerView adapter ──────────────────────────────────────────────────
-
     class ModuleAdapter extends RecyclerView.Adapter<ModuleAdapter.VH> {
-
         @Override
         public VH onCreateViewHolder(ViewGroup parent, int viewType) {
-            View v = getLayoutInflater().inflate(R.layout.item_dashboard_module, parent, false);
-            return new VH(v);
+            return new VH(getLayoutInflater().inflate(R.layout.item_dashboard_module, parent, false));
         }
-
         @Override
         public void onBindViewHolder(VH h, int pos) {
             Module m = modules.get(pos);
             h.tvIcon.setText(m.icon);
             h.tvTitle.setText(m.title);
             h.tvSubtitle.setText(m.subtitle);
-            h.card.setCardBackgroundColor(0xFF1A1A1A);
             h.vAccent.setBackgroundColor(m.accentColor);
-            h.card.setOnClickListener(v -> {
-                if (m.target != null) startActivity(new Intent(DashboardActivity.this, m.target));
-            });
+            // Highlight Rhythm Slicer as featured module
+            h.card.setCardBackgroundColor(m.target == RhythmSlicerActivity.class
+                    ? 0xFF1F1008 : 0xFF1A1A1A);
+            h.card.setOnClickListener(v -> onModuleTapped(m));
         }
-
         @Override public int getItemCount() { return modules.size(); }
 
         class VH extends RecyclerView.ViewHolder {
-            CardView card;
-            TextView tvIcon, tvTitle, tvSubtitle;
-            View     vAccent;
+            CardView card; TextView tvIcon, tvTitle, tvSubtitle; View vAccent;
             VH(View v) {
                 super(v);
                 card       = v.findViewById(R.id.card);
