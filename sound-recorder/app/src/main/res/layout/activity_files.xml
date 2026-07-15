@@ -31,11 +31,17 @@
                 android:textStyle="bold"/>
 
             <TextView
+                android:id="@+id/btnProjects"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="v1.0"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp"/>
+                android:text="🗂 Projects"
+                android:textColor="@color/accent_blue"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?android:attr/selectableItemBackground"/>
         </LinearLayout>
 
         <!-- Empty State -->

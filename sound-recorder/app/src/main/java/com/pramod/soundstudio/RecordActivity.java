@@ -1,11 +1,18 @@
 package com.pramod.soundstudio;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.media.AudioDeviceInfo;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.view.View;
 import android.widget.*;
@@ -17,9 +24,19 @@ import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+/**
+ * Recording screen.
+ *
+ * Actual capture is delegated to {@link RecordingService} (a bound + foreground
+ * service) so recording keeps running — with a persistent notification — when
+ * the app is backgrounded or the screen turns off. This Activity binds to the
+ * service, drives the start/stop/pause controls, and renders live timer /
+ * waveform UI from broadcasts + the amplitude callback.
+ */
 public class RecordActivity extends AppCompatActivity {
 
-    private static final int PERM_REQ = 101;
+    private static final int PERM_REQ_MIC   = 101;
+    private static final int PERM_REQ_NOTIF = 102;
 
     // UI
     private TextView    tvUsbStatus, tvTimer, tvStatus;
@@ -30,16 +47,57 @@ public class RecordActivity extends AppCompatActivity {
     private int selectedSampleRate = 44100;
     private int selectedBitDepth   = 16;
 
-    // Recording
-    private AudioRecorderHelper recorder;
+    // Recording (delegated to RecordingService)
     private final Handler       uiHandler   = new Handler(Looper.getMainLooper());
-    private long                startTimeMs = 0;
     private final List<Float>   amplitudes  = new ArrayList<>();
-    private Runnable            timerRunnable;
+
+    private RecordingService    boundService;
+    private boolean             isBound = false;
 
     // USB poll
     private final Handler usbHandler = new Handler(Looper.getMainLooper());
     private Runnable usbPollRunnable;
+
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            boundService = ((RecordingService.LocalBinder) binder).getService();
+            isBound = true;
+            boundService.setAmplitudeCallback(amp -> uiHandler.post(() -> pushAmplitude(amp)));
+            syncUiWithService();
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            boundService = null;
+            isBound = false;
+        }
+    };
+
+    private final BroadcastReceiver recordingReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context ctx, Intent intent) {
+            String action = intent.getAction();
+            if (action == null) return;
+            switch (action) {
+                case "com.pramod.soundstudio.TIMER_TICK": {
+                    long elapsed = intent.getLongExtra("elapsed_ms", 0);
+                    updateTimerText(elapsed);
+                    break;
+                }
+                case "com.pramod.soundstudio.RECORDING_DONE": {
+                    String path  = intent.getStringExtra("file_path");
+                    String error = intent.getStringExtra("error");
+                    onRecordDone(path != null ? new File(path) : null, error);
+                    break;
+                }
+                case "com.pramod.soundstudio.RECORDING_PAUSED":
+                    tvStatus.setText("⏸ PAUSED");
+                    tvStatus.setTextColor(0xFFFF8F00);
+                    break;
+                case "com.pramod.soundstudio.RECORDING_RESUMED":
+                    tvStatus.setText("● RECORDING");
+                    tvStatus.setTextColor(0xFFE53935);
+                    break;
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,15 +121,33 @@ public class RecordActivity extends AppCompatActivity {
         setupSampleRateChips();
         setupBitDepthChips();
 
-        recorder = new AudioRecorderHelper(this);
-        recorder.setOnAmplitude(amp -> uiHandler.post(() -> pushAmplitude(amp)));
-        recorder.setOnDone((file, err) -> uiHandler.post(() -> onRecordDone(file, err)));
-
         btnRecord.setOnClickListener(v -> onRecordClick());
 
         // Bottom nav
         View btnFiles = findViewById(R.id.navFiles);
         if (btnFiles != null) btnFiles.setOnClickListener(v -> finish());
+
+        // Bind to the recording service so we can control/observe an in-progress
+        // recording even if it was started before this Activity instance existed.
+        bindService(new Intent(this, RecordingService.class), connection, BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.pramod.soundstudio.TIMER_TICK");
+        filter.addAction("com.pramod.soundstudio.RECORDING_DONE");
+        filter.addAction("com.pramod.soundstudio.RECORDING_PAUSED");
+        filter.addAction("com.pramod.soundstudio.RECORDING_RESUMED");
+        ContextCompat.registerReceiver(this, recordingReceiver, filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        unregisterReceiver(recordingReceiver);
     }
 
     @Override
@@ -84,6 +160,17 @@ public class RecordActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         usbHandler.removeCallbacks(usbPollRunnable);
+    }
+
+    private void syncUiWithService() {
+        if (boundService == null) return;
+        if (boundService.isRecording()) {
+            btnRecord.setText("⏹ STOP");
+            btnRecord.setBackgroundColor(0xFF880000);
+            tvStatus.setText(boundService.isPaused() ? "⏸ PAUSED" : "● RECORDING");
+            tvStatus.setTextColor(boundService.isPaused() ? 0xFFFF8F00 : 0xFFE53935);
+            updateTimerText(boundService.getElapsedMs());
+        }
     }
 
     // ── USB status poll ──────────────────────────────────────────────────────
@@ -103,7 +190,6 @@ public class RecordActivity extends AppCompatActivity {
         if (usb != null) {
             tvUsbStatus.setText("🟢 USB Audio Connected");
             tvUsbStatus.setTextColor(0xFF4CAF50);
-            recorder.setPreferredDevice(usb);
         } else {
             tvUsbStatus.setText("⚪ No USB Device (Built-in Mic)");
             tvUsbStatus.setTextColor(0xFF888888);
@@ -115,16 +201,10 @@ public class RecordActivity extends AppCompatActivity {
     private void setupFormatSelector() {
         rbWav.setChecked(true);
         rbWav.setOnCheckedChangeListener((btn, checked) -> {
-            if (checked) {
-                recorder.setFormat(AudioRecorderHelper.Format.WAV);
-                llBitDepth.setVisibility(View.VISIBLE);
-            }
+            if (checked) llBitDepth.setVisibility(View.VISIBLE);
         });
         rbCompressed.setOnCheckedChangeListener((btn, checked) -> {
-            if (checked) {
-                recorder.setFormat(AudioRecorderHelper.Format.COMPRESSED);
-                llBitDepth.setVisibility(View.GONE);
-            }
+            if (checked) llBitDepth.setVisibility(View.GONE);
         });
     }
 
@@ -135,7 +215,6 @@ public class RecordActivity extends AppCompatActivity {
         String[] labels = {"22kHz", "44.1kHz", "48kHz", "96kHz"};
         buildChips(llSampleRate, labels, 1 /*default 44.1kHz*/, idx -> {
             selectedSampleRate = rates[idx];
-            recorder.setSampleRate(selectedSampleRate);
             updateFileSizeEstimate();
         });
     }
@@ -147,7 +226,6 @@ public class RecordActivity extends AppCompatActivity {
         String[] labels = {"16-bit", "24-bit"};
         buildChips(llBitDepth, labels, 0 /*default 16-bit*/, idx -> {
             selectedBitDepth = depths[idx];
-            recorder.setBitDepth(selectedBitDepth);
             updateFileSizeEstimate();
         });
     }
@@ -197,7 +275,8 @@ public class RecordActivity extends AppCompatActivity {
     // ── Record button ────────────────────────────────────────────────────────
 
     private void onRecordClick() {
-        if (recorder.isRecording()) {
+        boolean recording = isBound && boundService != null && boundService.isRecording();
+        if (recording) {
             stopRecording();
         } else {
             startRecording();
@@ -208,32 +287,45 @@ public class RecordActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.RECORD_AUDIO}, PERM_REQ);
+                    new String[]{Manifest.permission.RECORD_AUDIO}, PERM_REQ_MIC);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, PERM_REQ_NOTIF);
             return;
         }
 
         amplitudes.clear();
         waveformView.setAmplitudes(new float[0]);
 
-        String ts   = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        File   dir  = new File(getFilesDir(), "recordings");
+        String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
 
-        recorder.setSampleRate(selectedSampleRate);
-        recorder.setBitDepth(selectedBitDepth);
-        recorder.startRecording(dir, "REC_" + ts);
+        Intent startIntent = new Intent(this, RecordingService.class);
+        startIntent.setAction(RecordingService.ACTION_START_RECORDING);
+        startIntent.putExtra(RecordingService.EXTRA_SAMPLE_RATE, selectedSampleRate);
+        startIntent.putExtra(RecordingService.EXTRA_BIT_DEPTH, selectedBitDepth);
+        startIntent.putExtra(RecordingService.EXTRA_FORMAT, rbWav.isChecked() ? "WAV" : "COMPRESSED");
+        startIntent.putExtra(RecordingService.EXTRA_FILE_NAME, "REC_" + ts);
+        ContextCompat.startForegroundService(this, startIntent);
 
-        startTimeMs = System.currentTimeMillis();
         btnRecord.setText("⏹ STOP");
         btnRecord.setBackgroundColor(0xFF880000);
         tvStatus.setText("● RECORDING");
         tvStatus.setTextColor(0xFFE53935);
-
-        startTimer();
+        updateTimerText(0);
     }
 
     private void stopRecording() {
-        recorder.stopRecording();
-        stopTimer();
+        if (isBound && boundService != null) {
+            boundService.stopRecording();
+        } else {
+            Intent stopIntent = new Intent(this, RecordingService.class);
+            stopIntent.setAction(RecordingService.ACTION_STOP_RECORDING);
+            startService(stopIntent);
+        }
         btnRecord.setText("⏺ RECORD");
         btnRecord.setBackgroundColor(0xFFE53935);
         tvStatus.setText("Saving…");
@@ -252,24 +344,12 @@ public class RecordActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
-    // ── Timer ────────────────────────────────────────────────────────────────
+    // ── Timer / waveform ─────────────────────────────────────────────────────
 
-    private void startTimer() {
-        timerRunnable = new Runnable() {
-            @Override public void run() {
-                long elapsed = System.currentTimeMillis() - startTimeMs;
-                long ms   = elapsed % 1000;
-                long secs = (elapsed / 1000) % 60;
-                long mins = elapsed / 60000;
-                tvTimer.setText(String.format(Locale.US, "%02d:%02d.%03d", mins, secs, ms));
-                uiHandler.postDelayed(this, 50);
-            }
-        };
-        uiHandler.post(timerRunnable);
-    }
-
-    private void stopTimer() {
-        if (timerRunnable != null) uiHandler.removeCallbacks(timerRunnable);
+    private void updateTimerText(long elapsedMs) {
+        long secs = (elapsedMs / 1000) % 60;
+        long mins = elapsedMs / 60000;
+        tvTimer.setText(String.format(Locale.US, "%02d:%02d", mins, secs));
     }
 
     private void pushAmplitude(float amp) {
@@ -284,22 +364,27 @@ public class RecordActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] results) {
         super.onRequestPermissionsResult(req, perms, results);
-        if (req == PERM_REQ && results.length > 0
-                && results[0] == PackageManager.PERMISSION_GRANTED) {
+        if (results.length == 0) return;
+        if (req == PERM_REQ_MIC) {
+            if (results[0] == PackageManager.PERMISSION_GRANTED) {
+                onRecordClick();
+            } else {
+                Toast.makeText(this, "Microphone permission required!", Toast.LENGTH_LONG).show();
+            }
+        } else if (req == PERM_REQ_NOTIF) {
+            // Notification permission is best-effort — recording still works without it,
+            // the persistent status notification just won't be visible.
             onRecordClick();
-        } else {
-            Toast.makeText(this, "Microphone permission required!", Toast.LENGTH_LONG).show();
         }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // Clear callbacks FIRST so late onDone/onAmplitude posts don't navigate a dead Activity
-        recorder.setOnAmplitude(null);
-        recorder.setOnDone(null);
-        if (recorder.isRecording()) recorder.stopRecording();
-        stopTimer();
+        if (isBound) {
+            unbindService(connection);
+            isBound = false;
+        }
         uiHandler.removeCallbacksAndMessages(null);
         usbHandler.removeCallbacksAndMessages(null);
     }

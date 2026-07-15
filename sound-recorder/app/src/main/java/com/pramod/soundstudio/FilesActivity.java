@@ -22,6 +22,7 @@ public class FilesActivity extends AppCompatActivity {
     private FilesAdapter    adapter;
     private List<File>      fileList = new ArrayList<>();
     private TextView        tvEmpty;
+    private ProjectManager  projectManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,6 +36,8 @@ public class FilesActivity extends AppCompatActivity {
         adapter = new FilesAdapter();
         recyclerView.setAdapter(adapter);
 
+        projectManager = new ProjectManager(this);
+
         // FAB: go to RecordActivity
         View fab = findViewById(R.id.fabRecord);
         if (fab != null) fab.setOnClickListener(v ->
@@ -44,6 +47,10 @@ public class FilesActivity extends AppCompatActivity {
         View fabImport = findViewById(R.id.fabImport);
         if (fabImport != null) fabImport.setOnClickListener(v ->
                 DeviceFileImporter.launchPicker(this, REQUEST_DEVICE_FILE, true));
+
+        // Top bar: named projects (save/load groups of recordings)
+        View btnProjects = findViewById(R.id.btnProjects);
+        if (btnProjects != null) btnProjects.setOnClickListener(v -> showProjectsDialog());
     }
 
     @Override
@@ -275,6 +282,85 @@ public class FilesActivity extends AppCompatActivity {
                     loadFiles();
                 })
                 .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ── Projects (named groups of recordings, saved via ProjectManager) ──────
+
+    private void showProjectsDialog() {
+        List<ProjectManager.Project> projects = projectManager.listProjects();
+        String[] items = new String[projects.size() + 1];
+        items[0] = "＋ New Project (save current recordings)";
+        for (int i = 0; i < projects.size(); i++) items[i + 1] = "📁 " + projects.get(i).toString();
+
+        new AlertDialog.Builder(this)
+                .setTitle("My Projects")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        showCreateProjectDialog();
+                    } else {
+                        showProjectDetailDialog(projects.get(which - 1));
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void showCreateProjectDialog() {
+        if (fileList.isEmpty()) {
+            Toast.makeText(this, "No recordings to save yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditText input = new EditText(this);
+        input.setHint("Project name");
+        input.setTextColor(0xFFFFFFFF);
+        input.setHintTextColor(0xFF888888);
+
+        List<String> paths = new ArrayList<>();
+        for (File f : fileList) paths.add(f.getAbsolutePath());
+
+        new AlertDialog.Builder(this)
+                .setTitle("New Project")
+                .setMessage(fileList.size() + " recording(s) will be included")
+                .setView(input)
+                .setPositiveButton("Save", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) name = "Untitled";
+                    try {
+                        projectManager.createProject(name, paths, "");
+                        Toast.makeText(this, "✅ Project saved: " + name, Toast.LENGTH_SHORT).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showProjectDetailDialog(ProjectManager.Project project) {
+        List<File> files = new ArrayList<>();
+        for (String p : project.filePaths) {
+            File f = new File(p);
+            if (f.exists()) files.add(f);
+        }
+        String[] names = new String[files.size()];
+        for (int i = 0; i < files.size(); i++) names[i] = files.get(i).getName();
+
+        new AlertDialog.Builder(this)
+                .setTitle(project.name)
+                .setItems(names.length > 0 ? names : new String[]{"(no files found)"},
+                        (dialog, which) -> {
+                            if (which < files.size()) {
+                                Intent i = new Intent(this, EditorActivity.class);
+                                i.putExtra(EditorActivity.EXTRA_FILE_PATH, files.get(which).getAbsolutePath());
+                                startActivity(i);
+                            }
+                        })
+                .setPositiveButton("Delete Project", (d, w) -> {
+                    projectManager.deleteProject(project.id);
+                    Toast.makeText(this, "Project deleted", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Close", null)
                 .show();
     }
 }
