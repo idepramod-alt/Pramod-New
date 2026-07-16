@@ -129,7 +129,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private TextView txtMidiStatus;
     private TextView txtPitchVal;
     private TextView txtTempoVal;
-    private Button[] loopPads = new Button[8];
+    Button[] loopPads = new Button[8];
     private String currentLoopName = "LOOP 1";
     private String pendingSaveLoopName = null;
     private int loopChannelIndex = 1;
@@ -142,9 +142,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private boolean editMode = false;
     private int selectedPad = 0;
     private Uri[] loopUris = new Uri[8];
-    private AudioEngine audioEngine;
+    AudioEngine audioEngine;
     private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
-    private boolean[] loopPlaying = new boolean[8];
+    boolean[] loopPlaying = new boolean[8];
 
     // ── Master Volume Mode ────────────────────────────────────────────────────
     // true  = slider controls ALL pads simultaneously (original behaviour)
@@ -1783,14 +1783,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // ourselves with Handler.postDelayed so both behaviours work correctly.
             final android.os.Handler lpHandler = new android.os.Handler(android.os.Looper.getMainLooper());
             final Runnable[] lpRunnable = new Runnable[]{null};
-            this.loopPads[i].setOnTouchListener(new View.OnTouchListener(this) {
+            this.loopPads[i].setOnTouchListener(new View.OnTouchListener() {
                 final LoopsActivity this$0 = LoopsActivity.this;
 
                 @Override
                 public boolean onTouch(View v, MotionEvent event) throws IllegalStateException {
                     if (event.getAction() == MotionEvent.ACTION_DOWN) {
                         // ── Audio BEFORE visual — fires sound with zero UI overhead ──
-                        this.this$0.handlePadClick(index);
+                        LoopsActivity.this.handlePadClick(index);
                         v.setPressed(true);
                         // Schedule 2-second hold: toggle this pad between LOOP and DRUM mode
                         lpRunnable[0] = () -> {
@@ -1877,12 +1877,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     private void showEditOptions(final int index) {
         String[] options = {"Select Loop Audio", "Clear Loop"};
-        new AlertDialog.Builder(this).setTitle("EDIT LOOP " + (index + 1)).setItems(options, new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.LoopsActivity.17
-            final /* synthetic */ LoopsActivity this$0;
+        new AlertDialog.Builder(this).setTitle("EDIT LOOP " + (index + 1)).setItems(options, new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.17
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface dialog, int which) throws IllegalStateException {
@@ -1892,9 +1888,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     intent.setType("audio/*");
                     intent.addFlags(1);
                     intent.addFlags(64);
-                    this.this$0.startActivityForResult(intent, LoopsActivity.REQ_PICK_LOOP_WAV);
+                    LoopsActivity.this.startActivityForResult(intent, LoopsActivity.REQ_PICK_LOOP_WAV);
                 } else if (which == 1) {
-                    this.this$0.clearLoop(index);
+                    LoopsActivity.this.clearLoop(index);
                 }
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
@@ -1924,21 +1920,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     public void renameLoopDialog() {
         final EditText edt = new EditText(this);
         edt.setText(this.currentLoopName);
-        new AlertDialog.Builder(this).setTitle("Enter Loop Name").setView(edt).setPositiveButton("OK", new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.LoopsActivity.18
-            final /* synthetic */ LoopsActivity this$0;
+        new AlertDialog.Builder(this).setTitle("Enter Loop Name").setView(edt).setPositiveButton("OK", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.18
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface d, int w) {
-                this.this$0.currentLoopName = edt.getText().toString().trim();
-                if (this.this$0.currentLoopName.length() == 0) {
-                    this.this$0.currentLoopName = "LOOP " + this.this$0.loopChannelIndex;
+                LoopsActivity.this.currentLoopName = edt.getText().toString().trim();
+                if (LoopsActivity.this.currentLoopName.length() == 0) {
+                    LoopsActivity.this.currentLoopName = "LOOP " + LoopsActivity.this.loopChannelIndex;
                 }
-                this.this$0.txtLoopChannel.setText(this.this$0.currentLoopName);
-                this.this$0.prefs.edit().putString("loop_name_ch_" + this.this$0.loopChannelIndex, this.this$0.currentLoopName).apply();
+                LoopsActivity.this.txtLoopChannel.setText(LoopsActivity.this.currentLoopName);
+                LoopsActivity.this.prefs.edit().putString("loop_name_ch_" + LoopsActivity.this.loopChannelIndex, LoopsActivity.this.currentLoopName).apply();
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
     }
@@ -1947,22 +1939,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final EditText edt = new EditText(this);
         edt.setHint("Enter Loop Group Name");
         edt.setText(this.currentLoopName);
-        new AlertDialog.Builder(this).setTitle("Save Loop Group As").setView(edt).setPositiveButton("NEXT", new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.LoopsActivity.19
-            final /* synthetic */ LoopsActivity this$0;
+        new AlertDialog.Builder(this).setTitle("Save Loop Group As").setView(edt).setPositiveButton("NEXT", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.19
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface dialog, int which) {
                 String name = edt.getText().toString().trim();
                 if (name.length() != 0) {
-                    this.this$0.pendingSaveLoopName = this.this$0.sanitizeFileName(name);
-                    this.this$0.startActivityForResult(new Intent("android.intent.action.OPEN_DOCUMENT_TREE"), LoopsActivity.REQ_SAVE_LOOP_FOLDER);
+                    LoopsActivity.this.pendingSaveLoopName = LoopsActivity.this.sanitizeFileName(name);
+                    LoopsActivity.this.startActivityForResult(new Intent("android.intent.action.OPEN_DOCUMENT_TREE"), LoopsActivity.REQ_SAVE_LOOP_FOLDER);
                     return;
                 }
-                Toast.makeText(this.this$0, "Name required!", 0).show();
+                Toast.makeText(LoopsActivity.this, "Name required!", 0).show();
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
     }
@@ -2426,10 +2414,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     case 42: case 44: padIndex = 7; break;
                     case 45:
                     case 47:
-                    case ConstraintLayout.LayoutParams.Table.LAYOUT_CONSTRAINT_VERTICAL_CHAINSTYLE /* 48 */:
+                    case 48:
                     case 50: padIndex = 1; break;
                     case 46: padIndex = 6; break;
-                    case ConstraintLayout.LayoutParams.Table.LAYOUT_EDITOR_ABSOLUTEX /* 49 */: padIndex = 0; break;
+                    case 49: padIndex = 0; break;
                 }
                 if (padIndex == -1) padIndex = (note & 0xFF) % 8;
             }
@@ -2441,31 +2429,23 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     : 1.0f;
             // Fire audio immediately on MIDI thread (zero UI-thread latency)
             final boolean audioAlreadyTriggered = midiTriggerDrumPadImmediate(finalPadIndex, velScale);
-            runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.LoopsActivity.22
-                final /* synthetic */ LoopsActivity this$0;
+            runOnUiThread(new Runnable() { // from class: com.pramod.loopmidi.LoopsActivity.22
 
-                {
-                    this.this$0 = this;
-                }
 
                 @Override // java.lang.Runnable
                 public void run() throws IllegalStateException {
                     int i = finalPadIndex;
                     if (i >= 0 && i < 8) {
-                        this.this$0.loopPads[finalPadIndex].setPressed(true);
-                        this.this$0.handlePadClick(finalPadIndex, audioAlreadyTriggered);
+                        LoopsActivity.this.loopPads[finalPadIndex].setPressed(true);
+                        LoopsActivity.this.handlePadClick(finalPadIndex, audioAlreadyTriggered);
                         Handler handler = new Handler(Looper.getMainLooper());
                         final int i2 = finalPadIndex;
-                        handler.postDelayed(new Runnable(this) { // from class: com.pramod.loopmidi.LoopsActivity.22.1
-                            final /* synthetic */ AnonymousClass22 this$1;
+                        handler.postDelayed(new Runnable() { // from class: com.pramod.loopmidi.LoopsActivity.22.1
 
-                            {
-                                this.this$1 = this;
-                            }
 
                             @Override // java.lang.Runnable
                             public void run() {
-                                this.this$1.this$0.loopPads[i2].setPressed(false);
+                                LoopsActivity.this.loopPads[i2].setPressed(false);
                             }
                         }, 100L);
                     }

@@ -415,32 +415,24 @@ public class MainActivity extends Activity {
                     ? Math.min(1.4f, 0.2f + 1.2f * ((velocity & 0xFF) / 127.0f))
                     : 1.0f;
             playPadSoundImmediate(finalPadIndex, velScale);
-            runOnUiThread(new Runnable(this) { // from class: com.pramod.loopmidi.MainActivity.3
-                final /* synthetic */ MainActivity this$0;
+            runOnUiThread(new Runnable() { // from class: com.pramod.loopmidi.MainActivity.3
 
-                {
-                    this.this$0 = this;
-                }
 
                 @Override // java.lang.Runnable
                 public void run() {
                     try {
-                        this.this$0.pads[finalPadIndex].setPressed(true);
+                        MainActivity.this.pads[finalPadIndex].setPressed(true);
                     } catch (Exception e) {
                     }
                     Handler handler = new Handler(Looper.getMainLooper());
                     final int i = finalPadIndex;
-                    handler.postDelayed(new Runnable(this) { // from class: com.pramod.loopmidi.MainActivity.3.1
-                        final /* synthetic */ AnonymousClass3 this$1;
+                    handler.postDelayed(new Runnable() { // from class: com.pramod.loopmidi.MainActivity.3.1
 
-                        {
-                            this.this$1 = this;
-                        }
 
                         @Override // java.lang.Runnable
                         public void run() {
                             try {
-                                this.this$1.this$0.pads[i].setPressed(false);
+                                MainActivity.this.pads[i].setPressed(false);
                             } catch (Exception e2) {
                             }
                         }
@@ -1181,42 +1173,38 @@ public class MainActivity extends Activity {
         String copyText = this.copySourcePad == -1 ? "Pad Sound Copy (Select Source)" : "Pad Sound Copy (Paste Mode ON)";
         String swapText = this.swapSourcePad == -1 ? "Pad Sound Exchange (Select First Pad)" : "Pad Sound Exchange (Swap Mode ON)";
         String[] options = {"Pad Select Sound", copyText, swapText, "Clear Pad Sound"};
-        new AlertDialog.Builder(this).setTitle("PAD " + (padIndex + 1) + " - EDIT OPTIONS").setItems(options, new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.MainActivity.21
-            final /* synthetic */ MainActivity this$0;
+        new AlertDialog.Builder(this).setTitle("PAD " + (padIndex + 1) + " - EDIT OPTIONS").setItems(options, new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.21
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface dialog, int which) {
                 if (which != 0) {
                     if (which == 1) {
-                        this.this$0.copySourcePad = padIndex;
-                        this.this$0.swapSourcePad = -1;
-                        Toast.makeText(this.this$0, "Copy Mode ON: Now tap target PAD to paste", 0).show();
+                        MainActivity.this.copySourcePad = padIndex;
+                        MainActivity.this.swapSourcePad = -1;
+                        Toast.makeText(MainActivity.this, "Copy Mode ON: Now tap target PAD to paste", 0).show();
                         return;
                     } else if (which == 2) {
-                        this.this$0.swapSourcePad = padIndex;
-                        this.this$0.copySourcePad = -1;
-                        Toast.makeText(this.this$0, "Exchange Mode ON: Now tap second PAD to swap", 0).show();
+                        MainActivity.this.swapSourcePad = padIndex;
+                        MainActivity.this.copySourcePad = -1;
+                        Toast.makeText(MainActivity.this, "Exchange Mode ON: Now tap second PAD to swap", 0).show();
                         return;
                     } else if (which == 3) {
-                        this.this$0.selectedWavUris[padIndex] = null;
-                        this.this$0.selectedRawResIds[padIndex] = 0;
-                        this.this$0.samples[padIndex] = null;
-                        this.this$0.padVolume[padIndex] = 0.8f;
-                        this.this$0.padPitch[padIndex] = 1.0f;
-                        this.this$0.padDelayOn[padIndex] = false;
-                        this.this$0.padDelayTime[padIndex] = 150.0f;
-                        this.this$0.padDelayLevel[padIndex] = 0.5f;
-                        this.this$0.padEqHigh[padIndex] = 0.0f;
-                        this.this$0.padEqMid[padIndex] = 0.0f;
-                        this.this$0.padEqLow[padIndex] = 0.0f;
-                        this.this$0.padChokeGroup[padIndex] = 0;
-                        MainActivity mainActivity = this.this$0;
+                        MainActivity.this.selectedWavUris[padIndex] = null;
+                        MainActivity.this.selectedRawResIds[padIndex] = 0;
+                        MainActivity.this.samples[padIndex] = null;
+                        MainActivity.this.padVolume[padIndex] = 0.8f;
+                        MainActivity.this.padPitch[padIndex] = 1.0f;
+                        MainActivity.this.padDelayOn[padIndex] = false;
+                        MainActivity.this.padDelayTime[padIndex] = 150.0f;
+                        MainActivity.this.padDelayLevel[padIndex] = 0.5f;
+                        MainActivity.this.padEqHigh[padIndex] = 0.0f;
+                        MainActivity.this.padEqMid[padIndex] = 0.0f;
+                        MainActivity.this.padEqLow[padIndex] = 0.0f;
+                        MainActivity.this.padChokeGroup[padIndex] = 0;
+                        MainActivity mainActivity = MainActivity.this;
                         mainActivity.saveKitToMemory(mainActivity.kitIndex);
-                        Toast.makeText(this.this$0, "PAD " + (padIndex + 1) + " Cleared!", 0).show();
+                        Toast.makeText(MainActivity.this, "PAD " + (padIndex + 1) + " Cleared!", 0).show();
                         return;
                     } else {
                         return;
@@ -1227,7 +1215,7 @@ public class MainActivity extends Activity {
                 intent.setType("audio/*");
                 intent.addFlags(1);
                 intent.addFlags(64);
-                this.this$0.startActivityForResult(intent, MainActivity.REQ_PICK_SINGLE_WAV);
+                MainActivity.this.startActivityForResult(intent, MainActivity.REQ_PICK_SINGLE_WAV);
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
     }
@@ -1431,22 +1419,18 @@ public class MainActivity extends Activity {
         final EditText edt = new EditText(this);
         edt.setHint("Enter Kit Name");
         edt.setText(this.currentKitName);
-        new AlertDialog.Builder(this).setTitle("Save Kit As").setView(edt).setPositiveButton("NEXT", new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.MainActivity.22
-            final /* synthetic */ MainActivity this$0;
+        new AlertDialog.Builder(this).setTitle("Save Kit As").setView(edt).setPositiveButton("NEXT", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.22
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface dialog, int which) {
                 String name = edt.getText().toString().trim();
                 if (name.length() != 0) {
-                    this.this$0.pendingSaveKitName = this.this$0.sanitizeFileName(name);
-                    this.this$0.startActivityForResult(new Intent("android.intent.action.OPEN_DOCUMENT_TREE"), MainActivity.REQ_SAVE_FOLDER);
+                    MainActivity.this.pendingSaveKitName = MainActivity.this.sanitizeFileName(name);
+                    MainActivity.this.startActivityForResult(new Intent("android.intent.action.OPEN_DOCUMENT_TREE"), MainActivity.REQ_SAVE_FOLDER);
                     return;
                 }
-                Toast.makeText(this.this$0, "Kit name required!", 0).show();
+                Toast.makeText(MainActivity.this, "Kit name required!", 0).show();
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
     }
@@ -1454,22 +1438,18 @@ public class MainActivity extends Activity {
     public void renameKitDialog() {
         final EditText edt = new EditText(this);
         edt.setText(this.currentKitName);
-        new AlertDialog.Builder(this).setTitle("Enter Kit Name").setView(edt).setPositiveButton("OK", new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.MainActivity.23
-            final /* synthetic */ MainActivity this$0;
+        new AlertDialog.Builder(this).setTitle("Enter Kit Name").setView(edt).setPositiveButton("OK", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.23
 
-            {
-                this.this$0 = this;
-            }
 
             @Override // android.content.DialogInterface.OnClickListener
             public void onClick(DialogInterface d, int w) {
-                this.this$0.currentKitName = edt.getText().toString().trim();
-                if (this.this$0.currentKitName.length() == 0) {
-                    this.this$0.currentKitName = "KIT " + this.this$0.kitIndex;
+                MainActivity.this.currentKitName = edt.getText().toString().trim();
+                if (MainActivity.this.currentKitName.length() == 0) {
+                    MainActivity.this.currentKitName = "KIT " + MainActivity.this.kitIndex;
                 }
-                this.this$0.txtKitName.setText(this.this$0.currentKitName);
-                MainActivity mainActivity = this.this$0;
-                Log.i(MainActivity.TAG, "renameKitDialog: saving kit name='" + this.this$0.currentKitName + "' for kitNo=" + mainActivity.kitIndex);
+                MainActivity.this.txtKitName.setText(MainActivity.this.currentKitName);
+                MainActivity mainActivity = MainActivity.this;
+                Log.i(MainActivity.TAG, "renameKitDialog: saving kit name='" + MainActivity.this.currentKitName + "' for kitNo=" + mainActivity.kitIndex);
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
@@ -2003,23 +1983,19 @@ public class MainActivity extends Activity {
             }
             String[] items = (String[]) kitNames.toArray(new String[0]);
             DialogInterface.OnClickListener onClickListener = null;
-            new AlertDialog.Builder(this).setTitle("Select Kit").setItems(items, new DialogInterface.OnClickListener(this) { // from class: com.pramod.loopmidi.MainActivity.25
-                final /* synthetic */ MainActivity this$0;
+            new AlertDialog.Builder(this).setTitle("Select Kit").setItems(items, new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.25
 
-                {
-                    this.this$0 = this;
-                }
 
                 @Override // android.content.DialogInterface.OnClickListener
                 public void onClick(DialogInterface dialog, int which) {
                     DocumentFile selectedKitFolder = (DocumentFile) kitFolders.get(which);
                     try {
-                        this.this$0.loadKitFromFolder(selectedKitFolder.getUri());
+                        MainActivity.this.loadKitFromFolder(selectedKitFolder.getUri());
                     } catch (IOException e) {
-                        Toast.makeText(this.this$0, "Error loading kit: " + e.getMessage(), 0).show();
+                        Toast.makeText(MainActivity.this, "Error loading kit: " + e.getMessage(), 0).show();
                         e.printStackTrace();
                     }
-                    MainActivity mainActivity = this.this$0;
+                    MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
             }).setNeutralButton("Change Folder", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.24
