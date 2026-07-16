@@ -1777,9 +1777,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.loopPads[i].setSoundEffectsEnabled(false);
             final int index = i;
 
-            // Touch listener: ACTION_DOWN = play immediately; 2-second hold = toggle
+            // Touch listener: ACTION_DOWN = play immediately; 1-second hold = toggle
             // LOOP/DRUM mode. Note: because ACTION_DOWN returns true (consumed), Android's
-            // built-in setOnLongClickListener never fires — we implement the 2-sec hold
+            // built-in setOnLongClickListener never fires — we implement the 1-sec hold
             // ourselves with Handler.postDelayed so both behaviours work correctly.
             final android.os.Handler lpHandler = new android.os.Handler(android.os.Looper.getMainLooper());
             final Runnable[] lpRunnable = new Runnable[]{null};
@@ -1792,7 +1792,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         // ── Audio BEFORE visual — fires sound with zero UI overhead ──
                         LoopsActivity.this.handlePadClick(index);
                         v.setPressed(true);
-                        // Schedule 2-second hold: toggle this pad between LOOP and DRUM mode
+                        // Schedule 1-second hold: toggle this pad between LOOP and DRUM mode
                         lpRunnable[0] = () -> {
                             boolean currentlyDrum = LoopsActivity.this.padModeOverride[index]
                                     ? LoopsActivity.this.padDrumMode[index]
@@ -1814,15 +1814,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                 .apply();
                             String modeStr = LoopsActivity.this.padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
                             LoopsActivity.this.txtLoopStatus.setText(
-                                "PAD " + (index + 1) + " → " + modeStr + " MODE (2-sec hold to toggle)");
+                                "PAD " + (index + 1) + " → " + modeStr + " MODE (1-sec hold to toggle)");
                             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
                         };
-                        lpHandler.postDelayed(lpRunnable[0], 2000);
+                        lpHandler.postDelayed(lpRunnable[0], 1000);
                         return true;
                     } else if (event.getAction() == MotionEvent.ACTION_UP
                             || event.getAction() == MotionEvent.ACTION_CANCEL) {
                         v.setPressed(false);
-                        // Cancel the 2-sec toggle if finger lifted before 2 seconds
+                        // Cancel the 1-sec toggle if finger lifted before 1 second
                         if (lpRunnable[0] != null) lpHandler.removeCallbacks(lpRunnable[0]);
                         return true;
                     }
@@ -1831,7 +1831,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             });
             // setOnLongClickListener intentionally removed — ACTION_DOWN is consumed by
             // onTouch above, which prevents the system long-click from ever firing.
-            // The 2-second hold toggle is handled entirely in the touch listener above.
+            // The 1-second hold toggle is handled entirely in the touch listener above.
 
             // Apply initial visual state (orange border for drum mode, dark for loop mode)
             updatePadLabel(index);
