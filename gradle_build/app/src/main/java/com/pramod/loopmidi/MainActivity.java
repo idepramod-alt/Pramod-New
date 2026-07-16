@@ -1873,7 +1873,7 @@ public class MainActivity extends Activity {
                                 } catch (Exception e3) {
 
                                     try {
-                                        e.printStackTrace();
+                                        e3.printStackTrace();
                                         Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
                                         root2 = root;
                                         eqLArray2 = eqLArray;
