@@ -1266,7 +1266,6 @@ public class MainActivity extends Activity {
                         this.samples[toPad] = this.audioEngine.loadRawSound(toPad, i);
                     }
                 } catch (IOException e2) {
-                    e2.getMessage() /* was e=e2 */);
                     Toast.makeText(this, "Error copying sound: " + e2.getMessage(), 0).show();
                     this.samples[toPad] = null;
                     saveKitToMemory(this.kitIndex);
