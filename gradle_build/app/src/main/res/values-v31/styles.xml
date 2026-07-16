@@ -122,6 +122,9 @@
         <item name="colorTertiaryFixedDim">@color/m3_sys_color_dynamic_tertiary_fixed_dim</item>
         <item name="isMaterial3DynamicColorApplied">true</item>
     </style>
+    <!-- Base style required by name-inheritance: .Dark and .Light are children of this -->
+    <style name="ThemeOverlay.Material3.DynamicColors" parent="">
+    </style>
     <style name="ThemeOverlay.Material3.DynamicColors.Dark">
         <item name="android:colorBackground">@color/m3_sys_color_dynamic_dark_background</item>
         <item name="android:textColorPrimary">@color/m3_dynamic_dark_default_color_primary_text</item>
