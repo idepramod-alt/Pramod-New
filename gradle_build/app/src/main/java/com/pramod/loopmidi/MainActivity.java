@@ -402,10 +402,10 @@ public class MainActivity extends Activity {
                     case 42: case 44: padIndex = 7; break;
                     case 45:
                     case 47:
-                    case ConstraintLayout.LayoutParams.Table.LAYOUT_CONSTRAINT_VERTICAL_CHAINSTYLE /* 48 */:
+                    case 48:
                     case 50: padIndex = 1; break;
                     case 46: padIndex = 6; break;
-                    case ConstraintLayout.LayoutParams.Table.LAYOUT_EDITOR_ABSOLUTEX /* 49 */: padIndex = 0; break;
+                    case 49: padIndex = 0; break;
                 }
                 if (padIndex == -1) padIndex = (note & 0xFF) % 8;
             }
@@ -1251,7 +1251,6 @@ public class MainActivity extends Activity {
             try {
                 this.samples[toPad] = this.audioEngine.loadWavFromUri(toPad, uri);
             } catch (IOException e) {
-                e = e;
                 Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
                 this.samples[toPad] = null;
                 saveKitToMemory(this.kitIndex);
@@ -1267,14 +1266,14 @@ public class MainActivity extends Activity {
                         this.samples[toPad] = this.audioEngine.loadRawSound(toPad, i);
                     }
                 } catch (IOException e2) {
-                    e = e2;
-                    Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
+                    e2.getMessage() /* was e=e2 */);
+                    Toast.makeText(this, "Error copying sound: " + e2.getMessage(), 0).show();
                     this.samples[toPad] = null;
                     saveKitToMemory(this.kitIndex);
                     Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
                 }
             } catch (IOException e3) {
-                e = e3;
+
             }
         }
         saveKitToMemory(this.kitIndex);
@@ -1333,7 +1332,6 @@ public class MainActivity extends Activity {
         try {
             uri = uriArr[padA];
         } catch (IOException e) {
-            e = e;
         }
         try {
             if (uri != null) {
@@ -1358,8 +1356,8 @@ public class MainActivity extends Activity {
                 }
             }
         } catch (IOException e2) {
-            e = e2;
-            Toast.makeText(this, "Error swapping sounds: " + e.getMessage(), 0).show();
+
+            Toast.makeText(this, "Error swapping sounds: " + e2.getMessage(), 0).show();
             this.samples[padA] = null;
             this.samples[padB] = null;
             saveKitToMemory(this.kitIndex);
@@ -1860,11 +1858,10 @@ public class MainActivity extends Activity {
                                         eqLArray.put(this.padEqLow[i4]);
                                         chokeArray = chokeArray2;
                                     } catch (Exception e) {
-                                        e = e;
                                         chokeArray = chokeArray2;
                                     }
                                 } catch (Exception e2) {
-                                    e = e2;
+
                                     i2 = i22;
                                     eqLArray = eqLArray2;
                                     chokeArray = chokeArray2;
@@ -1875,7 +1872,7 @@ public class MainActivity extends Activity {
                                     root2 = root22;
                                     kitFolder2 = kitFolder22;
                                 } catch (Exception e3) {
-                                    e = e3;
+
                                     try {
                                         e.printStackTrace();
                                         Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
@@ -1888,20 +1885,20 @@ public class MainActivity extends Activity {
                                         i = 8;
                                         dataFile2 = dataFile;
                                     } catch (Exception e4) {
-                                        e2 = e4;
-                                        e2.printStackTrace();
+
+                                        e4.printStackTrace();
                                         Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
                                     }
                                 }
                             } catch (Exception e5) {
-                                e = e5;
+
                                 eqMArray = eqMArray2;
                                 chokeArray = chokeArray2;
                                 i2 = i22;
                                 eqLArray = eqLArray2;
                             }
                         } catch (Exception e6) {
-                            e = e6;
+
                             root = kitFolder3;
                             dataFile = dataFile2;
                             eqMArray = eqMArray2;
@@ -1933,7 +1930,7 @@ public class MainActivity extends Activity {
                         out.close();
                     }
                 } catch (Exception e7) {
-                    e2 = e7;
+
                 }
             }
             Toast.makeText(this, "Kit Saved: " + this.currentKitName, 0).show();
