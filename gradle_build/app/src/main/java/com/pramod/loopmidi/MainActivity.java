@@ -1271,7 +1271,7 @@ public class MainActivity extends Activity {
                     saveKitToMemory(this.kitIndex);
                     Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
                 }
-            } catch (IOException e3) {
+            } catch (Exception e3) {
 
             }
         }
@@ -1280,7 +1280,7 @@ public class MainActivity extends Activity {
     }
 
     public void swapPadSound(int padA, int padB) {
-        Uri uri;
+        Uri uri = null;
         if (padA == padB) {
             return;
         }
@@ -1330,7 +1330,7 @@ public class MainActivity extends Activity {
         fArr7[padB] = tempChoke;
         try {
             uri = uriArr[padA];
-        } catch (IOException e) {
+        } catch (Exception e) {
         }
         try {
             if (uri != null) {
@@ -1537,7 +1537,12 @@ public class MainActivity extends Activity {
             } else if (rawResId != 0) {
                 this.selectedWavUris[i] = null;
                 this.selectedRawResIds[i] = rawResId;
-                this.samples[i] = this.audioEngine.loadRawSound(i, rawResId);
+                try {
+                    this.samples[i] = this.audioEngine.loadRawSound(i, rawResId);
+                } catch (IOException e) {
+                    this.samples[i] = null;
+                    e.printStackTrace();
+                }
                 AudioEngine.SampleData sampleData2 = this.samples[i];
                 if (sampleData2 != null) {
                     this.audioEngine.preloadSample(sampleData2);
@@ -1549,7 +1554,12 @@ public class MainActivity extends Activity {
                 } else {
                     this.selectedRawResIds[i] = this.presetKits[0][i];
                 }
-                this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
+                try {
+                    this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
+                } catch (IOException e) {
+                    this.samples[i] = null;
+                    e.printStackTrace();
+                }
                 AudioEngine.SampleData sampleData3 = this.samples[i];
                 if (sampleData3 != null) {
                     this.audioEngine.preloadSample(sampleData3);
@@ -1569,11 +1579,11 @@ public class MainActivity extends Activity {
     public void loadKitFromFolder(Uri folderUri) throws IOException {
         int i;
         String folderName;
-        DocumentFile dataFile;
-        DocumentFile kitFolder;
-        JSONArray dlyLArray;
-        JSONArray eqHArray;
-        DocumentFile kitFolder2;
+        DocumentFile dataFile = null;
+        DocumentFile kitFolder = null;
+        JSONArray dlyLArray = null;
+        JSONArray eqHArray = null;
+        DocumentFile kitFolder2 = null;
         try {
             DocumentFile kitFolder3 = DocumentFile.fromTreeUri(this, folderUri);
             if (kitFolder3 == null) {
@@ -1776,7 +1786,7 @@ public class MainActivity extends Activity {
         JSONArray chokeArray;
         int i2;
         JSONArray eqLArray;
-        DocumentFile root2;
+        DocumentFile root2 = null;
         try {
             DocumentFile root3 = DocumentFile.fromTreeUri(this, folderUri);
             if (root3 == null) {
