@@ -43,5 +43,11 @@
             android:exported="true"
             android:screenOrientation="landscape"/>
 
+        <!-- Octapad drum pad screen (launched from LoopsActivity) -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"/>
+
     </application>
 </manifest>

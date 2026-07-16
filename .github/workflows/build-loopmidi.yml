@@ -31,8 +31,8 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Platform 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android SDK Platform 35 + NDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;25.2.9519653"
 
       # ── 4. Install Gradle 8.11.1 (needed to run 'gradle wrapper') ─────────
       # ubuntu-latest does NOT ship the Gradle CLI; this action installs it.
