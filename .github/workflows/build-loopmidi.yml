@@ -19,7 +19,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. JDK 17 (required for AGP 9.x) ─────────────────────────────────
+      # ── 2. JDK 17 (required for AGP 8.x) ─────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -27,26 +27,28 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # ── 3. Android SDK (compileSdk 34) ────────────────────────────────────
+      # ── 3. Android SDK (compileSdk 35) ────────────────────────────────────
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK Platform 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      # ── 4. Create Gradle wrapper (AGP 9.0 needs Gradle 8.11+) ─────────────
-      # Gradle 9.x requires a settings file even for an empty project,
-      # so we create one before running 'gradle wrapper' in the temp dir.
-      - name: Create Gradle wrapper
-        run: |
-          mkdir -p /tmp/gradle-init
-          echo 'rootProject.name = "tmp"' > /tmp/gradle-init/settings.gradle
-          cd /tmp/gradle-init
-          gradle wrapper --gradle-version 8.11.1 --distribution-type all
-          cp -r gradle gradlew gradlew.bat $GITHUB_WORKSPACE/gradle_build/
-          chmod +x $GITHUB_WORKSPACE/gradle_build/gradlew
+      # ── 4. Install Gradle 8.11.1 (needed to run 'gradle wrapper') ─────────
+      # ubuntu-latest does NOT ship the Gradle CLI; this action installs it.
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-      # ── 5. Cache Gradle files ──────────────────────────────────────────────
+      # ── 5. Create Gradle wrapper inside the project ───────────────────────
+      - name: Create Gradle wrapper
+        working-directory: gradle_build
+        run: |
+          gradle wrapper --gradle-version 8.11.1 --distribution-type all
+          chmod +x gradlew
+
+      # ── 6. Cache Gradle files ──────────────────────────────────────────────
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -57,7 +59,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-loopmidi-
 
-      # ── 6. Build Debug APK ─────────────────────────────────────────────────
+      # ── 7. Build Debug APK ─────────────────────────────────────────────────
       - name: Build Debug APK
         working-directory: gradle_build
         run: |
@@ -68,12 +70,12 @@ jobs:
             --warning-mode all \
             2>&1 | tee /tmp/build_debug.log
 
-      # ── 7. Show logs on failure ────────────────────────────────────────────
+      # ── 8. Show logs on failure ────────────────────────────────────────────
       - name: Show build log on failure
         if: failure()
         run: tail -n 400 /tmp/build_debug.log || true
 
-      # ── 8. Collect APK ────────────────────────────────────────────────────
+      # ── 9. Collect APK ────────────────────────────────────────────────────
       - name: Rename APK
         if: success()
         run: |
@@ -84,7 +86,7 @@ jobs:
           cp "$SRC" "artifacts/PramodOctapad-v1.0-debug-${SHORT}.apk"
           echo "=== Built APK ===" && ls -lh artifacts/
 
-      # ── 9. Upload APK artifact ────────────────────────────────────────────
+      # ── 10. Upload APK artifact ────────────────────────────────────────────
       - name: Upload Debug APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -94,7 +96,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 10. Build summary ─────────────────────────────────────────────────
+      # ── 11. Build summary ─────────────────────────────────────────────────
       - name: Print build summary
         if: always()
         run: |

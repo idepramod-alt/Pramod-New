@@ -36,14 +36,21 @@ jobs:
       - name: Install Android SDK Platform 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      # ── 4. Gradle Wrapper (project has no bundled gradlew) ─────────────────
+      # ── 4. Install Gradle 8.9 (needed to run 'gradle wrapper') ────────────
+      # ubuntu-latest does NOT ship the Gradle CLI; this action installs it.
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # ── 5. Gradle Wrapper (project has no bundled gradlew) ─────────────────
       - name: Create Gradle wrapper (8.9)
         working-directory: sound-recorder
         run: |
           gradle wrapper --gradle-version 8.9 --distribution-type all
           chmod +x gradlew
 
-      # ── 5. Cache Gradle files ──────────────────────────────────────────────
+      # ── 6. Cache Gradle files ──────────────────────────────────────────────
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -54,7 +61,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # ── 6. Build Debug APK ─────────────────────────────────────────────────
+      # ── 7. Build Debug APK ─────────────────────────────────────────────────
       - name: Build Debug APK
         working-directory: sound-recorder
         run: |
@@ -65,7 +72,7 @@ jobs:
             --warning-mode all \
             2>&1 | tee /tmp/build_debug.log
 
-      # ── 7. Build Release APK (unsigned) ───────────────────────────────────
+      # ── 8. Build Release APK (unsigned) ───────────────────────────────────
       - name: Build Release APK (unsigned)
         working-directory: sound-recorder
         run: |
@@ -75,7 +82,7 @@ jobs:
             --stacktrace \
             2>&1 | tee /tmp/build_release.log
 
-      # ── 8. Show logs on failure ────────────────────────────────────────────
+      # ── 9. Show logs on failure ────────────────────────────────────────────
       - name: Show build log on failure
         if: failure()
         run: |
@@ -84,7 +91,7 @@ jobs:
           echo "===== RELEASE BUILD LOG (last 100 lines) ====="
           tail -n 100 /tmp/build_release.log 2>/dev/null || true
 
-      # ── 9. Rename APKs with version + commit SHA ──────────────────────────
+      # ── 10. Rename APKs with version + commit SHA ──────────────────────────
       - name: Rename APK files
         if: success()
         run: |
@@ -98,7 +105,7 @@ jobs:
           echo "=== Built APKs ==="
           ls -lh artifacts/
 
-      # ── 10. Upload Debug APK ───────────────────────────────────────────────
+      # ── 11. Upload Debug APK ───────────────────────────────────────────────
       - name: Upload Debug APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -108,7 +115,7 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      # ── 11. Upload Release APK (unsigned) ─────────────────────────────────
+      # ── 12. Upload Release APK (unsigned) ─────────────────────────────────
       - name: Upload Release APK (unsigned)
         if: success()
         uses: actions/upload-artifact@v4
@@ -118,7 +125,7 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      # ── 12. Build summary ──────────────────────────────────────────────────
+      # ── 13. Build summary ──────────────────────────────────────────────────
       - name: Print build summary
         if: always()
         run: |
