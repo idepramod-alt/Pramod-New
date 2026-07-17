@@ -160,14 +160,14 @@ public class MainActivity extends Activity {
     public void onStopLoopClick(View view) {
         try {
             LoopsActivity loopsActivity = LoopsActivity.globalInstance;
-            if (loopsActivity != null) {
+            if (loopsActivity != null && loopsActivity.audioEngine != null) {
+                // Use stopAll() — same as LoopsActivity's own Stop button.
+                // This silences every voice regardless of loopPlaying state.
+                loopsActivity.audioEngine.stopAll();
                 for (int i = 0; i < 8; i++) {
-                    if (loopsActivity.loopPlaying[i]) {
-                        loopsActivity.audioEngine.stopPad(i);
-                        loopsActivity.loopPlaying[i] = false;
-                        loopsActivity.loopPads[i].setBackgroundResource(R.drawable.pad_black_selector);
-                    }
+                    loopsActivity.loopPlaying[i] = false;
                 }
+                // UI (pad colours) will refresh when LoopsActivity next resumes.
             }
         } catch (Throwable th) {
         }
@@ -726,6 +726,10 @@ public class MainActivity extends Activity {
                 @Override // android.view.View.OnClickListener
                 public void onClick(View v) {
                     Intent intent = new Intent(MainActivity.this, LoopsActivity.class);
+                    // REORDER_TO_FRONT: if a LoopsActivity is already alive in the
+                    // back stack (background playback mode), bring it to front instead
+                    // of creating a second instance on top of it.
+                    intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
                     MainActivity.this.startActivity(intent);
                 }
             });

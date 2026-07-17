@@ -71,6 +71,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private static final int REQ_SAVE_LOOP_FOLDER = 6002;
     private static final int REQ_PICK_FILE_SOUND  = 6010;
     public static LoopsActivity globalInstance;
+    /**
+     * Full APK only: set to true just before we reorder MainActivity to front
+     * so onPause() knows NOT to stop the currently-playing loops.
+     * MainActivity's Stop button will stop them via globalInstance.
+     */
+    public static boolean sBackgroundPlayback = false;
     private View advancedControlPanel;
     private Button btnAdvancedLoops;
     private Button btnBack;
@@ -873,6 +879,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     protected void onPause() {
         super.onPause();
         this.isVisible = false;
+
+        // Full APK back-to-main: keep loops running in background.
+        // sBackgroundPlayback is set in onBackPressed() just before we reorder
+        // MainActivity to front without finishing this activity.
+        if (sBackgroundPlayback) {
+            sBackgroundPlayback = false; // consume the flag
+            // Loops keep playing — don't call stopPad().
+            // Push settings but leave loopPlaying[] and audio untouched.
+            CloudSync.pushCurrentUserSettings(this);
+            return;
+        }
+
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
@@ -882,6 +900,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // Push the latest loop/pad settings to Firebase for the signed-in account
         CloudSync.pushCurrentUserSettings(this);
+    }
+
+    @Override // android.app.Activity
+    public void onBackPressed() {
+        if (BuildConfig.FLAVOR.equals("full")) {
+            // Full APK: pressing back while a loop is playing should keep the
+            // audio going so the user can work pads in MainActivity while the
+            // loop runs.  We reorder MainActivity to the front WITHOUT calling
+            // finish(), so this LoopsActivity instance survives in the back stack.
+            // onPause() will see sBackgroundPlayback=true and skip stopPad().
+            sBackgroundPlayback = true;
+            Intent backIntent = new Intent(this, MainActivity.class);
+            backIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            startActivity(backIntent);
+            // Do NOT call super — that would finish() this activity.
+        } else {
+            // Loops-only APK: default back = exit the app normally.
+            super.onBackPressed();
+        }
     }
 
     @Override // android.app.Activity
