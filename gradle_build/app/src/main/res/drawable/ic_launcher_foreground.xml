@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/ic_launcher_fore"
-    android:gravity="fill"/>
+<!--
+    Adaptive icon foreground.
+    Android shows only the center 66.7% (72dp out of 108dp) of the adaptive
+    canvas — "gravity=fill" was stretching the image to fill all 108dp so
+    ~17% on each edge was cropped.  The inset drawable adds 17% padding on
+    every side so the full logo always sits within the guaranteed safe zone.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_fore"
+    android:inset="17%"/>
