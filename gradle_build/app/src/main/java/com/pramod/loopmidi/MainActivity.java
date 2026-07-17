@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
     private static final String KEY_EDIT_MODE = "edit_mode";
     private static final String KEY_KIT_INDEX = "kit_index";
     private static final String KEY_LAST_LIST_FOLDER_URI = "last_list_folder_uri";
-    private static final int MAX_KITS = 50;
+    private static final int MAX_KITS = 100;
     private static final int PAD_COUNT = 8;
     private static final String PREF_NAME = "OctapadSettings";
     private static final int REQ_LIST_FOLDER = 2003;
@@ -888,7 +888,7 @@ public class MainActivity extends Activity {
         this.btnNextKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.8
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
-                if (MainActivity.this.kitIndex < 50) {
+                if (MainActivity.this.kitIndex < 100) {
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                     MainActivity.access$1208(MainActivity.this);
