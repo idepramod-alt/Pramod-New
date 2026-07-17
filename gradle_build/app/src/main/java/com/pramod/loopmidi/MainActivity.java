@@ -781,6 +781,38 @@ public class MainActivity extends Activity {
         this.seekPitch = (SeekBar) findViewById(R.id.seekPitch);
         this.fxControlBar = findViewById(R.id.fxControlBar);
         this.advControlBar = findViewById(R.id.advControlBar);
+
+        // ── Drums APK: accountRow + LOOPS/STOP hide, Sign Out FX/ADV me ──────
+        if (BuildConfig.FLAVOR.equals("drums")) {
+            // 1. Signed-in row bilkul hata do
+            View accountRow = findViewById(R.id.accountRow);
+            if (accountRow != null) accountRow.setVisibility(View.GONE);
+            // 2. LOOPS aur STOP buttons hata do (LoopsActivity se koi matlab nahi)
+            if (this.btnLoops != null) this.btnLoops.setVisibility(View.GONE);
+            View btnStopLoop = findViewById(R.id.btnStopLoop);
+            if (btnStopLoop != null) btnStopLoop.setVisibility(View.GONE);
+            // 3. FX/ADV panel ke andar Sign Out button dikhao + wire karo
+            Button btnDrumsSignOut = findViewById(R.id.btnDrumsSignOut);
+            if (btnDrumsSignOut != null) {
+                btnDrumsSignOut.setVisibility(View.VISIBLE);
+                btnDrumsSignOut.setOnClickListener(v -> {
+                    CloudSync.pushCurrentUserSettings(MainActivity.this);
+                    com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+                    com.google.android.gms.auth.api.signin.GoogleSignInOptions _gso3 =
+                            new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestEmail().build();
+                    com.google.android.gms.auth.api.signin.GoogleSignIn
+                            .getClient(MainActivity.this, _gso3).signOut();
+                    Intent _li = new Intent(MainActivity.this, LoginActivity.class);
+                    _li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(_li);
+                    finish();
+                });
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         this.chkDelay = (CheckBox) findViewById(R.id.chkDelay);
         this.seekDelayTime = (SeekBar) findViewById(R.id.seekDelayTime);
         this.seekDelayLevel = (SeekBar) findViewById(R.id.seekDelayLevel);

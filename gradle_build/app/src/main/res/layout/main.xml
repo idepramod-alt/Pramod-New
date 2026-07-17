@@ -61,6 +61,8 @@
             <SeekBar android:id="@+id/seekChokeGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="4"/>
         </LinearLayout>
         <Button android:textSize="10sp" android:textColor="#ffffffff" android:id="@+id/btnPadColor" android:background="#ff333333" android:layout_width="0dp" android:layout_height="match_parent" android:text="COLOR" android:layout_weight="1"/>
+        <!-- Drums APK me sign-out yahan dikhega; baaki flavors me gone -->
+        <Button android:id="@+id/btnDrumsSignOut" android:visibility="gone" android:textSize="10sp" android:textColor="#ffffffff" android:background="@drawable/btn_3d_dark" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:paddingStart="10dp" android:paddingEnd="10dp" android:text="Sign Out"/>
     </LinearLayout>
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@+id/accountRow" android:background="#ff111111" android:padding="2dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp">
         <TextView android:id="@+id/txtSignedInAs" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="10sp" android:textColor="#ff00afff" android:singleLine="true" android:ellipsize="end" android:text=""/>
@@ -70,7 +72,7 @@
         <TextView android:textSize="12sp" android:textStyle="bold" android:textColor="#ff00afff" android:id="@+id/txtSelectedPad" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SELECTED : PAD 1"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnBankToggle" android:background="#ff660000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="BANK A"/>
         <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnLoops" android:background="#ff006600" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="LOOPS"/>
-        <Button android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:background="#ffcc0000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="STOP" android:onClick="onStopLoopClick"/>
+        <Button android:id="@+id/btnStopLoop" android:textSize="12sp" android:textStyle="bold" android:textColor="#ffffffff" android:background="#ffcc0000" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="STOP" android:onClick="onStopLoopClick"/>
         <TextView
             android:id="@+id/txtBrand"
             android:layout_width="0dp"
