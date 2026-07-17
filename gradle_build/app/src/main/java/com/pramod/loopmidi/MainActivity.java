@@ -4,6 +4,9 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.media.AudioManager;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.inputmethod.InputMethodManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.midi.MidiDevice;
@@ -126,6 +129,10 @@ public class MainActivity extends Activity {
     private final String[] presetKitNames = new String[25];
     private final int[][] presetKits = (int[][]) Array.newInstance(Integer.TYPE, 25, 8);
     private long[] lastHitTime = new long[8];
+
+    // ── Kit hold-repeat (Roland SPD style) ────────────────────────────────────
+    private final Handler kitRepeatHandler = new Handler(Looper.getMainLooper());
+    private Runnable kitRepeatRunnable;
 
     @Override // android.app.Activity
     protected void onResume() {
@@ -885,36 +892,11 @@ public class MainActivity extends Activity {
                 MainActivity.this.renameKitDialog();
             }
         });
-        this.btnPrevKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.7
-            @Override // android.view.View.OnClickListener
-            public void onClick(View v) {
-                if (MainActivity.this.kitIndex > 1) {
-                    MainActivity mainActivity = MainActivity.this;
-                    mainActivity.saveKitToMemory(mainActivity.kitIndex);
-                    MainActivity.access$1210(MainActivity.this);
-                    MainActivity.this.prefs.edit().putInt(MainActivity.KEY_KIT_INDEX, MainActivity.this.kitIndex).apply();
-                    MainActivity mainActivity2 = MainActivity.this;
-                    mainActivity2.loadKitFromMemory(mainActivity2.kitIndex);
-                    return;
-                }
-                Toast.makeText(MainActivity.this, "Already First Kit!", 0).show();
-            }
-        });
-        this.btnNextKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.8
-            @Override // android.view.View.OnClickListener
-            public void onClick(View v) {
-                if (MainActivity.this.kitIndex < 100) {
-                    MainActivity mainActivity = MainActivity.this;
-                    mainActivity.saveKitToMemory(mainActivity.kitIndex);
-                    MainActivity.access$1208(MainActivity.this);
-                    MainActivity.this.prefs.edit().putInt(MainActivity.KEY_KIT_INDEX, MainActivity.this.kitIndex).apply();
-                    MainActivity mainActivity2 = MainActivity.this;
-                    mainActivity2.loadKitFromMemory(mainActivity2.kitIndex);
-                    return;
-                }
-                Toast.makeText(MainActivity.this, "Max Kit Limit Reached!", 0).show();
-            }
-        });
+        // ── Hold-repeat touch listeners (Roland SPD style) ────────────────────
+        setupKitHoldButton(this.btnPrevKit, -1);
+        setupKitHoldButton(this.btnNextKit, +1);
+        // ── Kit Jump: tap kit name → number keyboard → jump instantly ─────────
+        this.txtKitName.setOnClickListener(v -> showKitJumpDialog());
         this.btnLoadKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.9
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
@@ -2062,6 +2044,100 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "List Error: " + e.getMessage(), 0).show();
         }
     }
+
+    // ── Kit navigation helpers ─────────────────────────────────────────────────
+
+    /** Single kit step; safe to call from any thread that owns the UI. */
+    private void changeKitBy(int direction) {
+        if (direction < 0) {
+            if (kitIndex > 1) {
+                saveKitToMemory(kitIndex);
+                kitIndex--;
+                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                loadKitFromMemory(kitIndex);
+            }
+        } else {
+            if (kitIndex < MAX_KITS) {
+                saveKitToMemory(kitIndex);
+                kitIndex++;
+                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                loadKitFromMemory(kitIndex);
+            }
+        }
+    }
+
+    /**
+     * Attaches a hold-to-repeat touch listener to a kit nav button.
+     * Behaviour: tap = 1 step; hold 500 ms → starts repeating at 300 ms,
+     * accelerates to 120 ms → 60 ms → 30 ms (Roland SPD-20 Pro feel).
+     */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private void setupKitHoldButton(Button btn, final int direction) {
+        btn.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    v.setPressed(true);
+                    changeKitBy(direction);
+                    kitRepeatRunnable = new Runnable() {
+                        private int step = 0;
+                        @Override public void run() {
+                            step++;
+                            changeKitBy(direction);
+                            long delay = step < 5 ? 300L : step < 15 ? 120L : step < 30 ? 60L : 30L;
+                            kitRepeatHandler.postDelayed(this, delay);
+                        }
+                    };
+                    kitRepeatHandler.postDelayed(kitRepeatRunnable, 500);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    kitRepeatHandler.removeCallbacks(kitRepeatRunnable);
+                    kitRepeatRunnable = null;
+                    return true;
+            }
+            return false;
+        });
+    }
+
+    /** Tap kit name → number keyboard → jump directly to any kit 1-100. */
+    private void showKitJumpDialog() {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        et.setHint("1 – " + MAX_KITS);
+        et.setTextColor(0xffffffff);
+        et.setHintTextColor(0xff888888);
+        et.setGravity(Gravity.CENTER);
+        et.setTextSize(26);
+        new AlertDialog.Builder(this)
+            .setTitle("Kit number daalo (1–" + MAX_KITS + ")")
+            .setView(et)
+            .setPositiveButton("GO ▶", (d, w) -> {
+                String s = et.getText().toString().trim();
+                if (!s.isEmpty()) {
+                    try {
+                        int target = Integer.parseInt(s);
+                        if (target >= 1 && target <= MAX_KITS) {
+                            saveKitToMemory(kitIndex);
+                            kitIndex = target;
+                            prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                            loadKitFromMemory(kitIndex);
+                        } else {
+                            Toast.makeText(this, "1 se " + MAX_KITS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+        et.post(() -> {
+            et.requestFocus();
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(et, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
 
     @Override // android.app.Activity
     protected void onPause() {

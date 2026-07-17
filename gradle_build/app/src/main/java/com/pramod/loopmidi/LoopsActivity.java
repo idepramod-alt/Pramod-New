@@ -23,6 +23,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.inputmethod.InputMethodManager;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
@@ -246,6 +249,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // 40ms after the last slider move; UI labels update immediately as before.
     private final Handler speedPitchHandler = new Handler(Looper.getMainLooper());
     private Runnable speedPitchRunnable = null;
+
+    // ── Loop hold-repeat (Roland SPD style) ───────────────────────────────────
+    private final Handler loopRepeatHandler = new Handler(Looper.getMainLooper());
+    private Runnable loopRepeatRunnable;
 
     // ── Audio routing ─────────────────────────────────────────────────────────
     // Handles earphone/BT plug & unplug so the Oboe stream restarts on the
@@ -763,6 +770,105 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
+    // ── Loop channel navigation helpers ───────────────────────────────────────
+
+    /** Single loop channel step; safe to call from the UI thread. */
+    private void changeLoopBy(int direction) {
+        if (direction < 0) {
+            if (loopChannelIndex > 1) {
+                saveLoopsToMemory();
+                loopChannelIndex--;
+                prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+                currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
+                txtLoopChannel.setText(currentLoopName);
+                loadCurrentKit();
+            }
+        } else {
+            if (loopChannelIndex < MAX_LOOPS) {
+                saveLoopsToMemory();
+                loopChannelIndex++;
+                prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+                currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
+                txtLoopChannel.setText(currentLoopName);
+                loadCurrentKit();
+            }
+        }
+    }
+
+    /**
+     * Attaches a hold-to-repeat touch listener to a loop nav button.
+     * Tap = 1 step; hold 500 ms → repeats at 300 → 120 → 60 → 30 ms.
+     */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private void setupLoopHoldButton(Button btn, final int direction) {
+        btn.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    v.setPressed(true);
+                    changeLoopBy(direction);
+                    loopRepeatRunnable = new Runnable() {
+                        private int step = 0;
+                        @Override public void run() {
+                            step++;
+                            changeLoopBy(direction);
+                            long delay = step < 5 ? 300L : step < 15 ? 120L : step < 30 ? 60L : 30L;
+                            loopRepeatHandler.postDelayed(this, delay);
+                        }
+                    };
+                    loopRepeatHandler.postDelayed(loopRepeatRunnable, 500);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    loopRepeatHandler.removeCallbacks(loopRepeatRunnable);
+                    loopRepeatRunnable = null;
+                    return true;
+            }
+            return false;
+        });
+    }
+
+    /** Tap loop channel name → number keyboard → jump directly to any channel 1-100. */
+    private void showLoopJumpDialog() {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        et.setHint("1 – " + MAX_LOOPS);
+        et.setTextColor(0xffffffff);
+        et.setHintTextColor(0xff888888);
+        et.setGravity(Gravity.CENTER);
+        et.setTextSize(26);
+        new AlertDialog.Builder(this)
+            .setTitle("Loop channel number daalo (1–" + MAX_LOOPS + ")")
+            .setView(et)
+            .setPositiveButton("GO ▶", (d, w) -> {
+                String s = et.getText().toString().trim();
+                if (!s.isEmpty()) {
+                    try {
+                        int target = Integer.parseInt(s);
+                        if (target >= 1 && target <= MAX_LOOPS) {
+                            saveLoopsToMemory();
+                            loopChannelIndex = target;
+                            prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+                            currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
+                            txtLoopChannel.setText(currentLoopName);
+                            loadCurrentKit();
+                        } else {
+                            Toast.makeText(this, "1 se " + MAX_LOOPS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+        et.post(() -> {
+            et.requestFocus();
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(et, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+
     @Override // android.app.Activity
     protected void onPause() {
         super.onPause();
@@ -1114,38 +1220,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
-        this.btnPrevLoop.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.5
-            @Override // android.view.View.OnClickListener
-            public void onClick(View v) throws IllegalStateException {
-                if (LoopsActivity.this.loopChannelIndex > 1) {
-                    LoopsActivity.this.saveLoopsToMemory();
-                    LoopsActivity.access$510(LoopsActivity.this);
-                    LoopsActivity.this.prefs.edit().putInt(LoopsActivity.KEY_LOOP_INDEX, LoopsActivity.this.loopChannelIndex).apply();
-                    LoopsActivity loopsActivity = LoopsActivity.this;
-                    loopsActivity.currentLoopName = loopsActivity.prefs.getString("loop_name_ch_" + LoopsActivity.this.loopChannelIndex, "LOOP " + LoopsActivity.this.loopChannelIndex);
-                    LoopsActivity.this.txtLoopChannel.setText(LoopsActivity.this.currentLoopName);
-                    LoopsActivity.this.loadCurrentKit();
-                    return;
-                }
-                Toast.makeText(LoopsActivity.this, "Already First Loop Channel!", 0).show();
-            }
-        });
-        this.btnNextLoop.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.6
-            @Override // android.view.View.OnClickListener
-            public void onClick(View v) throws IllegalStateException {
-                if (LoopsActivity.this.loopChannelIndex < 100) {
-                    LoopsActivity.this.saveLoopsToMemory();
-                    LoopsActivity.access$508(LoopsActivity.this);
-                    LoopsActivity.this.prefs.edit().putInt(LoopsActivity.KEY_LOOP_INDEX, LoopsActivity.this.loopChannelIndex).apply();
-                    LoopsActivity loopsActivity = LoopsActivity.this;
-                    loopsActivity.currentLoopName = loopsActivity.prefs.getString("loop_name_ch_" + LoopsActivity.this.loopChannelIndex, "LOOP " + LoopsActivity.this.loopChannelIndex);
-                    LoopsActivity.this.txtLoopChannel.setText(LoopsActivity.this.currentLoopName);
-                    LoopsActivity.this.loadCurrentKit();
-                    return;
-                }
-                Toast.makeText(LoopsActivity.this, "Max Loop Channel Reached!", 0).show();
-            }
-        });
+        // ── Hold-repeat touch listeners (Roland SPD style) ────────────────────
+        setupLoopHoldButton(this.btnPrevLoop, -1);
+        setupLoopHoldButton(this.btnNextLoop, +1);
+        // ── Loop Jump: tap loop name → number keyboard → jump instantly ────────
+        this.txtLoopChannel.setOnClickListener(v -> showLoopJumpDialog());
         Button button3 = this.btnRenameLoop;
         if (button3 != null) {
             button3.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.7
