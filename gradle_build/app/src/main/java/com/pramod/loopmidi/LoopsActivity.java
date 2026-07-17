@@ -748,6 +748,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.audioEngine.stop();
             this.audioEngine = null;
         }
+        // Release PresetReverb attached to global session 0.
+        // Without this, every open/close cycle leaves one unreleased effect
+        // stacked on the system output mix → audio distorts after repeated use.
+        // Mobile restart clears audio sessions which is why that fixes it.
+        if (this.globalReverb != null) {
+            try { this.globalReverb.release(); } catch (Exception ignored) {}
+            this.globalReverb = null;
+        }
         try {
             closeMidiDevice();
         } catch (IOException e) {
@@ -774,6 +782,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     protected void onResume() {
         super.onResume();
         this.isVisible = true;
+        // Reinit the Oboe stream on every resume so any accumulated buffer
+        // drift, underrun state, or audio-focus conflict from background is
+        // cleared. onPause already stopped all pads (loopPlaying[i]=false)
+        // so reinitAudioForNewDevice will not restart any loops here.
+        if (this.audioEngine != null) {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                reinitAudioForNewDevice(am);
+            }
+        }
     }
 
     public void onScaleMinus(View view) {
