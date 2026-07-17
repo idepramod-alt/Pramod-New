@@ -3,6 +3,7 @@ package com.pramod.loopmidi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.media.AudioManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.midi.MidiDevice;
@@ -130,6 +131,23 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         this.isVisible = true;
+        // Reinit Oboe stream on every resume to clear any accumulated buffer
+        // drift or underrun state from background — same fix as LoopsActivity.
+        if (this.audioEngine != null) {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                int nativeSR = 48000, nativeBurst = 256;
+                try {
+                    String srStr    = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+                    String burstStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+                    if (srStr    != null && !srStr.isEmpty())    nativeSR    = Integer.parseInt(srStr);
+                    if (burstStr != null && !burstStr.isEmpty()) nativeBurst = Integer.parseInt(burstStr);
+                    if (nativeSR < 8000 || nativeSR > 192000)   nativeSR    = 48000;
+                    if (nativeBurst < 32 || nativeBurst > 8192) nativeBurst = 256;
+                } catch (NumberFormatException ignored) {}
+                this.audioEngine.reinitStream(nativeSR, nativeBurst);
+            }
+        }
     }
 
     public void onStopLoopClick(View view) {
