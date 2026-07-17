@@ -222,7 +222,27 @@ public class LoginActivity extends Activity {
                     return;
                 }
 
-                // ✅ Licensed — check device lock
+                // ── Per-APK access check ──────────────────────────────────────
+                // allowedApps field nahi hai → purana user, teeno allowed (backward compat)
+                // allowedApps hai → current flavor ka value check karo
+                DataSnapshot appsSnap = snapshot.child("allowedApps");
+                if (appsSnap.exists()) {
+                    Boolean allowed = appsSnap.child(BuildConfig.FLAVOR).getValue(Boolean.class);
+                    if (allowed == null || !allowed) {
+                        runOnUiThread(() -> {
+                            if (txtLoginStatus != null)
+                                txtLoginStatus.setText(
+                                        "❌ Aapko \"" + flavorDisplayName(BuildConfig.FLAVOR)
+                                        + "\" APK ka access nahi hai.\n\n"
+                                        + "Admin se contact karein aur sahi APK ka access maangein.");
+                            if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
+                            if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
+                        });
+                        return;
+                    }
+                }
+
+                // ✅ Licensed + APK allowed — check device lock
                 DataSnapshot tokenSnap = snapshot.child("deviceToken");
                 String savedDeviceId   = tokenSnap.getValue(String.class);
 
@@ -385,6 +405,15 @@ public class LoginActivity extends Activity {
             if (btnGoogleSignIn != null) btnGoogleSignIn.setEnabled(true);
             if (btnWhatsApp != null) btnWhatsApp.setVisibility(View.VISIBLE);
         });
+    }
+
+    private static String flavorDisplayName(String flavor) {
+        switch (flavor) {
+            case "full":  return "Full";
+            case "loops": return "Loops";
+            case "drums": return "Drums";
+            default:      return flavor;
+        }
     }
 
     private void goToLoops() {

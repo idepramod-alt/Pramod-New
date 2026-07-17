@@ -6,12 +6,14 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.firebase.auth.FirebaseAuth;
@@ -35,18 +37,23 @@ public class AdminDashboardActivity extends AppCompatActivity {
     private TextView txtActiveEmpty;
     private EditText editManualUid;
 
+    // Checkboxes for the manual-activate section
+    private CheckBox cbManualFull;
+    private CheckBox cbManualLoops;
+    private CheckBox cbManualDrums;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         auth = AdminFirebaseApp.auth(this);
         pendingRef = AdminFirebaseApp.database(this).getReference("pendingRequests");
-        usersRef = AdminFirebaseApp.database(this).getReference("authorizedUsers");
+        usersRef   = AdminFirebaseApp.database(this).getReference("authorizedUsers");
         buildUi();
         listenPending();
         listenActive();
     }
 
-    // ── UI construction (no XML — keeps this a self-contained single file) ──
+    // ── UI construction (no XML) ──────────────────────────────────────────────
 
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
@@ -67,9 +74,7 @@ public class AdminDashboardActivity extends AppCompatActivity {
         title.setText("Admin Panel");
         title.setTextColor(0xff00afff);
         title.setTextSize(20);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        header.addView(title, titleParams);
+        header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button btnLogout = new Button(this);
         btnLogout.setText("Logout");
         btnLogout.setOnClickListener(v -> {
@@ -80,7 +85,7 @@ public class AdminDashboardActivity extends AppCompatActivity {
         header.addView(btnLogout);
         root.addView(header, matchWidth(0));
 
-        // ── Pending requests section ──
+        // Pending section
         root.addView(sectionHeader("Pending Requests (naye users, abhi tak activate nahi)"), matchWidth(dp(20)));
         pendingContainer = new LinearLayout(this);
         pendingContainer.setOrientation(LinearLayout.VERTICAL);
@@ -88,7 +93,7 @@ public class AdminDashboardActivity extends AppCompatActivity {
         txtPendingEmpty = emptyText("Koi pending request nahi hai.");
         root.addView(txtPendingEmpty, matchWidth(dp(4)));
 
-        // ── Active / licensed users section ──
+        // Active section
         root.addView(sectionHeader("Active / Licensed Users"), matchWidth(dp(24)));
         activeContainer = new LinearLayout(this);
         activeContainer.setOrientation(LinearLayout.VERTICAL);
@@ -96,22 +101,363 @@ public class AdminDashboardActivity extends AppCompatActivity {
         txtActiveEmpty = emptyText("Koi active user nahi hai.");
         root.addView(txtActiveEmpty, matchWidth(dp(4)));
 
-        // ── Manual activate-by-UID fallback ──
+        // Manual activate section
         root.addView(sectionHeader("Manually Activate by UID (fallback)"), matchWidth(dp(24)));
-        LinearLayout manualRow = new LinearLayout(this);
-        manualRow.setOrientation(LinearLayout.HORIZONTAL);
+        buildManualSection(root);
+
+        setContentView(scroll);
+    }
+
+    private void buildManualSection(LinearLayout root) {
+        // UID input
+        LinearLayout uidRow = new LinearLayout(this);
+        uidRow.setOrientation(LinearLayout.HORIZONTAL);
         editManualUid = new EditText(this);
         editManualUid.setHint("Firebase User UID paste karein");
         editManualUid.setTextColor(0xffffffff);
         editManualUid.setHintTextColor(0xff888888);
-        manualRow.addView(editManualUid, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        uidRow.addView(editManualUid, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(uidRow, matchWidth(dp(4)));
+
+        // APK checkboxes (all checked by default)
+        TextView apkLabel = new TextView(this);
+        apkLabel.setText("Kis APK ka access dena hai:");
+        apkLabel.setTextColor(0xffaaaaaa);
+        apkLabel.setTextSize(11);
+        apkLabel.setPadding(0, dp(4), 0, dp(2));
+        root.addView(apkLabel, matchWidth(0));
+
+        LinearLayout cbRow = new LinearLayout(this);
+        cbRow.setOrientation(LinearLayout.HORIZONTAL);
+        cbManualFull  = makeCheckBox("Full",  true);
+        cbManualLoops = makeCheckBox("Loops", true);
+        cbManualDrums = makeCheckBox("Drums", true);
+        cbRow.addView(cbManualFull);
+        cbRow.addView(cbManualLoops);
+        cbRow.addView(cbManualDrums);
+        root.addView(cbRow, matchWidth(dp(2)));
+
         Button btnManualActivate = new Button(this);
         btnManualActivate.setText("Activate");
         btnManualActivate.setOnClickListener(v -> manualActivate());
-        manualRow.addView(btnManualActivate);
-        root.addView(manualRow, matchWidth(dp(4)));
+        root.addView(btnManualActivate, matchWidth(dp(4)));
+    }
 
-        setContentView(scroll);
+    // ── Pending list ──────────────────────────────────────────────────────────
+
+    private void listenPending() {
+        pendingRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                pendingContainer.removeAllViews();
+                boolean any = false;
+                for (DataSnapshot child : snapshot.getChildren()) {
+                    any = true;
+                    final String uid = child.getKey();
+                    String email       = child.child("email").getValue(String.class);
+                    String displayName = child.child("displayName").getValue(String.class);
+                    Long ts            = child.child("timestamp").getValue(Long.class);
+                    String subLine     = ts != null ? "Request: " + new java.util.Date(ts) : null;
+                    pendingContainer.addView(buildPendingRow(uid, email, displayName, subLine));
+                }
+                txtPendingEmpty.setVisibility(any ? View.GONE : View.VISIBLE);
+            }
+            @Override public void onCancelled(DatabaseError e) {
+                Toast.makeText(AdminDashboardActivity.this,
+                        "Pending list error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /**
+     * Pending row — 3 APK checkboxes (Full / Loops / Drums, all ticked by default)
+     * so admin can choose which APKs to grant before clicking Activate.
+     */
+    private View buildPendingRow(String uid, String email, String displayName, String subLine) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackgroundColor(0xff1c1c1c);
+        int pad = dp(10);
+        row.setPadding(pad, pad, pad, pad);
+        row.setLayoutParams(matchWidth(dp(6)));
+
+        addUserInfoViews(row, uid, email, displayName, subLine);
+
+        // APK selection label
+        TextView apkLabel = new TextView(this);
+        apkLabel.setText("Kis APK ka access dena hai:");
+        apkLabel.setTextColor(0xffaaaaaa);
+        apkLabel.setTextSize(11);
+        apkLabel.setPadding(0, dp(6), 0, dp(2));
+        row.addView(apkLabel);
+
+        // Checkboxes — all ticked by default
+        LinearLayout cbRow = new LinearLayout(this);
+        cbRow.setOrientation(LinearLayout.HORIZONTAL);
+        CheckBox cbFull  = makeCheckBox("Full",  true);
+        CheckBox cbLoops = makeCheckBox("Loops", true);
+        CheckBox cbDrums = makeCheckBox("Drums", true);
+        cbRow.addView(cbFull);
+        cbRow.addView(cbLoops);
+        cbRow.addView(cbDrums);
+        row.addView(cbRow);
+
+        // Action buttons
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setPadding(0, dp(6), 0, 0);
+
+        Button btnActivate = new Button(this);
+        btnActivate.setText("Activate");
+        btnActivate.setOnClickListener(v ->
+                activateUser(uid, email, displayName,
+                        cbFull.isChecked(), cbLoops.isChecked(), cbDrums.isChecked()));
+        btnRow.addView(btnActivate, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button btnReject = new Button(this);
+        btnReject.setText("Reject");
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        rp.leftMargin = dp(6);
+        btnReject.setOnClickListener(v -> pendingRef.child(uid).removeValue());
+        btnRow.addView(btnReject, rp);
+
+        row.addView(btnRow);
+        return row;
+    }
+
+    // ── Active list ───────────────────────────────────────────────────────────
+
+    private void listenActive() {
+        usersRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                activeContainer.removeAllViews();
+                boolean any = false;
+                for (DataSnapshot child : snapshot.getChildren()) {
+                    any = true;
+                    final String uid       = child.getKey();
+                    String email           = child.child("email").getValue(String.class);
+                    String displayName     = child.child("displayName").getValue(String.class);
+                    String deviceToken     = child.child("deviceToken").getValue(String.class);
+
+                    // allowedApps — agar field nahi hai to purana user (teeno allowed)
+                    DataSnapshot appsSnap  = child.child("allowedApps");
+                    boolean hasFull  = !appsSnap.exists()
+                            || Boolean.TRUE.equals(appsSnap.child("full").getValue(Boolean.class));
+                    boolean hasLoops = !appsSnap.exists()
+                            || Boolean.TRUE.equals(appsSnap.child("loops").getValue(Boolean.class));
+                    boolean hasDrums = !appsSnap.exists()
+                            || Boolean.TRUE.equals(appsSnap.child("drums").getValue(Boolean.class));
+
+                    String appsLine = "APK: "
+                            + (hasFull  ? "✅Full "  : "❌Full ")
+                            + (hasLoops ? "✅Loops " : "❌Loops ")
+                            + (hasDrums ? "✅Drums"  : "❌Drums");
+                    String deviceLine = !TextUtils.isEmpty(deviceToken) ? "🔒 Device locked" : "🔓 Unlocked";
+
+                    activeContainer.addView(buildActiveRow(
+                            uid, email, displayName,
+                            appsLine + "  |  " + deviceLine,
+                            deviceToken, hasFull, hasLoops, hasDrums));
+                }
+                txtActiveEmpty.setVisibility(any ? View.GONE : View.VISIBLE);
+            }
+            @Override public void onCancelled(DatabaseError e) {
+                Toast.makeText(AdminDashboardActivity.this,
+                        "Active list error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /**
+     * Active row — shows current APK access + Deactivate / Edit Apps / Unlock Device buttons.
+     */
+    private View buildActiveRow(String uid, String email, String displayName,
+                                String subLine, String deviceToken,
+                                boolean curFull, boolean curLoops, boolean curDrums) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackgroundColor(0xff1c1c1c);
+        int pad = dp(10);
+        row.setPadding(pad, pad, pad, pad);
+        row.setLayoutParams(matchWidth(dp(6)));
+
+        addUserInfoViews(row, uid, email, displayName, subLine);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setPadding(0, dp(6), 0, 0);
+
+        // Deactivate
+        Button btnDeactivate = new Button(this);
+        btnDeactivate.setText("Deactivate");
+        btnDeactivate.setOnClickListener(v -> confirmDeactivate(uid));
+        btnRow.addView(btnDeactivate, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        // Edit Apps
+        Button btnEdit = new Button(this);
+        btnEdit.setText("Edit Apps");
+        LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        ep.leftMargin = dp(6);
+        btnEdit.setOnClickListener(v ->
+                showEditAppsDialog(uid, email, displayName, curFull, curLoops, curDrums));
+        btnRow.addView(btnEdit, ep);
+
+        // Unlock Device (only shown if device is locked)
+        if (!TextUtils.isEmpty(deviceToken)) {
+            Button btnUnlock = new Button(this);
+            btnUnlock.setText("Unlock");
+            LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            up.leftMargin = dp(6);
+            btnUnlock.setOnClickListener(v ->
+                    usersRef.child(uid).child("deviceToken").removeValue());
+            btnRow.addView(btnUnlock, up);
+        }
+
+        row.addView(btnRow);
+        return row;
+    }
+
+    /** Dialog: change which APKs this user can access (without resetting device lock). */
+    private void showEditAppsDialog(String uid, String email, String displayName,
+                                    boolean curFull, boolean curLoops, boolean curDrums) {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        layout.setPadding(pad, pad, pad, pad);
+
+        CheckBox cbFull  = makeCheckBox("Full  (com.pramod.loopmidi)",        curFull);
+        CheckBox cbLoops = makeCheckBox("Loops (com.pramod.loopmidi.loops)",  curLoops);
+        CheckBox cbDrums = makeCheckBox("Drums (com.pramod.loopmidi.drums)",  curDrums);
+        layout.addView(cbFull);
+        layout.addView(cbLoops);
+        layout.addView(cbDrums);
+
+        new AlertDialog.Builder(this)
+                .setTitle("APK Access — " + (!TextUtils.isEmpty(email) ? email : uid))
+                .setView(layout)
+                .setPositiveButton("Save", (d, w) ->
+                        saveAllowedApps(uid, email,
+                                cbFull.isChecked(), cbLoops.isChecked(), cbDrums.isChecked()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ── Firebase actions ──────────────────────────────────────────────────────
+
+    /** New user activate — saves allowedApps from checkboxes. */
+    private void activateUser(String uid, String email, String displayName,
+                              boolean full, boolean loops, boolean drums) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("email",       email != null ? email : "");
+        data.put("displayName", displayName != null ? displayName : "");
+        data.put("activatedAt", System.currentTimeMillis());
+
+        Map<String, Object> appsMap = new HashMap<>();
+        appsMap.put("full",  full);
+        appsMap.put("loops", loops);
+        appsMap.put("drums", drums);
+        data.put("allowedApps", appsMap);
+
+        usersRef.child(uid).setValue(data);
+        pendingRef.child(uid).removeValue();
+        Toast.makeText(this, "Activated: " + (email != null ? email : uid), Toast.LENGTH_SHORT).show();
+    }
+
+    /** Update only allowedApps — does NOT reset deviceToken or activatedAt. */
+    private void saveAllowedApps(String uid, String email,
+                                 boolean full, boolean loops, boolean drums) {
+        Map<String, Object> appsMap = new HashMap<>();
+        appsMap.put("full",  full);
+        appsMap.put("loops", loops);
+        appsMap.put("drums", drums);
+        usersRef.child(uid).child("allowedApps").setValue(appsMap);
+        Toast.makeText(this, "Access updated: " + (email != null ? email : uid), Toast.LENGTH_SHORT).show();
+    }
+
+    private void confirmDeactivate(String uid) {
+        new AlertDialog.Builder(this)
+                .setTitle("Deactivate karein?")
+                .setMessage("Yeh user turant logout ho jayega aur app dobara nahi khulega jab tak aap use phir se activate na karein.")
+                .setPositiveButton("Deactivate", (dialog, which) -> {
+                    usersRef.child(uid).removeValue();
+                    Toast.makeText(this, "Deactivated.", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void manualActivate() {
+        String uid = editManualUid.getText().toString().trim();
+        if (TextUtils.isEmpty(uid)) {
+            Toast.makeText(this, "UID daalein.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("activatedAt", System.currentTimeMillis());
+        data.put("note", "manually added");
+
+        Map<String, Object> appsMap = new HashMap<>();
+        appsMap.put("full",  cbManualFull.isChecked());
+        appsMap.put("loops", cbManualLoops.isChecked());
+        appsMap.put("drums", cbManualDrums.isChecked());
+        data.put("allowedApps", appsMap);
+
+        usersRef.child(uid).setValue(data);
+        editManualUid.setText("");
+        Toast.makeText(this, "Activated by UID.", Toast.LENGTH_SHORT).show();
+    }
+
+    // ── View helpers ──────────────────────────────────────────────────────────
+
+    private void addUserInfoViews(LinearLayout row, String uid, String email,
+                                  String displayName, String subLine) {
+        TextView txtName = new TextView(this);
+        txtName.setText(!TextUtils.isEmpty(displayName)
+                ? displayName : (!TextUtils.isEmpty(email) ? email : uid));
+        txtName.setTextColor(0xffffffff);
+        txtName.setTextSize(14);
+        row.addView(txtName);
+
+        if (!TextUtils.isEmpty(email)) {
+            TextView txtEmail = new TextView(this);
+            txtEmail.setText(email);
+            txtEmail.setTextColor(0xff00afff);
+            txtEmail.setTextSize(11);
+            row.addView(txtEmail);
+        }
+
+        TextView txtUid = new TextView(this);
+        txtUid.setText("UID: " + uid);
+        txtUid.setTextColor(0xff666666);
+        txtUid.setTextSize(10);
+        row.addView(txtUid);
+
+        if (!TextUtils.isEmpty(subLine)) {
+            TextView txtSub = new TextView(this);
+            txtSub.setText(subLine);
+            txtSub.setTextColor(0xffaaaaaa);
+            txtSub.setTextSize(11);
+            row.addView(txtSub);
+        }
+    }
+
+    private CheckBox makeCheckBox(String label, boolean checked) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText(label);
+        cb.setChecked(checked);
+        cb.setTextColor(0xffffffff);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.rightMargin = dp(16);
+        cb.setLayoutParams(p);
+        return cb;
     }
 
     private TextView sectionHeader(String text) {
@@ -139,179 +485,6 @@ public class AdminDashboardActivity extends AppCompatActivity {
     }
 
     private int dp(int value) {
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(value * density);
-    }
-
-    // ── Row builder shared by both lists ──
-
-    private View buildRow(String uid, String email, String displayName, String subLine,
-                          String primaryLabel, Runnable onPrimary,
-                          String secondaryLabel, Runnable onSecondary) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setBackgroundColor(0xff1c1c1c);
-        int pad = dp(10);
-        row.setPadding(pad, pad, pad, pad);
-        LinearLayout.LayoutParams rowParams = matchWidth(dp(6));
-        row.setLayoutParams(rowParams);
-
-        TextView txtName = new TextView(this);
-        txtName.setText(!TextUtils.isEmpty(displayName) ? displayName : (!TextUtils.isEmpty(email) ? email : uid));
-        txtName.setTextColor(0xffffffff);
-        txtName.setTextSize(14);
-        row.addView(txtName);
-
-        if (!TextUtils.isEmpty(email)) {
-            TextView txtEmail = new TextView(this);
-            txtEmail.setText(email);
-            txtEmail.setTextColor(0xff00afff);
-            txtEmail.setTextSize(11);
-            row.addView(txtEmail);
-        }
-
-        TextView txtUid = new TextView(this);
-        txtUid.setText("UID: " + uid);
-        txtUid.setTextColor(0xff666666);
-        txtUid.setTextSize(10);
-        row.addView(txtUid);
-
-        if (!TextUtils.isEmpty(subLine)) {
-            TextView txtSub = new TextView(this);
-            txtSub.setText(subLine);
-            txtSub.setTextColor(0xffaaaaaa);
-            txtSub.setTextSize(11);
-            row.addView(txtSub);
-        }
-
-        LinearLayout btnRow = new LinearLayout(this);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setPadding(0, dp(6), 0, 0);
-
-        Button btnPrimary = new Button(this);
-        btnPrimary.setText(primaryLabel);
-        btnPrimary.setOnClickListener(v -> onPrimary.run());
-        btnRow.addView(btnPrimary, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        if (secondaryLabel != null) {
-            Button btnSecondary = new Button(this);
-            btnSecondary.setText(secondaryLabel);
-            LinearLayout.LayoutParams secParams = new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            secParams.leftMargin = dp(6);
-            btnSecondary.setOnClickListener(v -> onSecondary.run());
-            btnRow.addView(btnSecondary, secParams);
-        }
-
-        row.addView(btnRow);
-        return row;
-    }
-
-    // ── Pending requests (users who logged in but aren't licensed yet) ──
-
-    private void listenPending() {
-        pendingRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                pendingContainer.removeAllViews();
-                boolean any = false;
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    any = true;
-                    final String uid = child.getKey();
-                    String email = child.child("email").getValue(String.class);
-                    String displayName = child.child("displayName").getValue(String.class);
-                    Long timestamp = child.child("timestamp").getValue(Long.class);
-                    String subLine = timestamp != null
-                            ? "Request time: " + new java.util.Date(timestamp) : null;
-
-                    View row = buildRow(uid, email, displayName, subLine,
-                            "Activate",
-                            () -> activateUser(uid, email, displayName),
-                            "Reject",
-                            () -> pendingRef.child(uid).removeValue());
-                    pendingContainer.addView(row);
-                }
-                txtPendingEmpty.setVisibility(any ? View.GONE : View.VISIBLE);
-            }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Toast.makeText(AdminDashboardActivity.this,
-                        "Pending list load error: " + error.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    // ── Active / licensed users ──
-
-    private void listenActive() {
-        usersRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                activeContainer.removeAllViews();
-                boolean any = false;
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    any = true;
-                    final String uid = child.getKey();
-                    String email = child.child("email").getValue(String.class);
-                    String displayName = child.child("displayName").getValue(String.class);
-                    String deviceToken = child.child("deviceToken").getValue(String.class);
-                    String subLine = !TextUtils.isEmpty(deviceToken)
-                            ? "Device locked" : "Kisi device pe lock nahi (agla login lock karega)";
-
-                    View row = buildRow(uid, email, displayName, subLine,
-                            "Deactivate",
-                            () -> confirmDeactivate(uid),
-                            !TextUtils.isEmpty(deviceToken) ? "Unlock Device" : null,
-                            () -> usersRef.child(uid).child("deviceToken").removeValue());
-                    activeContainer.addView(row);
-                }
-                txtActiveEmpty.setVisibility(any ? View.GONE : View.VISIBLE);
-            }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Toast.makeText(AdminDashboardActivity.this,
-                        "Active list load error: " + error.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        });
-    }
-
-    // ── Actions ──
-
-    private void activateUser(String uid, String email, String displayName) {
-        Map<String, Object> data = new HashMap<>();
-        data.put("email", email != null ? email : "");
-        data.put("displayName", displayName != null ? displayName : "");
-        data.put("activatedAt", System.currentTimeMillis());
-        usersRef.child(uid).setValue(data);
-        pendingRef.child(uid).removeValue();
-        Toast.makeText(this, "Activated: " + (email != null ? email : uid), Toast.LENGTH_SHORT).show();
-    }
-
-    private void confirmDeactivate(String uid) {
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Deactivate karein?")
-                .setMessage("Yeh user turant logout ho jayega aur app dobara nahi khulega jab tak aap use phir se activate na karein.")
-                .setPositiveButton("Deactivate", (dialog, which) -> {
-                    usersRef.child(uid).removeValue();
-                    Toast.makeText(this, "Deactivated.", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void manualActivate() {
-        String uid = editManualUid.getText().toString().trim();
-        if (TextUtils.isEmpty(uid)) {
-            Toast.makeText(this, "UID daalein.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Map<String, Object> data = new HashMap<>();
-        data.put("activatedAt", System.currentTimeMillis());
-        data.put("note", "manually added");
-        usersRef.child(uid).setValue(data);
-        editManualUid.setText("");
-        Toast.makeText(this, "Activated by UID.", Toast.LENGTH_SHORT).show();
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }
