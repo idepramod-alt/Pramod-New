@@ -10,12 +10,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 
-    <uses-feature android:name="android.hardware.usb.host"/>
-    <uses-feature android:name="android.software.midi" android:required="true"/>
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
+    <!-- required=false: loops-only APK bhi MIDI-less devices pe install ho sake -->
+    <uses-feature android:name="android.software.midi" android:required="false"/>
 
     <application
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
-        android:label="Pramod Octapad Loops"
+        android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:extractNativeLibs="true">

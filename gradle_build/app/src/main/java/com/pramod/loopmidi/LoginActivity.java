@@ -388,7 +388,13 @@ public class LoginActivity extends Activity {
     }
 
     private void goToLoops() {
-        Intent intent = new Intent(this, LoopsActivity.class);
+        // BuildConfig.FLAVOR se decide karo kahan jaana hai:
+        //   "drums" flavor → sirf MainActivity (Drum Pad)
+        //   "loops" / "full" → LoopsActivity (loop player; full mein drum button bhi hai)
+        Class<?> target = BuildConfig.FLAVOR.equals("drums")
+                ? MainActivity.class
+                : LoopsActivity.class;
+        Intent intent = new Intent(this, target);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(intent);
         finish();

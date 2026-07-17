@@ -55,6 +55,29 @@ android {
     }
     buildFeatures {
         prefab true
+        buildConfig true   // BuildConfig.FLAVOR needed for per-flavor routing
+    }
+
+    flavorDimensions "system"
+    productFlavors {
+        // ── Full: dono systems ek saath ──────────────────────────────────────
+        full {
+            dimension "system"
+            applicationId "com.pramod.loopmidi"
+            resValue "string", "app_name", "Pramod Octapad Full"
+        }
+        // ── Loops: sirf LoopsActivity ─────────────────────────────────────────
+        loops {
+            dimension "system"
+            applicationId "com.pramod.loopmidi.loops"
+            resValue "string", "app_name", "Pramod Octapad Loops"
+        }
+        // ── Drums: sirf MainActivity (Drum Pad) ───────────────────────────────
+        drums {
+            dimension "system"
+            applicationId "com.pramod.loopmidi.drums"
+            resValue "string", "app_name", "Pramod Octapad Drums"
+        }
     }
     packagingOptions {
         resources {

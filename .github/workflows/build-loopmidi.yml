@@ -62,12 +62,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-loopmidi-
 
-      # ── 7. Build Debug APK ─────────────────────────────────────────────────
-      - name: Build Debug APK
+      # ── 7. Build 3 APKs (full / loops / drums) ────────────────────────────
+      - name: Build all 3 Debug APKs
         working-directory: gradle_build
         run: |
           set -o pipefail
-          ./gradlew assembleDebug \
+          ./gradlew assembleFullDebug assembleLoopsDebug assembleDrumsDebug \
             --no-daemon \
             --stacktrace \
             --warning-mode all \
@@ -78,24 +78,46 @@ jobs:
         if: failure()
         run: tail -n 400 /tmp/build_debug.log || true
 
-      # ── 9. Collect APK ────────────────────────────────────────────────────
-      - name: Rename APK
+      # ── 9. Collect all 3 APKs ─────────────────────────────────────────────
+      - name: Rename APKs
         if: success()
         run: |
           SHA="${{ github.sha }}"
           SHORT="${SHA:0:7}"
-          SRC="gradle_build/app/build/outputs/apk/debug/app-debug.apk"
           mkdir -p artifacts
-          cp "$SRC" "artifacts/PramodOctapad-v1.0-debug-${SHORT}.apk"
-          echo "=== Built APK ===" && ls -lh artifacts/
+          cp "gradle_build/app/build/outputs/apk/full/debug/app-full-debug.apk"  \
+             "artifacts/PramodOctapad-Full-v1.0-debug-${SHORT}.apk"
+          cp "gradle_build/app/build/outputs/apk/loops/debug/app-loops-debug.apk" \
+             "artifacts/PramodOctapad-Loops-v1.0-debug-${SHORT}.apk"
+          cp "gradle_build/app/build/outputs/apk/drums/debug/app-drums-debug.apk" \
+             "artifacts/PramodOctapad-Drums-v1.0-debug-${SHORT}.apk"
+          echo "=== Built APKs ===" && ls -lh artifacts/
 
-      # ── 10. Upload APK artifact ────────────────────────────────────────────
-      - name: Upload Debug APK
+      # ── 10. Upload all 3 APKs as separate artifacts ────────────────────────
+      - name: Upload Full APK (both systems)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: PramodOctapad-Debug-APK
-          path: artifacts/PramodOctapad-v1.0-debug-*.apk
+          name: PramodOctapad-Full-Debug-APK
+          path: artifacts/PramodOctapad-Full-v1.0-debug-*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Loops APK (sirf Loop Player)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PramodOctapad-Loops-Debug-APK
+          path: artifacts/PramodOctapad-Loops-v1.0-debug-*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Drums APK (sirf Drum Pad)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PramodOctapad-Drums-Debug-APK
+          path: artifacts/PramodOctapad-Drums-v1.0-debug-*.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -103,11 +125,18 @@ jobs:
       - name: Print build summary
         if: always()
         run: |
-          echo "## 📦 Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
-          for f in artifacts/*.apk; do
-            [ -f "$f" ] && echo "| \`$(basename $f)\` | $(du -sh $f | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Build Summary — 3 APKs" >> $GITHUB_STEP_SUMMARY
+          echo "| APK | Package | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|---------|------|" >> $GITHUB_STEP_SUMMARY
+          declare -A PKG=(
+            [Full]="com.pramod.loopmidi"
+            [Loops]="com.pramod.loopmidi.loops"
+            [Drums]="com.pramod.loopmidi.drums"
+          )
+          for flavor in Full Loops Drums; do
+            f="artifacts/PramodOctapad-${flavor}-v1.0-debug-${{ github.sha }}"; f="${f:0:55}"; \
+            apk=$(ls artifacts/PramodOctapad-${flavor}-*.apk 2>/dev/null | head -1)
+            [ -f "$apk" ] && echo "| \`$(basename $apk)\` | \`${PKG[$flavor]}\` | $(du -sh $apk | cut -f1) |" >> $GITHUB_STEP_SUMMARY
           done
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
