@@ -41,6 +41,80 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1070428492610:android:463803a2e3c8dff1b0eedb",
+        "android_client_info": {
+          "package_name": "com.pramod.loopmidi.loops"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1070428492610-4ob9cmeo9es55p8uc6a4i51a9u1ni61l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pramod.loopmidi.loops",
+            "certificate_hash": "9324732a57a16f3f5244991f32a4bbd178ff6659"
+          }
+        },
+        {
+          "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAM5iLKu7EBcodDUgBiGadmIAsMv82yxhc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1070428492610:android:463803a2e3c8dff1b0eedb",
+        "android_client_info": {
+          "package_name": "com.pramod.loopmidi.drums"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1070428492610-4ob9cmeo9es55p8uc6a4i51a9u1ni61l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pramod.loopmidi.drums",
+            "certificate_hash": "9324732a57a16f3f5244991f32a4bbd178ff6659"
+          }
+        },
+        {
+          "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAM5iLKu7EBcodDUgBiGadmIAsMv82yxhc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1070428492610-9vhr25vajqnd8dtmjg1tqcsiblchjvv3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
