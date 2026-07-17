@@ -421,12 +421,12 @@ public class LoginActivity extends Activity {
         //   "drums"  → sirf MainActivity (Drum Pad)
         //   "loops"  → sirf LoopsActivity
         //   "full"   → dialog: user choose kare Loops ya Octapad
-        if (BuildConfig.FLAVOR.equals("drums")) {
-            launchActivity(MainActivity.class);
-        } else if (BuildConfig.FLAVOR.equals("full")) {
-            showModeDialog();
-        } else {
+        // "drums" aur "full" dono → MainActivity
+        // "loops" → LoopsActivity
+        if (BuildConfig.FLAVOR.equals("loops")) {
             launchActivity(LoopsActivity.class);
+        } else {
+            launchActivity(MainActivity.class);
         }
     }
 
@@ -435,16 +435,6 @@ public class LoginActivity extends Activity {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(intent);
         finish();
-    }
-
-    private void showModeDialog() {
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("Mode Select karo")
-                .setMessage("Aap kaunsa mode use karna chahte hain?")
-                .setCancelable(false)
-                .setPositiveButton("🎵 Loops", (dialog, which) -> launchActivity(LoopsActivity.class))
-                .setNegativeButton("🥁 Octapad", (dialog, which) -> launchActivity(MainActivity.class))
-                .show();
     }
 
     // ─────────────────────────────────────────────────────────────────
