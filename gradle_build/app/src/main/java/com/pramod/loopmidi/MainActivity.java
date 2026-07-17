@@ -800,12 +800,9 @@ public class MainActivity extends Activity {
         this.fxControlBar = findViewById(R.id.fxControlBar);
         this.advControlBar = findViewById(R.id.advControlBar);
 
-        // ── Drums APK: accountRow + LOOPS/STOP hide, Sign Out FX/ADV me ──────
+        // ── Drums APK: LOOPS/STOP hide, Sign Out FX/ADV me ──────────────────
         if (BuildConfig.FLAVOR.equals("drums")) {
-            // 1. Signed-in row bilkul hata do
-            View accountRow = findViewById(R.id.accountRow);
-            if (accountRow != null) accountRow.setVisibility(View.GONE);
-            // 2. LOOPS aur STOP buttons hata do (LoopsActivity se koi matlab nahi)
+            // 1. LOOPS aur STOP buttons hata do (LoopsActivity se koi matlab nahi)
             if (this.btnLoops != null) this.btnLoops.setVisibility(View.GONE);
             View btnStopLoop = findViewById(R.id.btnStopLoop);
             if (btnStopLoop != null) btnStopLoop.setVisibility(View.GONE);
