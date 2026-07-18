@@ -138,9 +138,17 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         this.isVisible = true;
-        // Reinit Oboe stream on every resume to clear any accumulated buffer
-        // drift or underrun state from background — same fix as LoopsActivity.
-        if (this.audioEngine != null) {
+
+        if (this.audioEngine == null) {
+            // Engine was stopped in onStop() while LoopsActivity was on screen.
+            // Recreate the engine and reload the current kit so drum pads work.
+            AudioEngine eng = new AudioEngine(this);
+            this.audioEngine = eng;
+            eng.start();
+            loadKitFromMemory(this.kitIndex);
+        } else {
+            // Normal resume (screen lock, permission dialog, etc.).
+            // Reinit Oboe stream to clear any buffer drift/underrun from background.
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am != null) {
                 int nativeSR = 48000, nativeBurst = 256;
@@ -2154,6 +2162,15 @@ public class MainActivity extends Activity {
     protected void onStop() {
         super.onStop();
         saveKitToMemory(this.kitIndex);
+        // Full APK: when LoopsActivity comes to the foreground, MainActivity
+        // goes to onStop(). If we leave our Oboe stream running, two streams
+        // compete for the audio hardware simultaneously → underruns, crackling,
+        // and distortion in LoopsActivity ("kharab sound").
+        // Destroy the engine here; onResume() will recreate it + reload samples.
+        if (this.audioEngine != null) {
+            try { this.audioEngine.stop(); } catch (Exception ignored) {}
+            this.audioEngine = null;
+        }
     }
 
     @Override // android.app.Activity
