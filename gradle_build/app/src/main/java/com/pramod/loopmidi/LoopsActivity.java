@@ -242,6 +242,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private int                      dialogEngineRecTrack  = 0;
     // Dialog reference so we can refresh its UI from background threads
     private android.app.AlertDialog  recDialog        = null;
+    private View                      recControlPanelScroll = null;
+    private android.widget.LinearLayout recPanelRoot  = null;
     // Track-list and status-label references kept alive so the recording thread's
     // Handler.post() can refresh the dialog without re-opening it.
     private android.widget.LinearLayout currentRecTrackList = null;
@@ -1063,7 +1065,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnBack = (Button) findViewById(R.id.btnBack);
         this.btnEditLoops = (Button) findViewById(R.id.btnEditLoops);
         this.btnAdvancedLoops = (Button) findViewById(R.id.btnAdvancedLoops);
-        this.advancedControlPanel = findViewById(R.id.advancedControlPanelScroll);
+        this.advancedControlPanel     = findViewById(R.id.advancedControlPanelScroll);
+        this.recControlPanelScroll    = findViewById(R.id.recControlPanelScroll);
+        this.recPanelRoot             = (android.widget.LinearLayout) findViewById(R.id.recControlPanel);
         this.txtLoopStatus = (TextView) findViewById(R.id.txtLoopStatus);
         this.txtMidiStatus = (TextView) findViewById(R.id.txtMidiStatus);
         if (this.txtMidiStatus != null) {
@@ -3126,28 +3130,132 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 9001);
             return;
         }
+        if (recControlPanelScroll == null || recPanelRoot == null) return;
 
-        android.view.LayoutInflater inf = android.view.LayoutInflater.from(this);
-        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
-        root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setPadding(24, 16, 24, 8);
-        root.setBackgroundColor(0xFF1a1a2e);
+        // ── TOGGLE: REC button dabao → panel open/close (ADV jaisa) ──────────
+        if (recControlPanelScroll.getVisibility() == View.VISIBLE) {
+            recControlPanelScroll.setVisibility(View.GONE);
+            if (!isRecordingTrack) stopSystemAudioCapture();
+            return;
+        }
+
+        // ── Build panel content (fresh every open) ────────────────────────────
+        recPanelRoot.removeAllViews();
+
+        // ── Header row: title + ✕ CLOSE button ───────────────────────────────
+        android.widget.LinearLayout headerRow = new android.widget.LinearLayout(this);
+        headerRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        headerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.LinearLayout.LayoutParams hrLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        hrLP.bottomMargin = 8;
+        headerRow.setLayoutParams(hrLP);
+
+        android.widget.TextView tvTitle = new android.widget.TextView(this);
+        tvTitle.setText("🎙 Multi-Track Recorder");
+        tvTitle.setTextColor(0xFFFFFFFF);
+        tvTitle.setTextSize(14f);
+        tvTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        tvTitle.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        headerRow.addView(tvTitle);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("✕ CLOSE");
+        btnClose.setBackgroundColor(0xFF442222);
+        btnClose.setTextColor(0xFFFFAAAA);
+        btnClose.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams closeLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        btnClose.setLayoutParams(closeLP);
+        btnClose.setOnClickListener(v -> {
+            recControlPanelScroll.setVisibility(View.GONE);
+            if (!isRecordingTrack) stopSystemAudioCapture();
+        });
+        headerRow.addView(btnClose);
+        recPanelRoot.addView(headerRow);
 
         // ── Status label ──────────────────────────────────────────────────────
         final android.widget.TextView tvStatus = new android.widget.TextView(this);
         tvStatus.setTextColor(0xFFFF8800);
         tvStatus.setTextSize(13f);
-        tvStatus.setPadding(0, 0, 0, 10);
+        tvStatus.setPadding(0, 0, 0, 8);
         tvStatus.setText(trackPaths.isEmpty()
             ? "Koi track nahi hai — 🔴 REC dabao"
             : trackCount + " track(s) recorded");
-        root.addView(tvStatus);
+        recPanelRoot.addView(tvStatus);
 
-        // ── Source selector: MIC vs SYSTEM (internal) audio ─────────────────────
+        // ── BPM bar ───────────────────────────────────────────────────────────
+        android.widget.LinearLayout bpmBar = new android.widget.LinearLayout(this);
+        bpmBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        bpmBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bpmBar.setBackgroundColor(0xFF111122);
+        bpmBar.setPadding(12, 8, 12, 8);
+        android.widget.LinearLayout.LayoutParams bpmBarLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        bpmBarLP.bottomMargin = 8;
+        bpmBar.setLayoutParams(bpmBarLP);
+
+        android.widget.TextView tvBpmLabel = new android.widget.TextView(this);
+        tvBpmLabel.setText("🎵 BPM: ");
+        tvBpmLabel.setTextColor(0xFF88BBFF);
+        tvBpmLabel.setTextSize(12f);
+        bpmBar.addView(tvBpmLabel);
+
+        android.widget.TextView tvBpmVal = new android.widget.TextView(this);
+        tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
+        tvBpmVal.setTextColor(0xFFFFDD44);
+        tvBpmVal.setTextSize(14f);
+        tvBpmVal.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        tvBpmVal.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        bpmBar.addView(tvBpmVal);
+
+        Button btnBpmMinus = new Button(this);
+        btnBpmMinus.setText("−5");
+        btnBpmMinus.setBackgroundColor(0xFF333366);
+        btnBpmMinus.setTextColor(0xFFFFFFFF);
+        btnBpmMinus.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams bpmMinLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        bpmMinLP.setMarginStart(8);
+        btnBpmMinus.setLayoutParams(bpmMinLP);
+
+        Button btnBpmPlus = new Button(this);
+        btnBpmPlus.setText("+5");
+        btnBpmPlus.setBackgroundColor(0xFF333366);
+        btnBpmPlus.setTextColor(0xFFFFFFFF);
+        btnBpmPlus.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams bpmPlusLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        bpmPlusLP.setMarginStart(4);
+        btnBpmPlus.setLayoutParams(bpmPlusLP);
+
+        bpmBar.addView(btnBpmMinus);
+        bpmBar.addView(btnBpmPlus);
+        recPanelRoot.addView(bpmBar);
+
+        btnBpmMinus.setOnClickListener(v -> {
+            if (seekTempo != null) {
+                float s = Math.max(0.1f, Math.min(2.0f, Math.max(12f, currentSpeed * 120f - 5f) / 120f));
+                seekTempo.setProgress((int)(s * 100));
+                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
+            }
+        });
+        btnBpmPlus.setOnClickListener(v -> {
+            if (seekTempo != null) {
+                float s = Math.max(0.1f, Math.min(2.0f, Math.min(240f, currentSpeed * 120f + 5f) / 120f));
+                seekTempo.setProgress((int)(s * 100));
+                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
+            }
+        });
+
+        // ── Source selector ───────────────────────────────────────────────────
         final boolean[] useSystemAudio = { false };
         android.widget.LinearLayout srcRow = new android.widget.LinearLayout(this);
         srcRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        srcRow.setPadding(0, 0, 0, 12);
+        android.widget.LinearLayout.LayoutParams srcLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        srcLP.bottomMargin = 8;
+        srcRow.setLayoutParams(srcLP);
 
         final Button btnSrcMic = new Button(this);
         btnSrcMic.setText("🎤 MIC");
@@ -3159,7 +3267,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnSrcMic.setLayoutParams(micLP);
 
         final Button btnSrcSys = new Button(this);
-        btnSrcSys.setText("🔊 SYSTEM (internal)");
+        btnSrcSys.setText("🔊 SYSTEM");
         btnSrcSys.setBackgroundColor(0xFF333333);
         btnSrcSys.setTextColor(0xFFFFFFFF);
         btnSrcSys.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
@@ -3170,24 +3278,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             btnSrcSys.setBackgroundColor(0xFF333333);
             tvStatus.setText("🎤 MIC source selected");
         });
-        // "SYSTEM (internal)" now records the app's own mixed pad/loop output
-        // directly from the audio engine — no MediaProjection / screen-cast
-        // permission dialog is ever requested for this.
         btnSrcSys.setOnClickListener(vv -> {
             useSystemAudio[0] = true;
             btnSrcSys.setBackgroundColor(0xFF006600);
             btnSrcMic.setBackgroundColor(0xFF333333);
             tvStatus.setText("🔊 SYSTEM (internal) source selected");
         });
-
         srcRow.addView(btnSrcMic);
         srcRow.addView(btnSrcSys);
-        root.addView(srcRow);
+        recPanelRoot.addView(srcRow);
 
-        // ── MIC-only ECHO (delay) toggle ─────────────────────────────────────
-        // Normal (dry, no-effect) mic recording stays the default/unchanged
-        // behavior — ECHO is an opt-in extra applied only when this toggle is
-        // ON and the source is MIC.
+        // ── ECHO toggle ───────────────────────────────────────────────────────
         final boolean[] useEcho = { false };
         final Button btnEcho = new Button(this);
         btnEcho.setText("🔁 ECHO: OFF");
@@ -3195,7 +3296,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnEcho.setTextColor(0xFFFFFFFF);
         android.widget.LinearLayout.LayoutParams echoLP =
             new android.widget.LinearLayout.LayoutParams(-1, -2);
-        echoLP.setMargins(0, 0, 0, 12);
+        echoLP.bottomMargin = 8;
         btnEcho.setLayoutParams(echoLP);
         btnEcho.setOnClickListener(vv -> {
             useEcho[0] = !useEcho[0];
@@ -3205,71 +3306,62 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 ? "🔁 Echo ON — agli MIC recording mein delay/echo lagega"
                 : "Echo OFF — normal (dry) recording");
         });
-        root.addView(btnEcho);
+        recPanelRoot.addView(btnEcho);
 
-        // ── File Sound Player row (moved in from the old outer strip below the
-        // Mode Bar — now lives inside this dialog so the pad grid gets that
-        // space back). Same FILE / PLAY / STOP / VOL / file-name controls,
-        // wired to the same underlying fields and methods as before. ─────────
-        root.addView(buildFileSoundPlayerRow());
+        // ── File Sound Player ─────────────────────────────────────────────────
+        recPanelRoot.addView(buildFileSoundPlayerRow());
 
-        // ── Track list ────────────────────────────────────────────────────────
+        // ── Track list (inner scroll, max ~110dp) ─────────────────────────────
         final android.widget.ScrollView sv = new android.widget.ScrollView(this);
         final android.widget.LinearLayout trackList = new android.widget.LinearLayout(this);
         trackList.setOrientation(android.widget.LinearLayout.VERTICAL);
         sv.addView(trackList);
-        // Store references so the recording thread can refresh this dialog without
-        // requiring the user to close and reopen it.
         currentRecTrackList = trackList;
         currentRecTvStatus  = tvStatus;
-        android.view.ViewGroup.LayoutParams svLP =
-            new android.view.ViewGroup.LayoutParams(-1, android.util.TypedValue.applyDimension(
-                android.util.TypedValue.COMPLEX_UNIT_DIP, 120,
-                getResources().getDisplayMetrics()) > 0
-                ? (int) android.util.TypedValue.applyDimension(
-                    android.util.TypedValue.COMPLEX_UNIT_DIP, 120,
-                    getResources().getDisplayMetrics())
-                : 300);
-        sv.setLayoutParams(svLP);
-        root.addView(sv);
-
-        // Populate track rows
+        int svH = (int) android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_DIP, 110,
+            getResources().getDisplayMetrics());
+        sv.setLayoutParams(new android.view.ViewGroup.LayoutParams(-1, svH));
+        recPanelRoot.addView(sv);
         refreshTrackList(trackList, tvStatus);
 
         // ── Control buttons row ───────────────────────────────────────────────
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        btnRow.setPadding(0, 12, 0, 0);
+        android.widget.LinearLayout.LayoutParams brLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        brLP.topMargin = 8;
+        btnRow.setLayoutParams(brLP);
 
         final Button btnRecStart = new Button(this);
         btnRecStart.setText(isRecordingTrack ? "⏺ RECORDING..." : "🔴 REC");
         btnRecStart.setBackgroundColor(isRecordingTrack ? 0xFFFF0000 : 0xFFCC0000);
         btnRecStart.setTextColor(0xFFFFFFFF);
-        android.widget.LinearLayout.LayoutParams btnLP =
+        android.widget.LinearLayout.LayoutParams rlp =
             new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        btnLP.setMargins(0, 0, 6, 0);
-        btnRecStart.setLayoutParams(btnLP);
+        rlp.setMargins(0, 0, 6, 0);
+        btnRecStart.setLayoutParams(rlp);
 
         final Button btnRecStop = new Button(this);
         btnRecStop.setText("⏹ STOP");
         btnRecStop.setBackgroundColor(0xFF333333);
         btnRecStop.setTextColor(0xFFFFFFFF);
-        android.widget.LinearLayout.LayoutParams stopLP =
+        android.widget.LinearLayout.LayoutParams slp =
             new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        stopLP.setMargins(0, 0, 6, 0);
-        btnRecStop.setLayoutParams(stopLP);
+        slp.setMargins(0, 0, 6, 0);
+        btnRecStop.setLayoutParams(slp);
 
         final Button btnPlayAll = new Button(this);
         btnPlayAll.setText("▶ PLAY ALL");
         btnPlayAll.setBackgroundColor(0xFF006600);
         btnPlayAll.setTextColor(0xFFFFFFFF);
-        android.widget.LinearLayout.LayoutParams playLP =
+        android.widget.LinearLayout.LayoutParams plp =
             new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        playLP.setMargins(0, 0, 6, 0);
-        btnPlayAll.setLayoutParams(playLP);
+        plp.setMargins(0, 0, 6, 0);
+        btnPlayAll.setLayoutParams(plp);
 
         final Button btnClear = new Button(this);
-        btnClear.setText("🗑 CLEAR ALL");
+        btnClear.setText("🗑 CLEAR");
         btnClear.setBackgroundColor(0xFF550000);
         btnClear.setTextColor(0xFFFFFFFF);
         btnClear.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
@@ -3278,31 +3370,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnRow.addView(btnRecStop);
         btnRow.addView(btnPlayAll);
         btnRow.addView(btnClear);
-        root.addView(btnRow);
-
-        // ── Build dialog ──────────────────────────────────────────────────────
-        // Wrap everything in an outer ScrollView so the REC / STOP / PLAY ALL /
-        // CLEAR ALL row can never be pushed off-screen (e.g. on short devices or
-        // when the track list grows) — the whole dialog scrolls instead of
-        // clipping the bottom row.
-        final android.widget.ScrollView dialogScroll = new android.widget.ScrollView(this);
-        dialogScroll.addView(root);
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-            .setTitle("🎙 Multi-Track Recorder")
-            .setView(dialogScroll)
-            .setNegativeButton("CLOSE", null);
-        recDialog = builder.create();
-        // Closing the dialog (CLOSE button, back press, or tap-outside — e.g. to
-        // go tap pads while a track is recording, or while a recorded track is
-        // playing back) must NOT stop an in-progress recording OR an in-progress
-        // playback. Both only stop when the user explicitly presses ⏹ STOP (for
-        // recording) or ⏹ playback stop / track completes naturally (for
-        // playback) inside this dialog — closing the dialog just hides the UI,
-        // it keeps running in the background exactly like recording does.
-        recDialog.setOnDismissListener(dlg -> {
-            if (!isRecordingTrack) stopSystemAudioCapture();
-        });
+        recPanelRoot.addView(btnRow);
 
         // Listeners
         btnRecStart.setOnClickListener(v -> {
@@ -3312,7 +3380,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             startTrackRecording(btnRecStart, tvStatus, useSystemAudio[0], useEcho[0]);
         });
-
         btnRecStop.setOnClickListener(v -> {
             if (!isRecordingTrack) {
                 stopMediaPlayer();
@@ -3325,7 +3392,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             tvStatus.setText("✅ Track " + trackCount + " save ho gaya! Aur tracks record karo ya ▶ PLAY ALL karo.");
             refreshTrackList(trackList, tvStatus);
         });
-
         btnPlayAll.setOnClickListener(v -> {
             if (isRecordingTrack) {
                 Toast.makeText(this, "Pehle recording STOP karo!", Toast.LENGTH_SHORT).show();
@@ -3337,154 +3403,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             playTrack(trackPaths.get(trackPaths.size() - 1), tvStatus);
         });
-
         btnClear.setOnClickListener(v -> {
             if (isRecordingTrack) stopTrackRecording();
             stopMediaPlayer();
             for (String p : trackPaths) new File(p).delete();
             trackPaths.clear();
             trackCount = 0;
-            saveTrackPaths(); // Bug Fix: clear ke baad bhi list persist karo
+            saveTrackPaths();
             refreshTrackList(trackList, tvStatus);
             tvStatus.setText("Sab tracks delete ho gaye.");
             Toast.makeText(this, "All tracks cleared!", Toast.LENGTH_SHORT).show();
         });
 
-        // ── BPM display bar ───────────────────────────────────────────────────
-        // Shows current BPM live so user knows tempo while recording
-        android.widget.LinearLayout bpmBar = new android.widget.LinearLayout(this);
-        bpmBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        bpmBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        bpmBar.setBackgroundColor(0xFF111122);
-        bpmBar.setPadding(16, 10, 16, 10);
-        android.widget.LinearLayout.LayoutParams bpmBarLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        bpmBarLP.topMargin = 10;
-        bpmBar.setLayoutParams(bpmBarLP);
-
-        android.widget.TextView tvBpmLabel = new android.widget.TextView(this);
-        tvBpmLabel.setText("🎵 Current BPM: ");
-        tvBpmLabel.setTextColor(0xFF88BBFF);
-        tvBpmLabel.setTextSize(13f);
-        bpmBar.addView(tvBpmLabel);
-
-        android.widget.TextView tvBpmVal = new android.widget.TextView(this);
-        float curBpm = currentSpeed * 120f;
-        tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", curBpm, currentSpeed));
-        tvBpmVal.setTextColor(0xFFFFDD44);
-        tvBpmVal.setTextSize(15f);
-        tvBpmVal.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        bpmBar.addView(tvBpmVal);
-
-        // BPM +/- quick adjust buttons
-        android.widget.LinearLayout.LayoutParams bpmBtnSp = new android.widget.LinearLayout.LayoutParams(-2, -2);
-        bpmBtnSp.setMarginStart(16);
-        Button btnBpmMinus = new Button(this);
-        btnBpmMinus.setText("−");
-        btnBpmMinus.setBackgroundColor(0xFF333366);
-        btnBpmMinus.setTextColor(0xFFFFFFFF);
-        btnBpmMinus.setLayoutParams(bpmBtnSp);
-        Button btnBpmPlus = new Button(this);
-        btnBpmPlus.setText("+");
-        btnBpmPlus.setBackgroundColor(0xFF333366);
-        btnBpmPlus.setTextColor(0xFFFFFFFF);
-        android.widget.LinearLayout.LayoutParams bpmPlusLP = new android.widget.LinearLayout.LayoutParams(-2, -2);
-        bpmPlusLP.setMarginStart(6);
-        btnBpmPlus.setLayoutParams(bpmPlusLP);
-        bpmBar.addView(btnBpmMinus);
-        bpmBar.addView(btnBpmPlus);
-        root.addView(bpmBar);
-
-        // BPM ± 5 adjust — syncs with main seekTempo
-        btnBpmMinus.setOnClickListener(v -> {
-            if (seekTempo != null) {
-                float newBpm = Math.max(12f, currentSpeed * 120f - 5f);
-                float newSpeed = Math.max(0.1f, Math.min(2.0f, newBpm / 120f));
-                seekTempo.setProgress((int)(newSpeed * 100));
-                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
-            }
-        });
-        btnBpmPlus.setOnClickListener(v -> {
-            if (seekTempo != null) {
-                float newBpm = Math.min(240f, currentSpeed * 120f + 5f);
-                float newSpeed = Math.max(0.1f, Math.min(2.0f, newBpm / 120f));
-                seekTempo.setProgress((int)(newSpeed * 100));
-                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
-            }
-        });
-
-        // ── Pad grid — bilkul real pads jaisa (pad_black_selector, 18sp bold) ──
-        android.widget.TextView tvPadLabel = new android.widget.TextView(this);
-        tvPadLabel.setText("🥁 PADS — recording ke dauran bhi tap karo");
-        tvPadLabel.setTextColor(0xFF88BBFF);
-        tvPadLabel.setTextSize(11f);
-        android.widget.LinearLayout.LayoutParams tvPadLP =
-            new android.widget.LinearLayout.LayoutParams(-1, -2);
-        tvPadLP.topMargin = 14;
-        tvPadLabel.setLayoutParams(tvPadLP);
-        root.addView(tvPadLabel);
-
-        // Row height in px — matches roughly half the main screen pad height
-        int padRowPx = (int)(getResources().getDisplayMetrics().density * 90);
-
-        for (int row = 0; row < 2; row++) {
-            android.widget.LinearLayout padRow = new android.widget.LinearLayout(this);
-            padRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-            android.widget.LinearLayout.LayoutParams padRowLP =
-                new android.widget.LinearLayout.LayoutParams(-1, padRowPx);
-            padRowLP.topMargin = (row == 0) ? 4 : 0;
-            padRow.setLayoutParams(padRowLP);
-
-            for (int col = 0; col < 4; col++) {
-                final int padIdx = row * 4 + col;
-                Button padBtn = new Button(this);
-
-                // Exact same text as the real pad on screen
-                String label = (loopPads[padIdx] != null)
-                    ? loopPads[padIdx].getText().toString()
-                    : "PAD " + (padIdx + 1);
-                padBtn.setText(label);
-
-                // Real drawable — same 3D rounded style as the main pad buttons
-                padBtn.setBackgroundResource(R.drawable.pad_black_selector);
-                padBtn.setTextColor(0xFFFFFFFF);
-                padBtn.setTextSize(18f);   // same as XML: android:textSize="18sp"
-                padBtn.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                padBtn.setSoundEffectsEnabled(false);
-
-                // 4dp margin all around — same as XML: android:layout_margin="4dp"
-                int m4 = (int)(getResources().getDisplayMetrics().density * 4);
-                android.widget.LinearLayout.LayoutParams padBtnLP =
-                    new android.widget.LinearLayout.LayoutParams(0, -1, 1f);
-                padBtnLP.setMargins(m4, m4, m4, m4);
-                padBtn.setLayoutParams(padBtnLP);
-
-                final Button fPadBtn = padBtn;
-                padBtn.setOnTouchListener((v, ev) -> {
-                    int action = ev.getAction();
-                    if (action == android.view.MotionEvent.ACTION_DOWN) {
-                        handlePadClick(padIdx);
-                        // Blue glow on press — same as real pad active state
-                        fPadBtn.setBackgroundResource(R.drawable.pad_blue_glow_selector);
-                    } else if (action == android.view.MotionEvent.ACTION_UP
-                            || action == android.view.MotionEvent.ACTION_CANCEL) {
-                        // Return to black 3D look
-                        fPadBtn.setBackgroundResource(R.drawable.pad_black_selector);
-                    }
-                    return false;
-                });
-                padRow.addView(padBtn);
-            }
-            root.addView(padRow);
-        }
-
-        recDialog.show();
-        // ── Make dialog bigger: 97% screen width, 95% screen height ──────────
-        android.view.Window recWin = recDialog.getWindow();
-        if (recWin != null) {
-            int screenW = getResources().getDisplayMetrics().widthPixels;
-            int screenH = getResources().getDisplayMetrics().heightPixels;
-            recWin.setLayout((int)(screenW * 0.97f), (int)(screenH * 0.95f));
-        }
+        // ── Show the panel (real pads remain visible below via loopPadArea) ───
+        recControlPanelScroll.setVisibility(View.VISIBLE);
     }
 
     /** Refresh the track list inside the dialog. */
@@ -3668,7 +3600,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM, " + channels + "ch)");
                     // FIX: Refresh the dialog track list immediately so the new recording
                     // appears without needing to close and reopen the dialog.
-                    if (currentRecTrackList != null && recDialog != null && recDialog.isShowing()) {
+                    if (currentRecTrackList != null && recControlPanelScroll != null && recControlPanelScroll.getVisibility() == View.VISIBLE) {
                         refreshTrackList(currentRecTrackList, currentRecTvStatus);
                         if (currentRecTvStatus != null)
                             currentRecTvStatus.setText("✅ Track " + trackCount + " save ho gaya! Aur tracks record karo ya ▶ PLAY ALL karo.");

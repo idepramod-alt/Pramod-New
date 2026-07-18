@@ -337,9 +337,20 @@
             android:layout_width="40dp" android:layout_height="30dp" android:text="RESET"/>
     </LinearLayout>
 
-    <!-- ── File Sound Player strip: moved inside the 🔴 REC dialog (see
-         showMultiTrackRecDialog() in LoopsActivity.java) so this outer panel
-         no longer eats vertical space — the pad grid below grows to fill it. ── -->
+    <!-- ── REC Panel (REC button toggles visibility, same pattern as ADV) ── -->
+    <!-- Shares vertical space 50/50 with loopPadArea below via weight=1 so
+         the real pads always stay visible at the bottom while the panel is open. -->
+    <ScrollView android:id="@+id/recControlPanelScroll"
+        android:visibility="gone" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginBottom="4dp"
+        android:fillViewport="true">
+    <LinearLayout android:orientation="vertical" android:id="@+id/recControlPanel"
+        android:background="#ff1a1a2e" android:padding="12dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+    </LinearLayout>
+    </ScrollView>
 
     <!-- ── Pad Grid ── -->
     <!-- Hidden stubs: workflow CI patch scripts grep for these IDs to skip re-adding their rows -->
