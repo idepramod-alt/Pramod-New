@@ -3412,47 +3412,63 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         });
 
-        // ── Pad grid (2 rows × 4 cols) — tap pads while recording ─────────────
+        // ── Pad grid — bilkul real pads jaisa (pad_black_selector, 18sp bold) ──
         android.widget.TextView tvPadLabel = new android.widget.TextView(this);
-        tvPadLabel.setText("🥁 PADS — recording ke dauran bhi tap kar sakte ho");
+        tvPadLabel.setText("🥁 PADS — recording ke dauran bhi tap karo");
         tvPadLabel.setTextColor(0xFF88BBFF);
         tvPadLabel.setTextSize(11f);
-        android.widget.LinearLayout.LayoutParams tvPadLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        android.widget.LinearLayout.LayoutParams tvPadLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
         tvPadLP.topMargin = 14;
         tvPadLabel.setLayoutParams(tvPadLP);
         root.addView(tvPadLabel);
 
-        // 2 rows × 4 cols grid
-        String[] padEmojis = {"1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"};
+        // Row height in px — matches roughly half the main screen pad height
+        int padRowPx = (int)(getResources().getDisplayMetrics().density * 90);
+
         for (int row = 0; row < 2; row++) {
             android.widget.LinearLayout padRow = new android.widget.LinearLayout(this);
             padRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-            android.widget.LinearLayout.LayoutParams padRowLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-            padRowLP.topMargin = 6;
+            android.widget.LinearLayout.LayoutParams padRowLP =
+                new android.widget.LinearLayout.LayoutParams(-1, padRowPx);
+            padRowLP.topMargin = (row == 0) ? 4 : 0;
             padRow.setLayoutParams(padRowLP);
+
             for (int col = 0; col < 4; col++) {
                 final int padIdx = row * 4 + col;
                 Button padBtn = new Button(this);
-                // Show pad number + whether it has audio loaded
-                boolean hasAudio = loopUris[padIdx] != null || loopSamples[padIdx] != null;
-                String padName = "PAD " + (padIdx + 1);
-                padBtn.setText(padEmojis[padIdx] + "\n" + padName);
-                padBtn.setBackgroundColor(hasAudio ? 0xFF003399 : 0xFF222244);
-                padBtn.setTextColor(hasAudio ? 0xFFFFFFFF : 0xFF888888);
-                padBtn.setTextSize(10f);
+
+                // Exact same text as the real pad on screen
+                String label = (loopPads[padIdx] != null)
+                    ? loopPads[padIdx].getText().toString()
+                    : "PAD " + (padIdx + 1);
+                padBtn.setText(label);
+
+                // Real drawable — same 3D rounded style as the main pad buttons
+                padBtn.setBackgroundResource(R.drawable.pad_black_selector);
+                padBtn.setTextColor(0xFFFFFFFF);
+                padBtn.setTextSize(18f);   // same as XML: android:textSize="18sp"
+                padBtn.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                padBtn.setSoundEffectsEnabled(false);
+
+                // 4dp margin all around — same as XML: android:layout_margin="4dp"
+                int m4 = (int)(getResources().getDisplayMetrics().density * 4);
                 android.widget.LinearLayout.LayoutParams padBtnLP =
-                    new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-                padBtnLP.setMargins(col == 0 ? 0 : 6, 0, 0, 0);
+                    new android.widget.LinearLayout.LayoutParams(0, -1, 1f);
+                padBtnLP.setMargins(m4, m4, m4, m4);
                 padBtn.setLayoutParams(padBtnLP);
+
                 final Button fPadBtn = padBtn;
                 padBtn.setOnTouchListener((v, ev) -> {
-                    if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                    int action = ev.getAction();
+                    if (action == android.view.MotionEvent.ACTION_DOWN) {
                         handlePadClick(padIdx);
-                        fPadBtn.setBackgroundColor(0xFF0055FF);
-                    } else if (ev.getAction() == android.view.MotionEvent.ACTION_UP
-                            || ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                        boolean loaded = loopUris[padIdx] != null || loopSamples[padIdx] != null;
-                        fPadBtn.setBackgroundColor(loaded ? 0xFF003399 : 0xFF222244);
+                        // Blue glow on press — same as real pad active state
+                        fPadBtn.setBackgroundResource(R.drawable.pad_blue_glow_selector);
+                    } else if (action == android.view.MotionEvent.ACTION_UP
+                            || action == android.view.MotionEvent.ACTION_CANCEL) {
+                        // Return to black 3D look
+                        fPadBtn.setBackgroundResource(R.drawable.pad_black_selector);
                     }
                     return false;
                 });
