@@ -345,8 +345,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         boolean effectiveDrumMode = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : this.isGlobalDrumMode;
+        // Bug fix: when a pad has an explicit LOOP mode override but global
+        // OneShot is ON, the pad must still play as one-shot (not loop forever).
+        // Previously the override short-circuited isOneShotMode entirely.
         boolean isDrumPad = this.padModeOverride[index]
-                ? this.padDrumMode[index]
+                ? (this.padDrumMode[index] || this.isOneShotMode)
                 : (this.isGlobalDrumMode || this.isOneShotMode);
         // Real DRUM MODE and ONE-SHOT MODE use two different choke targets:
         //   - DRUM MODE: each pad is its own independent voice (chokeGroup = index+1
@@ -487,8 +490,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.loopPads[index] == null) return;
         // Effective mode: an explicit per-pad override always wins; otherwise the
         // pad simply reflects whatever the global LOOP/DRUM toggle currently is.
+        // Same fix as handlePadClick: LOOP override must still respect isOneShotMode
+        // for the pad colour (orange = drum/one-shot, black = stopped loop).
         boolean effectiveDrum = this.padModeOverride[index]
-                ? this.padDrumMode[index]
+                ? (this.padDrumMode[index] || this.isOneShotMode)
                 : (this.isGlobalDrumMode || this.isOneShotMode);
         if (this.loopPlaying[index]) {
             // Playing state handled by the caller (blue glow already set on play)
@@ -2857,8 +2862,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         boolean effectiveDrumMode = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : this.isGlobalDrumMode;
+        // Same fix as handlePadClick: LOOP override must still respect isOneShotMode
         boolean isDrumPad = this.padModeOverride[index]
-                ? this.padDrumMode[index]
+                ? (this.padDrumMode[index] || this.isOneShotMode)
                 : (this.isGlobalDrumMode || this.isOneShotMode);
 
         // Velocity-scaled volume: baseVol × velocityScale
@@ -2920,12 +2926,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     public void setGlobalDrumMode(boolean isDrum) {
         if (isDrum == this.isGlobalDrumMode) return;  // already in this mode
         if (isDrum) {
-            // Save current Loop Mode options before overwriting them
+            // Save current Loop Mode options so they can be restored on exit
             this.savedMultiMode   = this.isMultiMode;
             this.savedOneShotMode = this.isOneShotMode;
-            // Drum Mode: all pads independent one-shot, no looping
-            this.isOneShotMode = false;   // choke handled per-hit, not globally
-            this.isMultiMode   = true;    // all pads play simultaneously
+            // Drum Mode: choke is handled natively per-hit, not via isOneShotMode
+            this.isOneShotMode = false;
+            // Bug fix: do NOT force isMultiMode = true. Real drum pads already
+            // ignore isMultiMode in the engine (they never choke other pads),
+            // so forcing it to true just auto-checks the MultiPlay checkbox
+            // without any real effect — confusing and unwanted by the user.
         } else {
             // Restore the user's Loop Mode settings from before Drum Mode was enabled
             this.isOneShotMode = this.savedOneShotMode;
