@@ -1204,8 +1204,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // (choke + delay) — same per-pad pattern MainActivity uses.
         for (int i = 0; i < 8; i++) {
             this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
-            this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_" + i, false);
-            this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_" + i, false);
+            this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + i, false);
+            this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
             this.padDrumChokeGroup[i] = this.prefs.getInt("pad_drum_choke_grp_" + i, 0);
             this.padDrumDelayOn[i] = this.prefs.getBoolean("pad_drum_delay_on_" + i, false);
             this.padDrumDelayTime[i] = this.prefs.getFloat("pad_drum_delay_time_" + i, 150.0f);
@@ -1427,8 +1427,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                                 LoopsActivity.this.loopPlaying[padIndex] = false;
                                             }
                                             LoopsActivity.this.prefs.edit()
-                                                .putBoolean("pad_drum_mode_" + padIndex, isDrum)
-                                                .putBoolean("pad_mode_override_" + padIndex, true)
+                                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + padIndex, isDrum)
+                                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + padIndex, true)
                                                 .apply();
                                             LoopsActivity.this.updatePadLabel(padIndex);
                                             Toast.makeText(LoopsActivity.this,
@@ -1956,8 +1956,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             }
                             LoopsActivity.this.updatePadLabel(index);
                             LoopsActivity.this.prefs.edit()
-                                .putBoolean("pad_drum_mode_" + index, LoopsActivity.this.padDrumMode[index])
-                                .putBoolean("pad_mode_override_" + index, true)
+                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + index, LoopsActivity.this.padDrumMode[index])
+                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + index, true)
                                 .apply();
                             String modeStr = LoopsActivity.this.padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
                             LoopsActivity.this.txtLoopStatus.setText(
@@ -2056,8 +2056,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.padDrumMode[index] = false;
         this.padModeOverride[index] = false;
         prefs.edit()
-            .putBoolean("pad_drum_mode_" + index, false)
-            .putBoolean("pad_mode_override_" + index, false)
+            .putBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + index, false)
+            .putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + index, false)
             .apply();
         this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
         saveLoopsToMemory();
@@ -2287,13 +2287,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             this.loopSamples[i] = null;
             this.loopUris[i] = null;
-            // Kit load clears samples → reset drum mode/override and restore dark background
-            this.padDrumMode[i] = false;
-            this.padModeOverride[i] = false;
-            prefs.edit()
-                .putBoolean("pad_drum_mode_" + i, false)
-                .putBoolean("pad_mode_override_" + i, false)
-                .apply();
+            // Kit load: restore per-pad drum/loop override for THIS kit (not reset).
+            // Each kit has its own saved overrides keyed by loopChannelIndex.
+            this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + i, false);
+            this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
             updatePadLabel(i);
         }
         TextView textView = this.txtLoopStatus;
