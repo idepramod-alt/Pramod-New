@@ -3923,94 +3923,118 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
 
-        // Get duration first
-        double[] durHolder = {0};
+        // ── Read WAV header (fast — no PCM load yet) ─────────────────────────
+        final long[] wavMeta = new long[4]; // [0]=sampleRate [1]=channels [2]=bitsPerSample [3]=dataLen
         try {
             long fileLen = new File(wavPath).length();
             if (fileLen <= 44) { Toast.makeText(this, "File empty hai!", Toast.LENGTH_SHORT).show(); return; }
-            // Read sampleRate from WAV header (offset 24, 4 bytes LE)
             try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(wavPath, "r")) {
-                raf.seek(24);
-                int b0 = raf.read(), b1 = raf.read(), b2 = raf.read(), b3 = raf.read();
-                int sr = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-                int ch = 1; raf.seek(22); ch = raf.read() | (raf.read() << 8);
-                int bps = 16; raf.seek(34); bps = raf.read() | (raf.read() << 8);
-                long dataBytes = fileLen - 44;
-                durHolder[0] = (double) dataBytes / (sr * ch * bps / 8.0);
+                raf.seek(22);
+                wavMeta[1] = raf.read() | (raf.read() << 8);                                                    // channels
+                wavMeta[0] = raf.read() | (raf.read() << 8) | (raf.read() << 16) | (raf.read() << 24);         // sampleRate
+                raf.seek(34);
+                wavMeta[2] = raf.read() | (raf.read() << 8);                                                    // bitsPerSample
+                wavMeta[3] = fileLen - 44;                                                                       // dataLen
             }
         } catch (Exception e) {
             Toast.makeText(this, "File read error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             return;
         }
-        final double totalDur = durHolder[0];
+        final int  srInt   = (int) wavMeta[0];
+        final int  chInt   = (int) Math.max(1, wavMeta[1]);
+        final int  bpsInt  = (int) Math.max(8, wavMeta[2]);
+        final long dataLen = wavMeta[3];
+        final double totalDur = (double) dataLen / (srInt * chInt * bpsInt / 8.0);
 
-        // Build trim dialog UI
+        // ── Root scroll container ─────────────────────────────────────────────
+        android.widget.ScrollView scrollRoot = new android.widget.ScrollView(this);
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
-        root.setPadding(32, 24, 32, 16);
-        root.setBackgroundColor(0xFF1a1a2e);
+        root.setPadding(28, 20, 28, 12);
+        root.setBackgroundColor(0xFF0D1B2A);
+        scrollRoot.addView(root);
 
+        // ── Info label ────────────────────────────────────────────────────────
         android.widget.TextView tvInfo = new android.widget.TextView(this);
         tvInfo.setText(String.format(java.util.Locale.US,
-                "Total duration: %.2f sec\nTrack %d: %s",
+                "⏱ Total: %.2f sec   |   Track %d: %s",
                 totalDur, trackIdx + 1, new File(wavPath).getName()));
-        tvInfo.setTextColor(0xFFCCCCCC);
-        tvInfo.setTextSize(12f);
-        tvInfo.setPadding(0, 0, 0, 16);
+        tvInfo.setTextColor(0xFF88BBFF);
+        tvInfo.setTextSize(11f);
+        tvInfo.setPadding(0, 0, 0, 10);
         root.addView(tvInfo);
 
-        // Start time
-        android.widget.LinearLayout rowStart = new android.widget.LinearLayout(this);
-        rowStart.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        rowStart.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        // ── Waveform view ─────────────────────────────────────────────────────
+        final WaveformView waveformView = new WaveformView(this);
+        int wvHeightPx = (int)(getResources().getDisplayMetrics().density * 180);
+        android.widget.LinearLayout.LayoutParams wvLP =
+            new android.widget.LinearLayout.LayoutParams(-1, wvHeightPx);
+        wvLP.bottomMargin = 12;
+        waveformView.setLayoutParams(wvLP);
+        root.addView(waveformView);
+
+        // ── Time input row ────────────────────────────────────────────────────
+        android.widget.LinearLayout timeRow = new android.widget.LinearLayout(this);
+        timeRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        timeRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
         android.widget.TextView lblStart = new android.widget.TextView(this);
-        lblStart.setText("Start (sec): ");
-        lblStart.setTextColor(0xFFFFFFFF);
-        lblStart.setMinWidth(120);
+        lblStart.setText("🟢 Start:");
+        lblStart.setTextColor(0xFF00FF44);
+        lblStart.setTextSize(12f);
+        lblStart.setPadding(0, 0, 8, 0);
+
         android.widget.EditText etStart = new android.widget.EditText(this);
         etStart.setText("0.00");
         etStart.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         etStart.setTextColor(0xFFFFFFFF);
-        etStart.setBackgroundColor(0xFF333333);
-        android.widget.LinearLayout.LayoutParams etLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        etStart.setLayoutParams(etLP);
-        rowStart.addView(lblStart); rowStart.addView(etStart);
-        root.addView(rowStart);
+        etStart.setBackgroundColor(0xFF1A3A1A);
+        etStart.setPadding(8, 6, 8, 6);
+        etStart.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
 
-        // End time
-        android.widget.LinearLayout rowEnd = new android.widget.LinearLayout(this);
-        rowEnd.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        rowEnd.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        android.widget.LinearLayout.LayoutParams rowEndLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        rowEndLP.topMargin = 10;
-        rowEnd.setLayoutParams(rowEndLP);
-        android.widget.TextView lblEnd = new android.widget.TextView(this);
-        lblEnd.setText("End (sec):   ");
-        lblEnd.setTextColor(0xFFFFFFFF);
-        lblEnd.setMinWidth(120);
+        android.widget.TextView lblSep = new android.widget.TextView(this);
+        lblSep.setText("  🔴 End:");
+        lblSep.setTextColor(0xFFFF4444);
+        lblSep.setTextSize(12f);
+        lblSep.setPadding(12, 0, 8, 0);
+
         android.widget.EditText etEnd = new android.widget.EditText(this);
         etEnd.setText(String.format(java.util.Locale.US, "%.2f", totalDur));
         etEnd.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         etEnd.setTextColor(0xFFFFFFFF);
-        etEnd.setBackgroundColor(0xFF333333);
+        etEnd.setBackgroundColor(0xFF3A1A1A);
+        etEnd.setPadding(8, 6, 8, 6);
         etEnd.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
-        rowEnd.addView(lblEnd); rowEnd.addView(etEnd);
-        root.addView(rowEnd);
 
+        timeRow.addView(lblStart); timeRow.addView(etStart);
+        timeRow.addView(lblSep);   timeRow.addView(etEnd);
+        root.addView(timeRow);
+
+        // ── Selected-range label ──────────────────────────────────────────────
+        android.widget.TextView tvRange = new android.widget.TextView(this);
+        tvRange.setText(String.format(java.util.Locale.US, "Selected: 0.00s → %.2fs  (%.2fs)", totalDur, totalDur));
+        tvRange.setTextColor(0xFFFFCC44);
+        tvRange.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams rvLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        rvLP.topMargin = 6;
+        tvRange.setLayoutParams(rvLP);
+        root.addView(tvRange);
+
+        // ── Status label ─────────────────────────────────────────────────────
         android.widget.TextView tvTrimStatus = new android.widget.TextView(this);
-        tvTrimStatus.setText("");
-        tvTrimStatus.setTextColor(0xFF88FF88);
+        tvTrimStatus.setText("Waveform load ho rahi hai...");
+        tvTrimStatus.setTextColor(0xFF888888);
         tvTrimStatus.setTextSize(11f);
         android.widget.LinearLayout.LayoutParams tsLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        tsLP.topMargin = 12;
+        tsLP.topMargin = 8;
         tvTrimStatus.setLayoutParams(tsLP);
         root.addView(tvTrimStatus);
 
-        // Action buttons
+        // ── Action buttons ────────────────────────────────────────────────────
         android.widget.LinearLayout btnRow2 = new android.widget.LinearLayout(this);
         btnRow2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         android.widget.LinearLayout.LayoutParams br2LP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        br2LP.topMargin = 16;
+        br2LP.topMargin = 14;
         btnRow2.setLayoutParams(br2LP);
 
         Button btnApply = new Button(this);
@@ -4026,21 +4050,62 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         android.widget.LinearLayout.LayoutParams padLP2 = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
         padLP2.setMarginStart(8);
         btnAddToPad.setLayoutParams(padLP2);
-        btnAddToPad.setEnabled(false); // Pehle trim karo, phir pad mein daalo
+        btnAddToPad.setEnabled(false);
 
         btnRow2.addView(btnApply);
         btnRow2.addView(btnAddToPad);
         root.addView(btnRow2);
 
-        // Trim result path holder
         final String[] trimmedPathHolder = {null};
 
+        // ── Wire waveform markers → EditText fields ───────────────────────────
+        // Flag to prevent EditText→waveform→EditText update loops
+        final boolean[] updatingFromWave = {false};
+        final boolean[] updatingFromEdit = {false};
+
+        waveformView.setOnMarkersChanged((sf, ef) -> {
+            if (updatingFromEdit[0]) return;
+            updatingFromWave[0] = true;
+            double s = sf * totalDur, e = ef * totalDur;
+            etStart.setText(String.format(java.util.Locale.US, "%.2f", s));
+            etEnd.setText(String.format(java.util.Locale.US, "%.2f", e));
+            tvRange.setText(String.format(java.util.Locale.US,
+                    "Selected: %.2fs → %.2fs  (%.2fs)", s, e, e - s));
+            updatingFromWave[0] = false;
+        });
+
+        // ── Wire EditText → waveform markers ─────────────────────────────────
+        android.text.TextWatcher etWatcher = new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                if (updatingFromWave[0]) return;
+                updatingFromEdit[0] = true;
+                try {
+                    double sv = Double.parseDouble(etStart.getText().toString().trim());
+                    double ev = Double.parseDouble(etEnd.getText().toString().trim());
+                    float sf = (float)(sv / totalDur);
+                    float ef = (float)(ev / totalDur);
+                    sf = Math.max(0f, Math.min(1f, sf));
+                    ef = Math.max(0f, Math.min(1f, ef));
+                    waveformView.setMarkers(sf, ef);
+                    tvRange.setText(String.format(java.util.Locale.US,
+                            "Selected: %.2fs → %.2fs  (%.2fs)", sv, ev, ev - sv));
+                } catch (NumberFormatException ignored) {}
+                updatingFromEdit[0] = false;
+            }
+        };
+        etStart.addTextChangedListener(etWatcher);
+        etEnd.addTextChangedListener(etWatcher);
+
+        // ── Build dialog ──────────────────────────────────────────────────────
         AlertDialog trimDialog = new AlertDialog.Builder(this)
-            .setTitle("✂️ Recording Trim")
-            .setView(root)
+            .setTitle("✂️ Waveform Trim")
+            .setView(scrollRoot)
             .setNegativeButton("CLOSE", null)
             .create();
 
+        // ── TRIM button logic ─────────────────────────────────────────────────
         btnApply.setOnClickListener(v -> {
             double startSec, endSec;
             try {
@@ -4054,7 +4119,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (startSec < 0) startSec = 0;
             if (endSec > totalDur) endSec = totalDur;
             if (endSec <= startSec) {
-                tvTrimStatus.setText("❌ End time, Start time se zyada hona chahiye!");
+                tvTrimStatus.setText("❌ End, Start se zyada hona chahiye!");
                 tvTrimStatus.setTextColor(0xFFFF4444);
                 return;
             }
@@ -4071,13 +4136,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         trimmedPathHolder[0] = outPath;
                         double newDur = fe - fs;
                         tvTrimStatus.setText(String.format(java.util.Locale.US,
-                                "✅ Trim hua! %.2fs → %.2fs (%.2fs raka)",
+                                "✅ Trim hua! %.2fs → %.2fs  (%.2fs raka)",
                                 fs, fe, newDur));
-                        tvTrimStatus.setTextColor(0xFF88FF88);
+                        tvTrimStatus.setTextColor(0xFF44FF88);
                         btnApply.setEnabled(true);
                         btnApply.setText("✂️ TRIM KARO");
                         btnAddToPad.setEnabled(true);
-                        // Replace track in list with trimmed version
                         trackPaths.set(trackIdx, outPath);
                         saveTrackPaths();
                         if (container != null) refreshTrackList(container, tvStatus);
@@ -4094,6 +4158,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }).start();
         });
 
+        // ── PAD button logic ──────────────────────────────────────────────────
         btnAddToPad.setOnClickListener(v -> {
             String tp = trimmedPathHolder[0];
             if (tp == null) { Toast.makeText(this, "Pehle TRIM karo!", Toast.LENGTH_SHORT).show(); return; }
@@ -4113,8 +4178,60 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         android.view.Window tw = trimDialog.getWindow();
         if (tw != null) {
             int sw = getResources().getDisplayMetrics().widthPixels;
-            tw.setLayout((int)(sw * 0.92f), -2);
+            int sh = getResources().getDisplayMetrics().heightPixels;
+            tw.setLayout((int)(sw * 0.95f), (int)(sh * 0.88f));
         }
+
+        // ── Load waveform PCM on background thread ────────────────────────────
+        final String wp = wavPath;
+        final int sr2 = srInt, ch2 = chInt, bps2 = bpsInt;
+        new Thread(() -> {
+            float[] waveData = null;
+            try {
+                long fLen = new File(wp).length();
+                int dLen = (int)(fLen - 44);
+                if (dLen <= 0) return;
+                byte[] pcm = new byte[dLen];
+                try (java.io.FileInputStream fis = new java.io.FileInputStream(wp)) {
+                    fis.skip(44);
+                    int rd = 0;
+                    while (rd < dLen) { int n = fis.read(pcm, rd, dLen - rd); if (n < 0) break; rd += n; }
+                }
+                // Downsample to ~700 display columns (min-max per bucket for visual accuracy)
+                int cols = 700;
+                int bytesPerFrame = ch2 * bps2 / 8;
+                int totalFrames = dLen / bytesPerFrame;
+                int framesPerCol = Math.max(1, totalFrames / cols);
+                waveData = new float[cols];
+                for (int col = 0; col < cols; col++) {
+                    int frameStart = col * framesPerCol;
+                    int frameEnd   = Math.min(totalFrames, frameStart + framesPerCol);
+                    float maxAmp = 0f;
+                    for (int fr = frameStart; fr < frameEnd; fr++) {
+                        int byteIdx = fr * bytesPerFrame;
+                        if (byteIdx + 1 >= dLen) break;
+                        // Read first channel's sample (16-bit signed LE)
+                        short s16 = (short)((pcm[byteIdx] & 0xFF) | (pcm[byteIdx + 1] << 8));
+                        float norm = Math.abs(s16 / 32768f);
+                        if (norm > maxAmp) maxAmp = norm;
+                    }
+                    waveData[col] = maxAmp;
+                }
+            } catch (Exception ex) {
+                Log.e("WaveformLoad", "PCM load failed", ex);
+            }
+            final float[] finalWave = waveData;
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (finalWave != null) {
+                    waveformView.setSamples(finalWave);
+                    tvTrimStatus.setText("Waveform ready — markers drag karo ya time type karo");
+                    tvTrimStatus.setTextColor(0xFF888888);
+                } else {
+                    tvTrimStatus.setText("Waveform load nahi hua — time type karke bhi trim kar sakte ho");
+                    tvTrimStatus.setTextColor(0xFF888888);
+                }
+            });
+        }).start();
     }
 
     /**
@@ -4179,4 +4296,184 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         raf.write(val & 0xFF);
         raf.write((val >> 8) & 0xFF);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // WaveformView — interactive waveform with draggable start/end trim markers
+    // ══════════════════════════════════════════════════════════════════════════
+    private static class WaveformView extends android.view.View {
+
+        interface OnMarkersChanged {
+            void onChanged(float startFrac, float endFrac);
+        }
+
+        private float[]          samples    = null; // peak amplitude per display column, 0..1
+        private float            startFrac  = 0f;   // trim start position, 0..1
+        private float            endFrac    = 1f;   // trim end   position, 0..1
+        private int              dragTarget = 0;    // 0=none 1=start 2=end
+        private OnMarkersChanged listener   = null;
+
+        // Paints — initialised once, reused on every draw
+        private final android.graphics.Paint pBg      = new android.graphics.Paint();
+        private final android.graphics.Paint pGrid    = new android.graphics.Paint();
+        private final android.graphics.Paint pWaveIn  = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pWaveOut = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pRegion  = new android.graphics.Paint();
+        private final android.graphics.Paint pStart   = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pEnd     = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pHandle  = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pText    = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint pLoading = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+        public WaveformView(android.content.Context ctx) {
+            super(ctx);
+            pBg.setColor(0xFF0A1628);
+
+            pGrid.setColor(0x22FFFFFF);
+            pGrid.setStrokeWidth(1f);
+
+            pWaveIn.setColor(0xFF38B6FF);   // blue — inside trim region
+            pWaveIn.setStrokeWidth(2f);
+
+            pWaveOut.setColor(0xFF334455);  // dim — outside trim region
+            pWaveOut.setStrokeWidth(2f);
+
+            pRegion.setColor(0x2238B6FF);   // translucent blue fill
+
+            pStart.setColor(0xFF00FF66);
+            pStart.setStrokeWidth(3f);
+
+            pEnd.setColor(0xFFFF4444);
+            pEnd.setStrokeWidth(3f);
+
+            pHandle.setStyle(android.graphics.Paint.Style.FILL);
+
+            pText.setTextSize(30f);
+            pText.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+
+            pLoading.setColor(0xFF556677);
+            pLoading.setTextSize(34f);
+            pLoading.setTextAlign(android.graphics.Paint.Align.CENTER);
+            pLoading.setAntiAlias(true);
+        }
+
+        /** Set normalized waveform data (one float per display column, 0..1). */
+        public void setSamples(float[] s) {
+            samples = s;
+            invalidate();
+        }
+
+        /** Set trim marker positions (0..1 fractions of total duration). */
+        public void setMarkers(float s, float e) {
+            startFrac = Math.max(0f, Math.min(e - 0.005f, s));
+            endFrac   = Math.min(1f, Math.max(s + 0.005f, e));
+            invalidate();
+        }
+
+        public void setOnMarkersChanged(OnMarkersChanged l) { listener = l; }
+        public float getStartFrac() { return startFrac; }
+        public float getEndFrac()   { return endFrac; }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+
+            // Background
+            canvas.drawRect(0, 0, w, h, pBg);
+
+            // Grid: vertical quarters + centre line
+            for (int i = 1; i < 4; i++) {
+                float gx = w * i / 4f;
+                canvas.drawLine(gx, 0, gx, h, pGrid);
+            }
+            canvas.drawLine(0, h * 0.5f, w, h * 0.5f, pGrid);
+
+            // Loading state
+            if (samples == null || samples.length == 0) {
+                canvas.drawText("⏳ Waveform load ho rahi hai...", w * 0.5f, h * 0.5f + 12, pLoading);
+                return;
+            }
+
+            int startPx = (int)(startFrac * w);
+            int endPx   = (int)(endFrac   * w);
+            float cy    = h * 0.5f;
+
+            // Trimmed-region background highlight
+            canvas.drawRect(startPx, 0, endPx, h, pRegion);
+
+            // Waveform bars
+            int n = samples.length;
+            for (int i = 0; i < n; i++) {
+                float x   = (float) i / n * w;
+                float amp = samples[i] * h * 0.46f;
+                android.graphics.Paint wp = (x >= startPx && x <= endPx) ? pWaveIn : pWaveOut;
+                canvas.drawLine(x, cy - amp, x, cy + amp, wp);
+            }
+
+            // Trim region border lines
+            canvas.drawLine(startPx, 0, startPx, h, pStart);
+            canvas.drawLine(endPx,   0, endPx,   h, pEnd);
+
+            // Start handle (green circle at top)
+            pHandle.setColor(0xFF00FF66);
+            canvas.drawCircle(startPx, 22, 22, pHandle);
+            pText.setColor(0xFF000000);
+            pText.setTextAlign(android.graphics.Paint.Align.CENTER);
+            canvas.drawText("S", startPx, 32, pText);
+
+            // End handle (red circle at top)
+            pHandle.setColor(0xFFFF4444);
+            canvas.drawCircle(endPx, 22, 22, pHandle);
+            pText.setColor(0xFFFFFFFF);
+            canvas.drawText("E", endPx, 32, pText);
+
+            // Small time hints at bottom
+            pLoading.setTextSize(24f);
+            pLoading.setTextAlign(android.graphics.Paint.Align.LEFT);
+            pLoading.setColor(0xFF00FF66);
+            canvas.drawText(String.format(java.util.Locale.US, "%.1f%%", startFrac * 100), startPx + 4, h - 6, pLoading);
+            pLoading.setTextAlign(android.graphics.Paint.Align.RIGHT);
+            pLoading.setColor(0xFFFF4444);
+            canvas.drawText(String.format(java.util.Locale.US, "%.1f%%", endFrac * 100), endPx - 4, h - 6, pLoading);
+        }
+
+        @Override
+        public boolean onTouchEvent(android.view.MotionEvent ev) {
+            int w = getWidth();
+            if (w == 0) return true;
+            float x   = ev.getX();
+            float spx = startFrac * w;
+            float epx = endFrac   * w;
+            float slop = Math.max(44f, w * 0.04f); // 4% of width or 44px, whichever is larger
+
+            switch (ev.getAction()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    // Snap to whichever marker is closer if touch overlaps both
+                    float dS = Math.abs(x - spx);
+                    float dE = Math.abs(x - epx);
+                    if (dS < slop && dE < slop) dragTarget = (dS <= dE) ? 1 : 2;
+                    else if (dS < slop)         dragTarget = 1;
+                    else if (dE < slop)         dragTarget = 2;
+                    else                        dragTarget = 0;
+                    break;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    if (dragTarget == 1) {
+                        startFrac = Math.max(0f, Math.min(endFrac - 0.005f, x / w));
+                        invalidate();
+                        if (listener != null) listener.onChanged(startFrac, endFrac);
+                    } else if (dragTarget == 2) {
+                        endFrac = Math.min(1f, Math.max(startFrac + 0.005f, x / w));
+                        invalidate();
+                        if (listener != null) listener.onChanged(startFrac, endFrac);
+                    }
+                    break;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    dragTarget = 0;
+                    break;
+            }
+            return true;
+        }
+    }
+    // ── end WaveformView ──────────────────────────────────────────────────────
 }
