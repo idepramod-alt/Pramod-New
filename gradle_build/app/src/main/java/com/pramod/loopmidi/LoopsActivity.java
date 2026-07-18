@@ -345,11 +345,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         boolean effectiveDrumMode = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : this.isGlobalDrumMode;
-        // Bug fix: when a pad has an explicit LOOP mode override but global
-        // OneShot is ON, the pad must still play as one-shot (not loop forever).
-        // Previously the override short-circuited isOneShotMode entirely.
+        // Per-pad LOOP/DRUM override decides isDrumPad independently of isOneShotMode.
+        // isOneShotMode only affects the LOOP path below (retrigger logic).
         boolean isDrumPad = this.padModeOverride[index]
-                ? (this.padDrumMode[index] || this.isOneShotMode)
+                ? this.padDrumMode[index]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
         // Real DRUM MODE and ONE-SHOT MODE use two different choke targets:
         //   - DRUM MODE: each pad is its own independent voice (chokeGroup = index+1
@@ -436,6 +435,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // LOOP mode: loops the sample continuously until pad is tapped again.
         if (this.loopPlaying[index]) {
+            if (this.isOneShotMode) {
+                // OneShot ON + LOOP pad = RETRIGGER: restart loop from beginning on each tap
+                this.audioEngine.stopPad(index);
+                this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, this.currentPitch);
+                this.txtLoopStatus.setText("LOOP " + (index + 1) + " ↺ RETRIGGER");
+                // loopPlaying stays true — pad is still actively looping
+                return;
+            }
+            // OneShot OFF: normal toggle — second tap stops the loop
             this.audioEngine.stopPad(index);
             this.loopPlaying[index] = false;
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
@@ -490,10 +498,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.loopPads[index] == null) return;
         // Effective mode: an explicit per-pad override always wins; otherwise the
         // pad simply reflects whatever the global LOOP/DRUM toggle currently is.
-        // Same fix as handlePadClick: LOOP override must still respect isOneShotMode
-        // for the pad colour (orange = drum/one-shot, black = stopped loop).
+        // Pad colour: LOOP override pad stays in loop colour even when OneShot is ON
+        // (it retriggeres on tap but remains a loop pad, not a drum/one-shot pad).
         boolean effectiveDrum = this.padModeOverride[index]
-                ? (this.padDrumMode[index] || this.isOneShotMode)
+                ? this.padDrumMode[index]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
         if (this.loopPlaying[index]) {
             // Playing state handled by the caller (blue glow already set on play)
@@ -2862,9 +2870,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         boolean effectiveDrumMode = this.padModeOverride[index]
                 ? this.padDrumMode[index]
                 : this.isGlobalDrumMode;
-        // Same fix as handlePadClick: LOOP override must still respect isOneShotMode
         boolean isDrumPad = this.padModeOverride[index]
-                ? (this.padDrumMode[index] || this.isOneShotMode)
+                ? this.padDrumMode[index]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
 
         // Velocity-scaled volume: baseVol × velocityScale
@@ -2885,11 +2892,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         } else {
             // ── LOOP MODE fast path ───────────────────────────────────────────
             if (this.loopPlaying[index]) {
-                try { engine.stopPad(index); } catch (Exception ignored) {}
+                if (this.isOneShotMode) {
+                    // OneShot ON + LOOP pad via MIDI = retrigger (restart from beginning)
+                    try { engine.stopPad(index); } catch (Exception ignored) {}
+                    try { engine.playLoopSP(index, vol, this.currentSpeed, this.currentPitch); }
+                    catch (Exception ignored) {}
+                    // loopPlaying stays true
+                } else {
+                    try { engine.stopPad(index); } catch (Exception ignored) {}
+                    this.loopPlaying[index] = false;
+                }
             } else {
                 try { engine.playLoopSP(index, vol,
                                         this.currentSpeed, this.currentPitch); }
                 catch (Exception ignored) {}
+                this.loopPlaying[index] = true;
             }
             return true;
         }
