@@ -1059,6 +1059,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         SharedPreferences sharedPreferences = getSharedPreferences(PREF_NAME, 0);
         this.prefs = sharedPreferences;
         this.loopChannelIndex = sharedPreferences.getInt(KEY_LOOP_INDEX, 1);
+        restoreTrackPaths(); // Bug Fix: app restart pe recording list restore karo
         this.btnBack = (Button) findViewById(R.id.btnBack);
         this.btnEditLoops = (Button) findViewById(R.id.btnEditLoops);
         this.btnAdvancedLoops = (Button) findViewById(R.id.btnAdvancedLoops);
@@ -3341,6 +3342,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             for (String p : trackPaths) new File(p).delete();
             trackPaths.clear();
             trackCount = 0;
+            saveTrackPaths(); // Bug Fix: clear ke baad bhi list persist karo
             refreshTrackList(trackList, tvStatus);
             tvStatus.setText("Sab tracks delete ho gaye.");
             Toast.makeText(this, "All tracks cleared!", Toast.LENGTH_SHORT).show();
@@ -3439,12 +3441,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             btnDel.setOnClickListener(v -> {
                 new File(path).delete();
                 trackPaths.remove(idx);
+                saveTrackPaths(); // Bug Fix: delete ke baad bhi list persist karo
                 refreshTrackList(container, tvStatus);
                 tvStatus.setText("Track " + (idx + 1) + " delete ho gaya.");
             });
 
+            // ── TRIM button ────────────────────────────────────────────────────
+            Button btnTrim = new Button(this);
+            btnTrim.setText("✂️ TRIM");
+            btnTrim.setBackgroundColor(0xFF226622);
+            btnTrim.setTextColor(0xFFFFFFFF);
+            android.widget.LinearLayout.LayoutParams trimLP =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            trimLP.setMargins(4, 0, 4, 0);
+            btnTrim.setLayoutParams(trimLP);
+            btnTrim.setOnClickListener(v -> showTrimDialog(path, idx, container, tvStatus));
+
             row.addView(lbl);
             row.addView(btnPlay);
+            row.addView(btnTrim);
             row.addView(btnSave);
             row.addView(btnLoad);
             row.addView(btnDel);
@@ -3522,6 +3537,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 new Handler(Looper.getMainLooper()).post(() -> {
                     trackCount++;
                     trackPaths.add(outPath);
+                    saveTrackPaths(); // Bug Fix: recording list persist karo
                     Log.i("LoopsRec", "Track saved → " + outPath + " (" + pcm.length + " bytes PCM, " + channels + "ch)");
                     // FIX: Refresh the dialog track list immediately so the new recording
                     // appears without needing to close and reopen the dialog.
@@ -3590,6 +3606,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (written > 0) {
                 trackCount++;
                 trackPaths.add(outPath);
+                saveTrackPaths(); // Bug Fix: recording list persist karo
                 Log.i("LoopsRec", "Internal-audio track saved → " + outPath + " (" + written + " frames)");
             }
         }
@@ -3852,6 +3869,304 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private void onSaveRecordingClick() { /* stub for workflow patch compat */ }
     private void onPlayTrackClick(int t){ /* stub for workflow patch compat */ }
     // ── end workflow-patch compatibility stubs ────────────────────────────────
+
+    // ── Bug Fix: TrackPaths Persistence ──────────────────────────────────────
+    /**
+     * Saves trackPaths list to SharedPreferences so recording list survives app restart.
+     */
+    private void saveTrackPaths() {
+        if (prefs == null) return;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < trackPaths.size(); i++) {
+            if (i > 0) sb.append("|");
+            sb.append(trackPaths.get(i));
+        }
+        prefs.edit().putString("rec_track_paths", sb.toString())
+                    .putInt("rec_track_count", trackPaths.size())
+                    .apply();
+    }
+
+    /**
+     * Restores trackPaths from SharedPreferences on app start.
+     * Only keeps paths whose files actually exist on disk.
+     */
+    private void restoreTrackPaths() {
+        if (prefs == null) return;
+        String saved = prefs.getString("rec_track_paths", "");
+        if (saved == null || saved.isEmpty()) return;
+        String[] parts = saved.split("\\|");
+        trackPaths.clear();
+        trackCount = 0;
+        for (String p : parts) {
+            if (p != null && !p.isEmpty()) {
+                File f = new File(p);
+                if (f.exists() && f.length() > 44) { // valid WAV has >44 bytes (header)
+                    trackPaths.add(p);
+                    trackCount++;
+                }
+            }
+        }
+        // Re-save cleaned list (removes stale paths of deleted files)
+        saveTrackPaths();
+    }
+
+    // ── Trim Feature ──────────────────────────────────────────────────────────
+    /**
+     * Shows a trim dialog for the given track.
+     * User sets start/end time, trims the WAV, then can add to pad or save.
+     */
+    private void showTrimDialog(String wavPath, int trackIdx,
+                                android.widget.LinearLayout container,
+                                android.widget.TextView tvStatus) {
+        if (!wavPath.endsWith(".wav")) {
+            Toast.makeText(this, "Sirf WAV files trim ho sakti hain!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Get duration first
+        double[] durHolder = {0};
+        try {
+            long fileLen = new File(wavPath).length();
+            if (fileLen <= 44) { Toast.makeText(this, "File empty hai!", Toast.LENGTH_SHORT).show(); return; }
+            // Read sampleRate from WAV header (offset 24, 4 bytes LE)
+            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(wavPath, "r")) {
+                raf.seek(24);
+                int b0 = raf.read(), b1 = raf.read(), b2 = raf.read(), b3 = raf.read();
+                int sr = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+                int ch = 1; raf.seek(22); ch = raf.read() | (raf.read() << 8);
+                int bps = 16; raf.seek(34); bps = raf.read() | (raf.read() << 8);
+                long dataBytes = fileLen - 44;
+                durHolder[0] = (double) dataBytes / (sr * ch * bps / 8.0);
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "File read error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final double totalDur = durHolder[0];
+
+        // Build trim dialog UI
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(32, 24, 32, 16);
+        root.setBackgroundColor(0xFF1a1a2e);
+
+        android.widget.TextView tvInfo = new android.widget.TextView(this);
+        tvInfo.setText(String.format(java.util.Locale.US,
+                "Total duration: %.2f sec\nTrack %d: %s",
+                totalDur, trackIdx + 1, new File(wavPath).getName()));
+        tvInfo.setTextColor(0xFFCCCCCC);
+        tvInfo.setTextSize(12f);
+        tvInfo.setPadding(0, 0, 0, 16);
+        root.addView(tvInfo);
+
+        // Start time
+        android.widget.LinearLayout rowStart = new android.widget.LinearLayout(this);
+        rowStart.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        rowStart.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.TextView lblStart = new android.widget.TextView(this);
+        lblStart.setText("Start (sec): ");
+        lblStart.setTextColor(0xFFFFFFFF);
+        lblStart.setMinWidth(120);
+        android.widget.EditText etStart = new android.widget.EditText(this);
+        etStart.setText("0.00");
+        etStart.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        etStart.setTextColor(0xFFFFFFFF);
+        etStart.setBackgroundColor(0xFF333333);
+        android.widget.LinearLayout.LayoutParams etLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        etStart.setLayoutParams(etLP);
+        rowStart.addView(lblStart); rowStart.addView(etStart);
+        root.addView(rowStart);
+
+        // End time
+        android.widget.LinearLayout rowEnd = new android.widget.LinearLayout(this);
+        rowEnd.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        rowEnd.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.LinearLayout.LayoutParams rowEndLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        rowEndLP.topMargin = 10;
+        rowEnd.setLayoutParams(rowEndLP);
+        android.widget.TextView lblEnd = new android.widget.TextView(this);
+        lblEnd.setText("End (sec):   ");
+        lblEnd.setTextColor(0xFFFFFFFF);
+        lblEnd.setMinWidth(120);
+        android.widget.EditText etEnd = new android.widget.EditText(this);
+        etEnd.setText(String.format(java.util.Locale.US, "%.2f", totalDur));
+        etEnd.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        etEnd.setTextColor(0xFFFFFFFF);
+        etEnd.setBackgroundColor(0xFF333333);
+        etEnd.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        rowEnd.addView(lblEnd); rowEnd.addView(etEnd);
+        root.addView(rowEnd);
+
+        android.widget.TextView tvTrimStatus = new android.widget.TextView(this);
+        tvTrimStatus.setText("");
+        tvTrimStatus.setTextColor(0xFF88FF88);
+        tvTrimStatus.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams tsLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        tsLP.topMargin = 12;
+        tvTrimStatus.setLayoutParams(tsLP);
+        root.addView(tvTrimStatus);
+
+        // Action buttons
+        android.widget.LinearLayout btnRow2 = new android.widget.LinearLayout(this);
+        btnRow2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.LinearLayout.LayoutParams br2LP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        br2LP.topMargin = 16;
+        btnRow2.setLayoutParams(br2LP);
+
+        Button btnApply = new Button(this);
+        btnApply.setText("✂️ TRIM KARO");
+        btnApply.setBackgroundColor(0xFF226622);
+        btnApply.setTextColor(0xFFFFFFFF);
+        btnApply.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        Button btnAddToPad = new Button(this);
+        btnAddToPad.setText("→ PAD");
+        btnAddToPad.setBackgroundColor(0xFF003399);
+        btnAddToPad.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams padLP2 = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        padLP2.setMarginStart(8);
+        btnAddToPad.setLayoutParams(padLP2);
+        btnAddToPad.setEnabled(false); // Pehle trim karo, phir pad mein daalo
+
+        btnRow2.addView(btnApply);
+        btnRow2.addView(btnAddToPad);
+        root.addView(btnRow2);
+
+        // Trim result path holder
+        final String[] trimmedPathHolder = {null};
+
+        AlertDialog trimDialog = new AlertDialog.Builder(this)
+            .setTitle("✂️ Recording Trim")
+            .setView(root)
+            .setNegativeButton("CLOSE", null)
+            .create();
+
+        btnApply.setOnClickListener(v -> {
+            double startSec, endSec;
+            try {
+                startSec = Double.parseDouble(etStart.getText().toString().trim());
+                endSec   = Double.parseDouble(etEnd.getText().toString().trim());
+            } catch (NumberFormatException ex) {
+                tvTrimStatus.setText("❌ Galat time value! Numbers daalo.");
+                tvTrimStatus.setTextColor(0xFFFF4444);
+                return;
+            }
+            if (startSec < 0) startSec = 0;
+            if (endSec > totalDur) endSec = totalDur;
+            if (endSec <= startSec) {
+                tvTrimStatus.setText("❌ End time, Start time se zyada hona chahiye!");
+                tvTrimStatus.setTextColor(0xFFFF4444);
+                return;
+            }
+            final double fs = startSec, fe = endSec;
+            btnApply.setEnabled(false);
+            btnApply.setText("⏳ Trimming...");
+            tvTrimStatus.setText("Trim ho raha hai...");
+            tvTrimStatus.setTextColor(0xFFFFCC00);
+
+            new Thread(() -> {
+                try {
+                    String outPath = trimWavInline(wavPath, fs, fe);
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        trimmedPathHolder[0] = outPath;
+                        double newDur = fe - fs;
+                        tvTrimStatus.setText(String.format(java.util.Locale.US,
+                                "✅ Trim hua! %.2fs → %.2fs (%.2fs raka)",
+                                fs, fe, newDur));
+                        tvTrimStatus.setTextColor(0xFF88FF88);
+                        btnApply.setEnabled(true);
+                        btnApply.setText("✂️ TRIM KARO");
+                        btnAddToPad.setEnabled(true);
+                        // Replace track in list with trimmed version
+                        trackPaths.set(trackIdx, outPath);
+                        saveTrackPaths();
+                        if (container != null) refreshTrackList(container, tvStatus);
+                        if (tvStatus != null) tvStatus.setText("✅ Track " + (trackIdx + 1) + " trim ho gaya!");
+                    });
+                } catch (Exception ex) {
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        tvTrimStatus.setText("❌ Trim failed: " + ex.getMessage());
+                        tvTrimStatus.setTextColor(0xFFFF4444);
+                        btnApply.setEnabled(true);
+                        btnApply.setText("✂️ TRIM KARO");
+                    });
+                }
+            }).start();
+        });
+
+        btnAddToPad.setOnClickListener(v -> {
+            String tp = trimmedPathHolder[0];
+            if (tp == null) { Toast.makeText(this, "Pehle TRIM karo!", Toast.LENGTH_SHORT).show(); return; }
+            String[] padNames = new String[8];
+            for (int p = 0; p < 8; p++) padNames[p] = "PAD " + (p + 1);
+            new AlertDialog.Builder(this)
+                .setTitle("Trimmed audio → Pad mein load karo")
+                .setItems(padNames, (d, which) -> {
+                    loadTrackIntoPad(tp, which);
+                    trimDialog.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+        });
+
+        trimDialog.show();
+        android.view.Window tw = trimDialog.getWindow();
+        if (tw != null) {
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            tw.setLayout((int)(sw * 0.92f), -2);
+        }
+    }
+
+    /**
+     * Trims a WAV file between startSec and endSec.
+     * Returns the path of the trimmed output file.
+     * The output is saved alongside the original (same dir) with _trimmed suffix.
+     */
+    private String trimWavInline(String inputPath, double startSec, double endSec) throws IOException {
+        java.io.File inFile = new java.io.File(inputPath);
+        // Read WAV header
+        int sampleRate, channels, bitsPerSample;
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(inFile, "r")) {
+            raf.seek(22);
+            channels      = raf.read() | (raf.read() << 8);
+            sampleRate    = raf.read() | (raf.read() << 8) | (raf.read() << 16) | (raf.read() << 24);
+            raf.seek(34);
+            bitsPerSample = raf.read() | (raf.read() << 8);
+        }
+        // Read all PCM data (skip 44-byte header)
+        long fileLen  = inFile.length();
+        int  dataLen  = (int)(fileLen - 44);
+        if (dataLen <= 0) throw new IOException("WAV file mein koi data nahi hai!");
+        byte[] allPcm = new byte[dataLen];
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(inFile)) {
+            fis.skip(44);
+            int read = 0;
+            while (read < dataLen) {
+                int n = fis.read(allPcm, read, dataLen - read);
+                if (n < 0) break;
+                read += n;
+            }
+        }
+
+        int bytesPerFrame = channels * bitsPerSample / 8;
+        int startByte = (int)(startSec * sampleRate) * bytesPerFrame;
+        int endByte   = (int)(endSec   * sampleRate) * bytesPerFrame;
+        startByte = Math.max(0, Math.min(startByte, allPcm.length));
+        endByte   = Math.max(0, Math.min(endByte,   allPcm.length));
+        // Align to frame boundary
+        startByte = (startByte / bytesPerFrame) * bytesPerFrame;
+        endByte   = (endByte   / bytesPerFrame) * bytesPerFrame;
+        if (endByte <= startByte) throw new IOException("Trim range empty hai!");
+
+        int trimLen   = endByte - startByte;
+        byte[] trimPcm = new byte[trimLen];
+        System.arraycopy(allPcm, startByte, trimPcm, 0, trimLen);
+
+        // Write trimmed WAV
+        String outName = inputPath.replace(".wav", "_trimmed_" + System.currentTimeMillis() + ".wav");
+        writeWavFile(outName, trimPcm, sampleRate, channels, bitsPerSample);
+        return outName;
+    }
 
     private void writeIntLE(RandomAccessFile raf, int val) throws IOException {
         raf.write(val & 0xFF);
