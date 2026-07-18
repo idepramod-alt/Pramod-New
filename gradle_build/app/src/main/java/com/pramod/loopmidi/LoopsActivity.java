@@ -1698,7 +1698,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (seekBar.getId() == R.id.seekTempo) {
                     LoopsActivity.this.currentSpeed = value;
                     if (LoopsActivity.this.txtTempoVal != null) {
-                        LoopsActivity.this.txtTempoVal.setText(String.format("%.1fx", Float.valueOf(LoopsActivity.this.currentSpeed)));
+                        float bpm = LoopsActivity.this.currentSpeed * 120f;
+                        LoopsActivity.this.txtTempoVal.setText(
+                            String.format(java.util.Locale.US, "%.0f BPM (%.1fx)", bpm, LoopsActivity.this.currentSpeed));
                     }
                 } else if (seekBar.getId() == R.id.seekPitch) {
                     LoopsActivity.this.currentPitch = value;
@@ -3348,15 +3350,124 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             Toast.makeText(this, "All tracks cleared!", Toast.LENGTH_SHORT).show();
         });
 
+        // ── BPM display bar ───────────────────────────────────────────────────
+        // Shows current BPM live so user knows tempo while recording
+        android.widget.LinearLayout bpmBar = new android.widget.LinearLayout(this);
+        bpmBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        bpmBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bpmBar.setBackgroundColor(0xFF111122);
+        bpmBar.setPadding(16, 10, 16, 10);
+        android.widget.LinearLayout.LayoutParams bpmBarLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        bpmBarLP.topMargin = 10;
+        bpmBar.setLayoutParams(bpmBarLP);
+
+        android.widget.TextView tvBpmLabel = new android.widget.TextView(this);
+        tvBpmLabel.setText("🎵 Current BPM: ");
+        tvBpmLabel.setTextColor(0xFF88BBFF);
+        tvBpmLabel.setTextSize(13f);
+        bpmBar.addView(tvBpmLabel);
+
+        android.widget.TextView tvBpmVal = new android.widget.TextView(this);
+        float curBpm = currentSpeed * 120f;
+        tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", curBpm, currentSpeed));
+        tvBpmVal.setTextColor(0xFFFFDD44);
+        tvBpmVal.setTextSize(15f);
+        tvBpmVal.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        bpmBar.addView(tvBpmVal);
+
+        // BPM +/- quick adjust buttons
+        android.widget.LinearLayout.LayoutParams bpmBtnSp = new android.widget.LinearLayout.LayoutParams(-2, -2);
+        bpmBtnSp.setMarginStart(16);
+        Button btnBpmMinus = new Button(this);
+        btnBpmMinus.setText("−");
+        btnBpmMinus.setBackgroundColor(0xFF333366);
+        btnBpmMinus.setTextColor(0xFFFFFFFF);
+        btnBpmMinus.setLayoutParams(bpmBtnSp);
+        Button btnBpmPlus = new Button(this);
+        btnBpmPlus.setText("+");
+        btnBpmPlus.setBackgroundColor(0xFF333366);
+        btnBpmPlus.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams bpmPlusLP = new android.widget.LinearLayout.LayoutParams(-2, -2);
+        bpmPlusLP.setMarginStart(6);
+        btnBpmPlus.setLayoutParams(bpmPlusLP);
+        bpmBar.addView(btnBpmMinus);
+        bpmBar.addView(btnBpmPlus);
+        root.addView(bpmBar);
+
+        // BPM ± 5 adjust — syncs with main seekTempo
+        btnBpmMinus.setOnClickListener(v -> {
+            if (seekTempo != null) {
+                float newBpm = Math.max(12f, currentSpeed * 120f - 5f);
+                float newSpeed = Math.max(0.1f, Math.min(2.0f, newBpm / 120f));
+                seekTempo.setProgress((int)(newSpeed * 100));
+                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
+            }
+        });
+        btnBpmPlus.setOnClickListener(v -> {
+            if (seekTempo != null) {
+                float newBpm = Math.min(240f, currentSpeed * 120f + 5f);
+                float newSpeed = Math.max(0.1f, Math.min(2.0f, newBpm / 120f));
+                seekTempo.setProgress((int)(newSpeed * 100));
+                tvBpmVal.setText(String.format(java.util.Locale.US, "%.0f  (%.1fx)", currentSpeed * 120f, currentSpeed));
+            }
+        });
+
+        // ── Pad grid (2 rows × 4 cols) — tap pads while recording ─────────────
+        android.widget.TextView tvPadLabel = new android.widget.TextView(this);
+        tvPadLabel.setText("🥁 PADS — recording ke dauran bhi tap kar sakte ho");
+        tvPadLabel.setTextColor(0xFF88BBFF);
+        tvPadLabel.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams tvPadLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        tvPadLP.topMargin = 14;
+        tvPadLabel.setLayoutParams(tvPadLP);
+        root.addView(tvPadLabel);
+
+        // 2 rows × 4 cols grid
+        String[] padEmojis = {"1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"};
+        for (int row = 0; row < 2; row++) {
+            android.widget.LinearLayout padRow = new android.widget.LinearLayout(this);
+            padRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            android.widget.LinearLayout.LayoutParams padRowLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+            padRowLP.topMargin = 6;
+            padRow.setLayoutParams(padRowLP);
+            for (int col = 0; col < 4; col++) {
+                final int padIdx = row * 4 + col;
+                Button padBtn = new Button(this);
+                // Show pad number + whether it has audio loaded
+                boolean hasAudio = loopUris[padIdx] != null || loopSamples[padIdx] != null;
+                String padName = "PAD " + (padIdx + 1);
+                padBtn.setText(padEmojis[padIdx] + "\n" + padName);
+                padBtn.setBackgroundColor(hasAudio ? 0xFF003399 : 0xFF222244);
+                padBtn.setTextColor(hasAudio ? 0xFFFFFFFF : 0xFF888888);
+                padBtn.setTextSize(10f);
+                android.widget.LinearLayout.LayoutParams padBtnLP =
+                    new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+                padBtnLP.setMargins(col == 0 ? 0 : 6, 0, 0, 0);
+                padBtn.setLayoutParams(padBtnLP);
+                final Button fPadBtn = padBtn;
+                padBtn.setOnTouchListener((v, ev) -> {
+                    if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                        handlePadClick(padIdx);
+                        fPadBtn.setBackgroundColor(0xFF0055FF);
+                    } else if (ev.getAction() == android.view.MotionEvent.ACTION_UP
+                            || ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                        boolean loaded = loopUris[padIdx] != null || loopSamples[padIdx] != null;
+                        fPadBtn.setBackgroundColor(loaded ? 0xFF003399 : 0xFF222244);
+                    }
+                    return false;
+                });
+                padRow.addView(padBtn);
+            }
+            root.addView(padRow);
+        }
+
         recDialog.show();
-        // ── Make dialog bigger: 97% screen width, 92% screen height ──────────
-        // Bumped up from the previous 92%/80% now that the FILE/PLAY/STOP/VOL/
-        // name row lives inside this dialog too — it needs the extra room.
+        // ── Make dialog bigger: 97% screen width, 95% screen height ──────────
         android.view.Window recWin = recDialog.getWindow();
         if (recWin != null) {
             int screenW = getResources().getDisplayMetrics().widthPixels;
             int screenH = getResources().getDisplayMetrics().heightPixels;
-            recWin.setLayout((int)(screenW * 0.97f), (int)(screenH * 0.92f));
+            recWin.setLayout((int)(screenW * 0.97f), (int)(screenH * 0.95f));
         }
     }
 
@@ -4030,11 +4141,93 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         tvTrimStatus.setLayoutParams(tsLP);
         root.addView(tvTrimStatus);
 
+        // ── Play selected region row ──────────────────────────────────────────
+        android.widget.LinearLayout playRow = new android.widget.LinearLayout(this);
+        playRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.LinearLayout.LayoutParams prLP = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        prLP.topMargin = 14;
+        playRow.setLayoutParams(prLP);
+
+        final Button btnPlayRegion = new Button(this);
+        btnPlayRegion.setText("▶ PLAY SELECTED");
+        btnPlayRegion.setBackgroundColor(0xFF006633);
+        btnPlayRegion.setTextColor(0xFFFFFFFF);
+        btnPlayRegion.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        final Button btnStopRegion = new Button(this);
+        btnStopRegion.setText("⏹ STOP");
+        btnStopRegion.setBackgroundColor(0xFF333333);
+        btnStopRegion.setTextColor(0xFFFFFFFF);
+        android.widget.LinearLayout.LayoutParams srLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        srLP.setMarginStart(8);
+        btnStopRegion.setLayoutParams(srLP);
+
+        playRow.addView(btnPlayRegion);
+        playRow.addView(btnStopRegion);
+        root.addView(playRow);
+
+        // Region preview player (local to this dialog, separate from track mediaPlayer)
+        final MediaPlayer[] regionPlayer = {null};
+        final Handler regionStopHandler = new Handler(Looper.getMainLooper());
+        final Runnable[] regionStopRunnable = {null};
+
+        final Runnable stopRegionPlayback = () -> {
+            regionStopHandler.removeCallbacks(regionStopRunnable[0] != null ? regionStopRunnable[0] : () -> {});
+            if (regionPlayer[0] != null) {
+                try { if (regionPlayer[0].isPlaying()) regionPlayer[0].stop(); } catch (Exception ignored) {}
+                try { regionPlayer[0].release(); } catch (Exception ignored) {}
+                regionPlayer[0] = null;
+            }
+            btnPlayRegion.setText("▶ PLAY SELECTED");
+            btnPlayRegion.setBackgroundColor(0xFF006633);
+        };
+
+        btnStopRegion.setOnClickListener(v -> stopRegionPlayback.run());
+
+        btnPlayRegion.setOnClickListener(v -> {
+            // Stop any previous preview
+            stopRegionPlayback.run();
+            double startSec, endSec;
+            try {
+                startSec = Double.parseDouble(etStart.getText().toString().trim());
+                endSec   = Double.parseDouble(etEnd.getText().toString().trim());
+            } catch (NumberFormatException ex) {
+                Toast.makeText(this, "Pehle start/end time set karo", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (endSec <= startSec) {
+                Toast.makeText(this, "End > Start hona chahiye", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            final int startMs = (int)(startSec * 1000);
+            final int durationMs = (int)((endSec - startSec) * 1000);
+            try {
+                MediaPlayer mp = new MediaPlayer();
+                mp.setDataSource(wavPath);
+                mp.setOnPreparedListener(prepared -> {
+                    prepared.seekTo(startMs);
+                    prepared.start();
+                    btnPlayRegion.setText("▶ PLAYING...");
+                    btnPlayRegion.setBackgroundColor(0xFF009944);
+                    regionStopRunnable[0] = () -> {
+                        stopRegionPlayback.run();
+                    };
+                    regionStopHandler.postDelayed(regionStopRunnable[0], durationMs);
+                });
+                mp.setOnCompletionListener(done -> stopRegionPlayback.run());
+                mp.setOnErrorListener((mp2, what, extra) -> { stopRegionPlayback.run(); return true; });
+                mp.prepareAsync();
+                regionPlayer[0] = mp;
+            } catch (Exception ex) {
+                Toast.makeText(this, "Play failed: " + ex.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+
         // ── Action buttons ────────────────────────────────────────────────────
         android.widget.LinearLayout btnRow2 = new android.widget.LinearLayout(this);
         btnRow2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         android.widget.LinearLayout.LayoutParams br2LP = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        br2LP.topMargin = 14;
+        br2LP.topMargin = 10;
         btnRow2.setLayoutParams(br2LP);
 
         Button btnApply = new Button(this);
