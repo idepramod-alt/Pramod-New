@@ -7,8 +7,13 @@ import android.media.AudioManager;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.inputmethod.InputMethodManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
 import android.media.midi.MidiDevice;
 import android.media.midi.MidiDeviceInfo;
 import android.media.midi.MidiManager;
@@ -133,6 +138,10 @@ public class MainActivity extends Activity {
     // ── Kit hold-repeat (Roland SPD style) ────────────────────────────────────
     private final Handler kitRepeatHandler = new Handler(Looper.getMainLooper());
     private Runnable kitRepeatRunnable;
+
+    // ── Audio-routing callbacks (earphone / BT plug-unplug) ──────────────────
+    private AudioDeviceCallback audioDeviceCallback = null;
+    private BroadcastReceiver   noisyReceiver       = null;
 
     @Override // android.app.Activity
     protected void onResume() {
@@ -857,6 +866,7 @@ public class MainActivity extends Activity {
         AudioEngine audioEngine = new AudioEngine(this);
         this.audioEngine = audioEngine;
         audioEngine.start();
+        setupAudioRouting();   // earphone / BT plug-unplug handling
         initPads();
         initSeekBars();
         // Restore velocity sensitivity mode from prefs
@@ -2180,6 +2190,7 @@ public class MainActivity extends Activity {
             deactivateRef.removeEventListener(deactivateListener);
             deactivateListener = null;
         }
+        teardownAudioRouting();   // unregister earphone / BT callbacks
         saveKitToMemory(this.kitIndex);
         try {
             closeMidiDevice();
@@ -2195,5 +2206,97 @@ public class MainActivity extends Activity {
         } catch (Exception e2) {
             e2.printStackTrace();
         }
+    }
+
+    // ── Audio-routing helpers ─────────────────────────────────────────────────
+
+    /**
+     * Register two listeners so drum pads keep working when the user plugs
+     * or unplugs earphones / connects Bluetooth audio:
+     *
+     *   1. AudioDeviceCallback — fires on the main thread whenever an output
+     *      device is added or removed.  We reinit the Oboe stream so it opens
+     *      on the correct device at that device's native SR / burst size.
+     *
+     *   2. ACTION_AUDIO_BECOMING_NOISY receiver — fires when earphones are
+     *      suddenly unplugged and audio would otherwise blast from the speaker.
+     *      For drum pads (one-shot), we just reinit the stream; no loops to stop.
+     */
+    private void setupAudioRouting() {
+        final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+
+        // 1. Device-change callback (earphone plug / BT connect & disconnect)
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                for (AudioDeviceInfo d : addedDevices) {
+                    if (d.isSink()) {
+                        reinitAudioForNewDevice(am);
+                        return;
+                    }
+                }
+            }
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                for (AudioDeviceInfo d : removedDevices) {
+                    if (d.isSink()) {
+                        reinitAudioForNewDevice(am);
+                        return;
+                    }
+                }
+            }
+        };
+        am.registerAudioDeviceCallback(audioDeviceCallback,
+                new Handler(Looper.getMainLooper()));
+
+        // 2. Becoming-noisy receiver (earphone suddenly unplugged)
+        noisyReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                    // Drum pads are one-shot — just reinit the stream so the
+                    // next hit routes to the speaker cleanly.
+                    reinitAudioForNewDevice(am);
+                }
+            }
+        };
+        registerReceiver(noisyReceiver,
+                new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+    }
+
+    /** Unregister audio-routing listeners — called from onDestroy(). */
+    private void teardownAudioRouting() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null && audioDeviceCallback != null) {
+                am.unregisterAudioDeviceCallback(audioDeviceCallback);
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (noisyReceiver != null) unregisterReceiver(noisyReceiver);
+        } catch (Exception ignored) {}
+        audioDeviceCallback = null;
+        noisyReceiver       = null;
+    }
+
+    /**
+     * Reinit the Oboe stream with fresh AudioManager properties for the
+     * currently active output device (earphone / BT / speaker).
+     * Sample data stays loaded in the C++ engine — only the stream restarts.
+     */
+    private void reinitAudioForNewDevice(AudioManager am) {
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+        int nativeSR = 48000, nativeBurst = 256;
+        try {
+            String srStr    = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+            String burstStr = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+            if (srStr    != null && !srStr.isEmpty())    nativeSR    = Integer.parseInt(srStr);
+            if (burstStr != null && !burstStr.isEmpty()) nativeBurst = Integer.parseInt(burstStr);
+            if (nativeSR    < 8000  || nativeSR    > 192000) nativeSR    = 48000;
+            if (nativeBurst < 32    || nativeBurst > 8192)   nativeBurst = 256;
+        } catch (NumberFormatException ignored) {}
+        engine.reinitStream(nativeSR, nativeBurst);
     }
 }
