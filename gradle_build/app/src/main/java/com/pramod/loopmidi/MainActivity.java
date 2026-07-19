@@ -1431,6 +1431,16 @@ public class MainActivity extends Activity {
         if (resultCode != -1 || data == null || (uri = data.getData()) == null) {
             return;
         }
+        // onActivityResult is called BEFORE onResume(). If the file-picker caused
+        // onStop() to fire (which sets audioEngine = null), we must recreate the
+        // engine here before any audio operation. When onResume() then runs it will
+        // see audioEngine != null and call reinitStream() only — the samples loaded
+        // below (loadKitFromFolder / loadWavFromUri) remain intact in the engine.
+        if (this.audioEngine == null) {
+            AudioEngine eng = new AudioEngine(this);
+            this.audioEngine = eng;
+            eng.start();
+        }
         try {
             if (requestCode == REQ_PICK_SINGLE_WAV) {
                 int takeFlags = data.getFlags() & 3;
