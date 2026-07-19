@@ -1548,6 +1548,12 @@ public class MainActivity extends Activity {
     }
 
     public void loadKitFromMemory(int kitNo) {
+        // Guard: engine can be null if called while Activity is stopped (e.g. from
+        // a kitRepeatRunnable that fired after onStop() set audioEngine = null).
+        if (this.audioEngine == null) {
+            Log.w(TAG, "loadKitFromMemory: audioEngine is null, skipping load for kitNo=" + kitNo);
+            return;
+        }
         Log.i(TAG, "loadKitFromMemory: loading kitNo=" + kitNo);
         if (kitNo <= this.presetKitNames.length) {
             this.currentPresetKit = kitNo - 1;
@@ -2178,6 +2184,14 @@ public class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onStop() {
         super.onStop();
+        // Cancel hold-repeat BEFORE destroying the engine.
+        // kitRepeatRunnable fires on the main thread; if it fires after
+        // audioEngine = null below, changeKitBy() → loadKitFromMemory() crashes
+        // with NullPointerException. Cancelling here prevents that entirely.
+        if (kitRepeatRunnable != null) {
+            kitRepeatHandler.removeCallbacks(kitRepeatRunnable);
+            kitRepeatRunnable = null;
+        }
         saveKitToMemory(this.kitIndex);
         // Full APK: when LoopsActivity comes to the foreground, MainActivity
         // goes to onStop(). If we leave our Oboe stream running, two streams
