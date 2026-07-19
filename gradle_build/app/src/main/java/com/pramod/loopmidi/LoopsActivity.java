@@ -195,6 +195,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private volatile boolean midiLearnMode        = false;  // waiting to capture next note
     private volatile int     midiLearnTargetPad   = -1;    // pad being learned
     private Button           btnMidiMap           = null;
+    private Button           btnLoopSync          = null;
+    private View             loopSyncPanelScroll  = null;
     // Saved pre-drum-mode values so switching back to Loop Mode truly restores them
     private boolean savedMultiMode    = false;
     private boolean savedOneShotMode  = false;
@@ -1106,7 +1108,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Velocity Sensitivity toggle button
         this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         // MIDI Key Mapping button
-        this.btnMidiMap = (Button) findViewById(R.id.btnMidiMap);
+        this.btnMidiMap         = (Button) findViewById(R.id.btnMidiMap);
+        this.btnLoopSync        = (Button) findViewById(R.id.btnLoopSync);
+        this.loopSyncPanelScroll = findViewById(R.id.loopSyncPanelScroll);
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
@@ -1271,6 +1275,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         }
                         LoopsActivity.this.advancedControlPanel.setVisibility(0);
                         LoopsActivity.this.btnAdvancedLoops.setBackgroundResource(R.drawable.btn_3d_orange);
+                        // Close LOOP SYNC panel when ADV opens
+                        if (LoopsActivity.this.loopSyncPanelScroll != null) LoopsActivity.this.loopSyncPanelScroll.setVisibility(View.GONE);
+                        if (LoopsActivity.this.btnLoopSync != null) { LoopsActivity.this.btnLoopSync.setBackgroundResource(R.drawable.btn_3d_dark); LoopsActivity.this.btnLoopSync.setText("🔄SYNC\nOFF"); }
                     }
                 }
             });
@@ -1372,6 +1379,24 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // ── MIDI Key Mapping button ────────────────────────────────────────────
         if (this.btnMidiMap != null) {
             this.btnMidiMap.setOnClickListener(v -> showMidiKeyMappingDialog());
+        }
+        // ── Loop Sync panel toggle button ─────────────────────────────────────
+        if (this.btnLoopSync != null) {
+            this.btnLoopSync.setOnClickListener(v -> {
+                if (loopSyncPanelScroll == null) return;
+                boolean opening = loopSyncPanelScroll.getVisibility() != View.VISIBLE;
+                // Close other panels when opening
+                if (opening) {
+                    if (advancedControlPanel != null) {
+                        advancedControlPanel.setVisibility(View.GONE);
+                        if (btnAdvancedLoops != null) btnAdvancedLoops.setBackgroundResource(R.drawable.btn_3d_dark);
+                    }
+                    if (recControlPanelScroll != null) recControlPanelScroll.setVisibility(View.GONE);
+                }
+                loopSyncPanelScroll.setVisibility(opening ? View.VISIBLE : View.GONE);
+                btnLoopSync.setBackgroundResource(opening ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+                btnLoopSync.setText(opening ? "🔄SYNC\nON" : "🔄SYNC\nOFF");
+            });
         }
         // ── Loop Mode button ──────────────────────────────────────────────────
         if (this.btnLoopMode != null) {
@@ -3586,6 +3611,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
         // ── Show the panel (real pads remain visible below via loopPadArea) ───
         recControlPanelScroll.setVisibility(View.VISIBLE);
+        // Close LOOP SYNC panel when REC panel opens
+        if (loopSyncPanelScroll != null) loopSyncPanelScroll.setVisibility(View.GONE);
+        if (btnLoopSync != null) { btnLoopSync.setBackgroundResource(R.drawable.btn_3d_dark); btnLoopSync.setText("🔄SYNC\nOFF"); }
     }
 
     /** Refresh the track list inside the dialog. */

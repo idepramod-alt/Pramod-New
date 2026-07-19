@@ -105,6 +105,12 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="🎹MAP\nOFF" android:layout_weight="1"/>
 
+        <!-- Loop Sync panel toggle button -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnLoopSync" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp" android:text="🔄SYNC\nOFF" android:layout_weight="1"/>
+
         <!-- Brand name: no plate, just bold yellow text with a black stroke -->
         <TextView android:id="@+id/txtBrandName"
             android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffff00"
@@ -178,37 +184,6 @@
                 android:layout_height="wrap_content" android:text="ONE-SHOT"
                 android:layout_weight="1" android:buttonTint="#ff00afff"/>
         </LinearLayout>
-
-        <!-- ── Loop Sync section (MULTI-PLAY ke saath useful) ── -->
-        <View android:background="#ff555555" android:layout_width="match_parent"
-            android:layout_height="1dp" android:layout_marginTop="10dp"
-            android:layout_marginBottom="6dp"/>
-        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
-            android:layout_width="match_parent" android:layout_height="wrap_content">
-            <TextView android:textSize="11sp" android:textStyle="bold"
-                android:textColor="#ff00ffcc"
-                android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="🔄 LOOP SYNC"/>
-            <Button android:id="@+id/btnSyncAll"
-                android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"
-                android:background="@drawable/btn_3d_blue"
-                android:layout_width="wrap_content" android:layout_height="34dp"
-                android:paddingStart="14dp" android:paddingEnd="14dp"
-                android:text="⚡ SYNC ALL"/>
-        </LinearLayout>
-        <TextView android:textSize="9sp" android:textColor="#ff888888"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="2dp" android:layout_marginBottom="4dp"
-            android:text="SYNC ALL = sab playing loops ek saath restart  |  ◀ ▶ = ek pad ko aage/peeche nudge karo"/>
-        <!-- Per-pad nudge rows — built in Java (onCreate) -->
-        <LinearLayout android:id="@+id/loopSyncPadContainer"
-            android:orientation="vertical"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"/>
-        <View android:background="#ff555555" android:layout_width="match_parent"
-            android:layout_height="1dp" android:layout_marginTop="6dp"
-            android:layout_marginBottom="4dp"/>
 
         <!-- Drum-mode-only FX (per pad — same as MainActivity's per-pad
              chkDelay/seekDelayTime/seekDelayLevel/seekChokeGroup, just scoped to
@@ -380,6 +355,50 @@
         android:background="#ff1a1a2e" android:padding="12dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
+    </LinearLayout>
+    </ScrollView>
+
+    <!-- ── Loop Sync Panel (🔄SYNC button toggles visibility, same pattern as ADV/REC) ── -->
+    <!-- weight=1 → shares screen 50/50 with pad grid, pads always visible below -->
+    <ScrollView android:id="@+id/loopSyncPanelScroll"
+        android:visibility="gone" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginBottom="4dp"
+        android:fillViewport="true">
+    <LinearLayout android:orientation="vertical" android:id="@+id/loopSyncPanel"
+        android:background="#ff0d1f0d" android:padding="10dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <!-- Header row -->
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp">
+            <TextView android:textSize="13sp" android:textStyle="bold"
+                android:textColor="#ff00ffcc"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🔄 LOOP SYNC"/>
+            <Button android:id="@+id/btnSyncAll"
+                android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"
+                android:background="@drawable/btn_3d_blue"
+                android:layout_width="wrap_content" android:layout_height="36dp"
+                android:paddingStart="16dp" android:paddingEnd="16dp"
+                android:text="⚡ SYNC ALL"/>
+        </LinearLayout>
+
+        <!-- Hint text -->
+        <TextView android:textSize="9sp" android:textColor="#ff666666"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:text="SYNC ALL = sab playing loops ek saath restart  |  ◀ = peeche shift  ▶ = aage shift  ↺ = sirf yeh pad restart"/>
+
+        <!-- Per-pad nudge rows + nudge step selector — built in Java (onCreate) -->
+        <LinearLayout android:id="@+id/loopSyncPadContainer"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
     </LinearLayout>
     </ScrollView>
 
