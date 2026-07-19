@@ -179,6 +179,37 @@
                 android:layout_weight="1" android:buttonTint="#ff00afff"/>
         </LinearLayout>
 
+        <!-- ── Loop Sync section (MULTI-PLAY ke saath useful) ── -->
+        <View android:background="#ff555555" android:layout_width="match_parent"
+            android:layout_height="1dp" android:layout_marginTop="10dp"
+            android:layout_marginBottom="6dp"/>
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content">
+            <TextView android:textSize="11sp" android:textStyle="bold"
+                android:textColor="#ff00ffcc"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🔄 LOOP SYNC"/>
+            <Button android:id="@+id/btnSyncAll"
+                android:textSize="11sp" android:textStyle="bold" android:textColor="#ffffffff"
+                android:background="@drawable/btn_3d_blue"
+                android:layout_width="wrap_content" android:layout_height="34dp"
+                android:paddingStart="14dp" android:paddingEnd="14dp"
+                android:text="⚡ SYNC ALL"/>
+        </LinearLayout>
+        <TextView android:textSize="9sp" android:textColor="#ff888888"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="2dp" android:layout_marginBottom="4dp"
+            android:text="SYNC ALL = sab playing loops ek saath restart  |  ◀ ▶ = ek pad ko aage/peeche nudge karo"/>
+        <!-- Per-pad nudge rows — built in Java (onCreate) -->
+        <LinearLayout android:id="@+id/loopSyncPadContainer"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <View android:background="#ff555555" android:layout_width="match_parent"
+            android:layout_height="1dp" android:layout_marginTop="6dp"
+            android:layout_marginBottom="4dp"/>
+
         <!-- Drum-mode-only FX (per pad — same as MainActivity's per-pad
              chkDelay/seekDelayTime/seekDelayLevel/seekChokeGroup, just scoped to
              whichever pad is selected here). Only affects real DRUM MODE hits;

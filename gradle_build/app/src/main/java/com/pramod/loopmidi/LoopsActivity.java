@@ -1794,6 +1794,175 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (checkBox2 != null) {
             checkBox2.setOnCheckedChangeListener(checkListener);
         }
+
+        // ── LOOP SYNC — SYNC ALL + per-pad NUDGE ─────────────────────────────
+        Button btnSyncAll = findViewById(R.id.btnSyncAll);
+        if (btnSyncAll != null) {
+            btnSyncAll.setOnClickListener(v -> {
+                if (audioEngine == null) return;
+                // Collect all currently playing loop pads
+                java.util.List<Integer> playing = new java.util.ArrayList<>();
+                for (int i = 0; i < 8; i++) {
+                    if (loopPlaying[i]) playing.add(i);
+                }
+                if (playing.isEmpty()) {
+                    Toast.makeText(this, "Koi loop play nahi ho raha!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                // Stop all playing loops
+                for (int i : playing) audioEngine.stopPad(i);
+                // Restart all at the exact same moment → perfect sync
+                for (int i : playing) {
+                    audioEngine.playLoopSP(i, effectiveVolume(i), currentSpeed, currentPitch);
+                }
+                Toast.makeText(this, "✅ " + playing.size() + " loops sync ho gaye!", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        // Per-pad nudge rows — one row per pad (all 8, dim if no content loaded)
+        android.widget.LinearLayout syncContainer =
+            (android.widget.LinearLayout) findViewById(R.id.loopSyncPadContainer);
+        if (syncContainer != null) {
+            syncContainer.removeAllViews();
+            int[] nudgeMs = {50, 100, 200}; // nudge step options (ms)
+            final int[] selectedNudge = {1}; // default 100ms
+
+            // Nudge step selector row
+            android.widget.LinearLayout stepRow = new android.widget.LinearLayout(this);
+            stepRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            stepRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            android.widget.LinearLayout.LayoutParams stepRowLP =
+                new android.widget.LinearLayout.LayoutParams(-1, -2);
+            stepRowLP.bottomMargin = 6;
+            stepRow.setLayoutParams(stepRowLP);
+
+            android.widget.TextView tvStep = new android.widget.TextView(this);
+            tvStep.setText("Nudge step: ");
+            tvStep.setTextColor(0xFF888888);
+            tvStep.setTextSize(10f);
+            stepRow.addView(tvStep);
+
+            Button[] stepBtns = new Button[3];
+            String[] stepLabels = {"50ms", "100ms", "200ms"};
+            for (int s = 0; s < 3; s++) {
+                final int si = s;
+                stepBtns[s] = new Button(this);
+                stepBtns[s].setText(stepLabels[s]);
+                stepBtns[s].setTextSize(9f);
+                stepBtns[s].setTextColor(0xFFFFFFFF);
+                stepBtns[s].setBackgroundColor(si == 1 ? 0xFF005599 : 0xFF333333);
+                android.widget.LinearLayout.LayoutParams sbLP =
+                    new android.widget.LinearLayout.LayoutParams(-2, -2);
+                sbLP.setMarginStart(4);
+                stepBtns[s].setLayoutParams(sbLP);
+                stepBtns[s].setOnClickListener(v -> {
+                    selectedNudge[0] = si;
+                    for (int k = 0; k < 3; k++)
+                        stepBtns[k].setBackgroundColor(k == si ? 0xFF005599 : 0xFF333333);
+                });
+                stepRow.addView(stepBtns[s]);
+            }
+            syncContainer.addView(stepRow);
+
+            // One row per pad
+            for (int pi = 0; pi < 8; pi++) {
+                final int padIdx = pi;
+                boolean hasContent = loopUris[padIdx] != null
+                    || (loopSamples[padIdx] != null && loopSamples[padIdx].loaded);
+
+                android.widget.LinearLayout padSyncRow = new android.widget.LinearLayout(this);
+                padSyncRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                padSyncRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                android.widget.LinearLayout.LayoutParams psrLP =
+                    new android.widget.LinearLayout.LayoutParams(-1, -2);
+                psrLP.bottomMargin = 3;
+                padSyncRow.setLayoutParams(psrLP);
+
+                // Pad label
+                android.widget.TextView tvPad = new android.widget.TextView(this);
+                String padLabel = (loopPads[padIdx] != null)
+                    ? loopPads[padIdx].getText().toString() : "PAD " + (padIdx + 1);
+                tvPad.setText(padLabel);
+                tvPad.setTextColor(hasContent ? 0xFFFFFFFF : 0xFF555555);
+                tvPad.setTextSize(11f);
+                tvPad.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                android.widget.LinearLayout.LayoutParams tvPadLP =
+                    new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+                tvPad.setLayoutParams(tvPadLP);
+                padSyncRow.addView(tvPad);
+
+                // ◀ nudge back — restart after delay (shifts phase backward)
+                Button btnNudgeBack = new Button(this);
+                btnNudgeBack.setText("◀");
+                btnNudgeBack.setTextSize(12f);
+                btnNudgeBack.setTextColor(hasContent ? 0xFFFFFFFF : 0xFF444444);
+                btnNudgeBack.setBackgroundColor(hasContent ? 0xFF334455 : 0xFF222222);
+                btnNudgeBack.setEnabled(hasContent);
+                android.widget.LinearLayout.LayoutParams nbLP =
+                    new android.widget.LinearLayout.LayoutParams(-2, -2);
+                nbLP.setMarginStart(6);
+                btnNudgeBack.setLayoutParams(nbLP);
+                btnNudgeBack.setOnClickListener(v -> {
+                    if (audioEngine == null || !loopPlaying[padIdx]) {
+                        Toast.makeText(this, "PAD " + (padIdx+1) + " play nahi ho raha", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    int delayMs = nudgeMs[selectedNudge[0]];
+                    audioEngine.stopPad(padIdx);
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (loopPlaying[padIdx] && audioEngine != null)
+                            audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                    }, delayMs);
+                });
+                padSyncRow.addView(btnNudgeBack);
+
+                // ▶ nudge forward — stop + restart immediately (shifts phase forward)
+                Button btnNudgeFwd = new Button(this);
+                btnNudgeFwd.setText("▶");
+                btnNudgeFwd.setTextSize(12f);
+                btnNudgeFwd.setTextColor(hasContent ? 0xFFFFFFFF : 0xFF444444);
+                btnNudgeFwd.setBackgroundColor(hasContent ? 0xFF334455 : 0xFF222222);
+                btnNudgeFwd.setEnabled(hasContent);
+                android.widget.LinearLayout.LayoutParams nfLP =
+                    new android.widget.LinearLayout.LayoutParams(-2, -2);
+                nfLP.setMarginStart(4);
+                btnNudgeFwd.setLayoutParams(nfLP);
+                btnNudgeFwd.setOnClickListener(v -> {
+                    if (audioEngine == null || !loopPlaying[padIdx]) {
+                        Toast.makeText(this, "PAD " + (padIdx+1) + " play nahi ho raha", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    audioEngine.stopPad(padIdx);
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                });
+                padSyncRow.addView(btnNudgeFwd);
+
+                // ↺ restart this pad alone
+                Button btnRestart = new Button(this);
+                btnRestart.setText("↺");
+                btnRestart.setTextSize(12f);
+                btnRestart.setTextColor(hasContent ? 0xFF00FFAA : 0xFF444444);
+                btnRestart.setBackgroundColor(hasContent ? 0xFF224433 : 0xFF222222);
+                btnRestart.setEnabled(hasContent);
+                android.widget.LinearLayout.LayoutParams rstLP =
+                    new android.widget.LinearLayout.LayoutParams(-2, -2);
+                rstLP.setMarginStart(4);
+                btnRestart.setLayoutParams(rstLP);
+                btnRestart.setOnClickListener(v -> {
+                    if (audioEngine == null || !loopPlaying[padIdx]) {
+                        Toast.makeText(this, "PAD " + (padIdx+1) + " play nahi ho raha", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    audioEngine.stopPad(padIdx);
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                    Toast.makeText(this, "PAD " + (padIdx+1) + " restarted", Toast.LENGTH_SHORT).show();
+                });
+                padSyncRow.addView(btnRestart);
+
+                syncContainer.addView(padSyncRow);
+            }
+        }
+
         // Drum-mode-only FX: choke + delay, PER-PAD — same pattern as MainActivity's
         // per-pad chkDelay/seekChokeGroup (padChokeGroup[]/padDelayOn[] arrays), just
         // scoped to whichever pad is currently selected (LoopsActivity.this.selectedPad).
