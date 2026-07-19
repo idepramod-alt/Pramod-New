@@ -232,6 +232,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private String        fileSoundDisplayName = "no file selected";
     private android.media.AudioRecord audioRecord     = null;
     private MediaPlayer              mediaPlayer      = null;
+    private final java.util.List<MediaPlayer> playAllPlayers = new java.util.ArrayList<>();
     private volatile boolean         isRecordingTrack = false;
     private Thread                   recordThread     = null;
     private java.util.ArrayList<String> trackPaths   = new java.util.ArrayList<>();
@@ -762,6 +763,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { this.mediaPlayer.release(); } catch (Exception ignored) {}
             this.mediaPlayer = null;
         }
+        stopPlayAll();   // PLAY ALL players bhi release karo
         // Stop file sound player
         if (this.fileSoundPlayer != null) {
             try { this.fileSoundPlayer.release(); } catch (Exception ignored) {}
@@ -1258,7 +1260,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnBack.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.1
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
-                LoopsActivity.this.finish();
+                // finish() nahi — onBackPressed() use karo taaki full APK mein
+                // loop background mein chalta rahe aur MainActivity pe stop
+                // button se band ho sake.
+                LoopsActivity.this.onBackPressed();
             }
         });
         this.btnEditLoops.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.2
@@ -3603,7 +3608,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 Toast.makeText(this, "Koi track nahi! Pehle 🔴 REC karo.", Toast.LENGTH_SHORT).show();
                 return;
             }
-            playTrack(trackPaths.get(trackPaths.size() - 1), tvStatus);
+            // Pehle sab band karo, phir sab ek saath loop shuru karo
+            stopMediaPlayer();
+            for (String tPath : new java.util.ArrayList<>(trackPaths)) {
+                try {
+                    MediaPlayer mp = new MediaPlayer();
+                    mp.setDataSource(tPath);
+                    mp.setLooping(true);
+                    mp.setOnPreparedListener(MediaPlayer::start);
+                    mp.setOnErrorListener((m, what, extra) -> {
+                        runOnUiThread(this::stopPlayAll);
+                        return true;
+                    });
+                    mp.prepareAsync();
+                    playAllPlayers.add(mp);
+                } catch (Exception e) {
+                    Log.e("LoopsRec", "playAll track failed: " + tPath, e);
+                }
+            }
+            if (tvStatus != null)
+                tvStatus.setText("▶ PLAY ALL: " + trackPaths.size()
+                    + " tracks loop ho rahe hain... (⏹ STOP se rokein)");
         });
         btnClear.setOnClickListener(v -> {
             if (isRecordingTrack) stopTrackRecording();
@@ -3877,33 +3902,45 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         dialogEngineRecTrack = (dialogEngineRecTrack + 1) % 4;
     }
 
-    /** Play a single track file with MediaPlayer. */
+    /** Play a single track file with MediaPlayer — loops until stopMediaPlayer() is called. */
     private void playTrack(String path, android.widget.TextView tvStatus) {
         stopMediaPlayer();
         try {
             mediaPlayer = new MediaPlayer();
             mediaPlayer.setDataSource(path);
+            mediaPlayer.setLooping(true);   // ← repeat until STOP
             mediaPlayer.setOnPreparedListener(MediaPlayer::start);
             mediaPlayer.setOnCompletionListener(mp -> {
+                // setLooping(true) pe normally nahi aata; fallback cleanup
                 stopMediaPlayer();
                 if (tvStatus != null)
-                    runOnUiThread(() -> tvStatus.setText("✅ Playback khatam."));
+                    runOnUiThread(() -> tvStatus.setText("⏹ Playback khatam."));
             });
             mediaPlayer.prepareAsync();
-            if (tvStatus != null) tvStatus.setText("▶ Chal raha hai...");
+            if (tvStatus != null) tvStatus.setText("▶ Loop chal raha hai... (⏹ STOP se rokein)");
         } catch (Exception e) {
             Log.e("LoopsRec", "playTrack failed", e);
             Toast.makeText(this, "Play failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
-    /** Stop MediaPlayer if running. */
+    /** Stop MediaPlayer if running (including any PLAY ALL players). */
     private void stopMediaPlayer() {
         if (mediaPlayer != null) {
             try { if (mediaPlayer.isPlaying()) mediaPlayer.stop(); } catch (Exception ignored) {}
             try { mediaPlayer.release(); } catch (Exception ignored) {}
             mediaPlayer = null;
         }
+        stopPlayAll();
+    }
+
+    /** Stop all MediaPlayers started by PLAY ALL. */
+    private void stopPlayAll() {
+        for (MediaPlayer mp : playAllPlayers) {
+            try { if (mp.isPlaying()) mp.stop(); } catch (Exception ignored) {}
+            try { mp.release(); } catch (Exception ignored) {}
+        }
+        playAllPlayers.clear();
     }
 
     // ── File Sound Player methods ─────────────────────────────────────────────
