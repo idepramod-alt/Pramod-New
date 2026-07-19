@@ -1247,6 +1247,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.audioEngine = new AudioEngine(this);
         this.audioEngine.start();
         setupAudioRouting();
+        // Audio focus pehle se lo — pehli loop hit pe OS ko audio path switch
+        // nahi karna padta, isliye pehli hit ka delay khatam hota hai.
+        try {
+            AudioManager _am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (_am != null) _am.requestAudioFocus(null,
+                AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        } catch (Exception ignored) {}
         loadCurrentKit();
         this.btnBack.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.1
             @Override // android.view.View.OnClickListener
@@ -2123,6 +2130,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         for (int i = 0; i < 8; i++) {
             this.loopPads[i] = (Button) findViewById(padIds[i]);
             this.loopPads[i].setSoundEffectsEnabled(false);
+            this.loopPads[i].setHapticFeedbackEnabled(false); // vibration motor UI thread ko hold karta hai → 1-3ms saved
             final int index = i;
 
             // Touch listener: ACTION_DOWN = play immediately; 1-second hold = toggle

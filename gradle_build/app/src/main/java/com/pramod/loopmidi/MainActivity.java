@@ -867,6 +867,13 @@ public class MainActivity extends Activity {
         this.audioEngine = audioEngine;
         audioEngine.start();
         setupAudioRouting();   // earphone / BT plug-unplug handling
+        // Audio focus pehle se lo — pehli pad hit pe OS ko audio path switch
+        // nahi karna padta, isliye pehli hit ka delay khatam hota hai.
+        try {
+            AudioManager _am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (_am != null) _am.requestAudioFocus(null,
+                AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        } catch (Exception ignored) {}
         initPads();
         initSeekBars();
         // Restore velocity sensitivity mode from prefs

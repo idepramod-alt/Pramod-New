@@ -271,6 +271,10 @@ public:
     AudioEngineImpl() {
         memset(loopSonic, 0, sizeof(loopSonic));
         for (int i = 0; i < LOOP_VOICES; i++) {
+            // Pre-warm Sonic streams at construction time so the first loop
+            // play() call doesn't incur sonicCreateStream malloc on the audio
+            // thread — eliminates the 2-5ms "first hit" delay for loop pads.
+            loopSonic[i] = sonicCreateStream(48000, 1); // 48kHz default; reinit() updates SR
             loopSonicLastSpeed[i] = 1.f;
             loopSonicLastPitch[i] = 1.f;
         }
