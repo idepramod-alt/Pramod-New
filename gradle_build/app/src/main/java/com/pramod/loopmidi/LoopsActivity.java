@@ -1496,21 +1496,43 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 isTempoSync = !isTempoSync;
                 prefs.edit().putBoolean("tempo_sync_enabled", isTempoSync).apply();
                 if (isTempoSync) {
-                    // Entering Sync: save current BPM+Pitch as the shared global values
+                    // ── Turning Sync ON ─────────────────────────────────────────────
+                    // Save the global sync reference values
                     prefs.edit()
                         .putFloat("tempo_sync_global_speed", currentSpeed)
                         .putFloat("tempo_sync_global_pitch", currentPitch)
                         .apply();
+                    // Pre-sync backup for CURRENT kit — saved now so restore is reliable.
+                    // Other kits' backups are saved in loadLoopsFromMemory when Sync is ON.
+                    prefs.edit()
+                        .putFloat("loop_presync_speed_ch_" + loopChannelIndex, currentSpeed)
+                        .putFloat("loop_presync_pitch_ch_" + loopChannelIndex, currentPitch)
+                        .apply();
                     Toast.makeText(this, "⏱ Tempo Sync ON — saare kits yahi BPM+Pitch use karenge", Toast.LENGTH_SHORT).show();
                 } else {
-                    // Exiting Sync: restore THIS kit's own saved BPM+Pitch
-                    float spd = prefs.getFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
-                    float pit = prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+                    // ── Turning Sync OFF ────────────────────────────────────────────
+                    // Restore current kit from pre-sync backup.
+                    // Fallback chain: presync backup → last saved per-kit → 1.0x default
+                    float spd = prefs.getFloat("loop_presync_speed_ch_" + loopChannelIndex,
+                                    prefs.getFloat("loop_speed_ch_" + loopChannelIndex, 1.0f));
+                    float pit = prefs.getFloat("loop_presync_pitch_ch_" + loopChannelIndex,
+                                    prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, 1.0f));
                     currentSpeed = spd;
                     currentPitch = pit;
+                    // Write restored values back as the authoritative per-kit speed
+                    prefs.edit()
+                        .putFloat("loop_speed_ch_" + loopChannelIndex, spd)
+                        .putFloat("loop_pitch_ch_" + loopChannelIndex, pit)
+                        .apply();
                     if (seekTempo != null) seekTempo.setProgress((int)(spd * 100));
                     if (seekPitch != null) seekPitch.setProgress((int)(pit * 100));
-                    Toast.makeText(this, "⏱ Tempo Sync OFF — kit ka apna BPM+Pitch restore hua", Toast.LENGTH_SHORT).show();
+                    if (txtTempoVal != null) txtTempoVal.setText(
+                        String.format(java.util.Locale.US, "%.0f BPM (%.1fx)", spd * 120f, spd));
+                    if (txtPitchVal != null) txtPitchVal.setText(
+                        String.format(java.util.Locale.US, "%.1fx", pit));
+                    // Apply restored speed to any currently playing loops immediately
+                    updateAllActiveLoops();
+                    Toast.makeText(this, "⏱ Tempo Sync OFF — kit ka original BPM+Pitch restore hua", Toast.LENGTH_SHORT).show();
                 }
                 updateTempoSyncButton();
             });
@@ -2905,14 +2927,28 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // Restore per-kit BPM+Pitch (unless Tempo Sync is ON — then keep the global values)
         if (!isTempoSync) {
-            float spd = this.prefs.getFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
-            float pit = this.prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+            // Restore: prefer presync backup → saved per-kit → sensible default 1.0x
+            float spd = this.prefs.getFloat("loop_presync_speed_ch_" + loopChannelIndex,
+                            this.prefs.getFloat("loop_speed_ch_" + loopChannelIndex, 1.0f));
+            float pit = this.prefs.getFloat("loop_presync_pitch_ch_" + loopChannelIndex,
+                            this.prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, 1.0f));
             this.currentSpeed = spd;
             this.currentPitch = pit;
             if (seekTempo != null) seekTempo.setProgress((int)(spd * 100));
             if (seekPitch != null) seekPitch.setProgress((int)(pit * 100));
             if (txtTempoVal != null) txtTempoVal.setText(String.format(java.util.Locale.US, "%.0f BPM (%.1fx)", spd * 120f, spd));
             if (txtPitchVal != null) txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", pit));
+        } else {
+            // Sync is ON: save pre-sync backup for this kit (first visit under sync).
+            // If backup already exists we skip — never overwrite with the sync value.
+            if (!this.prefs.contains("loop_presync_speed_ch_" + loopChannelIndex)) {
+                this.prefs.edit()
+                    .putFloat("loop_presync_speed_ch_" + loopChannelIndex,
+                              this.prefs.getFloat("loop_speed_ch_" + loopChannelIndex, 1.0f))
+                    .putFloat("loop_presync_pitch_ch_" + loopChannelIndex,
+                              this.prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, 1.0f))
+                    .apply();
+            }
         }
         TextView textView = this.txtLoopStatus;
         if (textView != null) {

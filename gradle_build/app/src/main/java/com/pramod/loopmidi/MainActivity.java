@@ -1908,6 +1908,12 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Folder not found!", 0).show();
                 return;
             }
+            // ── Bank-aware WAV loading ─────────────────────────────────────────
+            // Bank A mode  → load into Bank A slots (0-7)
+            // Bank B mode  → load into Bank B slots (8-15)
+            // A+B Layer    → load into BOTH banks simultaneously
+            boolean loadIntoA = (bankMode != BANK_B);
+            boolean loadIntoB = (bankMode == BANK_B || bankMode == LAYER_AB);
             int i2 = 0;
             while (true) {
                 i = 8;
@@ -1916,31 +1922,47 @@ public class MainActivity extends Activity {
                 }
                 DocumentFile wav = kitFolder3.findFile(KitManager.DEFAULT_WAV_NAMES[i2]);
                 if (wav != null) {
-                    this.selectedWavUris[i2] = wav.getUri();
-                    this.selectedRawResIds[i2] = 0;
-                    this.samples[i2] = this.audioEngine.loadWavFromUri(i2, wav.getUri());
-                    AudioEngine.SampleData sampleData = this.samples[i2];
-                    if (sampleData != null) {
-                        this.audioEngine.preloadSample(sampleData);
+                    if (loadIntoA) {
+                        this.selectedWavUris[i2]  = wav.getUri();
+                        this.selectedRawResIds[i2] = 0;
+                        this.samples[i2] = this.audioEngine.loadWavFromUri(i2, wav.getUri());
+                        if (this.samples[i2] != null) this.audioEngine.preloadSample(this.samples[i2]);
+                    }
+                    if (loadIntoB) {
+                        this.selectedWavUrisB[i2]  = wav.getUri();
+                        this.selectedRawResIdsB[i2] = 0;
+                        this.samplesB[i2] = this.audioEngine.loadWavFromUri(i2 + 8, wav.getUri());
+                        if (this.samplesB[i2] != null) this.audioEngine.preloadSample(this.samplesB[i2]);
                     }
                 } else {
-                    this.selectedWavUris[i2] = null;
-                    int[] iArr = this.selectedRawResIds;
-                    int i22 = this.presetKits[this.currentPresetKit][i2];
-                    iArr[i2] = i22;
-                    this.samples[i2] = this.audioEngine.loadRawSound(i2, i22);
-                    AudioEngine.SampleData sampleData2 = this.samples[i2];
-                    if (sampleData2 != null) {
-                        this.audioEngine.preloadSample(sampleData2);
+                    int rawId = this.presetKits[this.currentPresetKit][i2];
+                    if (loadIntoA) {
+                        this.selectedWavUris[i2]  = null;
+                        this.selectedRawResIds[i2] = rawId;
+                        this.samples[i2] = this.audioEngine.loadRawSound(i2, rawId);
+                        if (this.samples[i2] != null) this.audioEngine.preloadSample(this.samples[i2]);
+                    }
+                    if (loadIntoB) {
+                        this.selectedWavUrisB[i2]  = null;
+                        this.selectedRawResIdsB[i2] = rawId;
+                        this.samplesB[i2] = this.audioEngine.loadRawSound(i2 + 8, rawId);
+                        if (this.samplesB[i2] != null) this.audioEngine.preloadSample(this.samplesB[i2]);
                     }
                 }
                 i2++;
             }
             String folderName2 = kitFolder3.getName();
             if (folderName2 != null) {
-                String strReplace = folderName2.replace(".mcn", "");
-                this.currentKitName = strReplace;
-                this.txtKitName.setText(strReplace);
+                String stripped = folderName2.replace(".mcn", "");
+                if (bankMode == BANK_B) {
+                    // Bank B mode: update Bank B's kit name and display
+                    this.currentKitNameB = "B:" + stripped;
+                    this.txtKitName.setText(this.currentKitNameB);
+                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).apply();
+                } else {
+                    this.currentKitName = stripped;
+                    this.txtKitName.setText(stripped);
+                }
             }
             DocumentFile dataFile2 = kitFolder3.findFile("kit_data.json");
             if (dataFile2 != null) {
@@ -1985,110 +2007,50 @@ public class MainActivity extends Activity {
                     JSONArray dlyLArray3 = jsonData.optJSONArray("eqHigh");
                     JSONArray eqHArray2 = jsonData.optJSONArray("eqMid");
                     JSONArray eqLArray = jsonData.optJSONArray("eqLow");
+                    // ── Bank-aware JSON param loading ──────────────────────────────
                     try {
                         JSONArray chokeArray = jsonData.optJSONArray("chokeGroup");
-                        int i3 = 0;
-                        while (i3 < i) {
-                            if (volArray != null) {
-                                try {
-                                    folderName = folderName2;
-                                    try {
-                                        this.padVolume[i3] = (float) volArray.getDouble(i3);
-                                    } catch (Exception e3) {
-                                    }
-                                } catch (Exception e4) {
-                                    folderName = folderName2;
+                        for (int i3 = 0; i3 < 8; i3++) {
+                            try {
+                                float vol   = volArray   != null ? (float) volArray.getDouble(i3)   : 0.8f;
+                                float pitch = pitchArray != null ? (float) pitchArray.getDouble(i3) : 1.0f;
+                                boolean dlyOn  = dlyOnArray != null && dlyOnArray.getBoolean(i3);
+                                float dlyT  = dlyTArray  != null ? (float) dlyTArray.getDouble(i3)  : 150f;
+                                float dlyL  = dlyLArray2 != null ? (float) dlyLArray2.getDouble(i3) : 0.5f;
+                                float eqH   = dlyLArray3 != null ? (float) dlyLArray3.getDouble(i3) : 0f;
+                                float eqM   = eqHArray2  != null ? (float) eqHArray2.getDouble(i3)  : 0f;
+                                float eqL   = eqLArray   != null ? (float) eqLArray.getDouble(i3)   : 0f;
+                                int   choke = chokeArray != null ? chokeArray.getInt(i3)             : 0;
+                                if (loadIntoA) {
+                                    this.padVolume[i3]     = vol;
+                                    this.padPitch[i3]      = pitch;
+                                    this.padDelayOn[i3]    = dlyOn;
+                                    this.padDelayTime[i3]  = dlyT;
+                                    this.padDelayLevel[i3] = dlyL;
+                                    this.padEqHigh[i3]     = eqH;
+                                    this.padEqMid[i3]      = eqM;
+                                    this.padEqLow[i3]      = eqL;
+                                    this.padChokeGroup[i3] = choke;
                                 }
-                            } else {
-                                folderName = folderName2;
-                            }
-                            if (pitchArray != null) {
-                                try {
-                                    this.padPitch[i3] = (float) pitchArray.getDouble(i3);
-                                } catch (Exception e5) {
+                                if (loadIntoB) {
+                                    this.padVolumeB[i3]     = vol;
+                                    this.padPitchB[i3]      = pitch;
+                                    this.padDelayOnB[i3]    = dlyOn;
+                                    this.padDelayTimeB[i3]  = dlyT;
+                                    this.padDelayLevelB[i3] = dlyL;
+                                    this.padEqHighB[i3]     = eqH;
+                                    this.padEqMidB[i3]      = eqM;
+                                    this.padEqLowB[i3]      = eqL;
+                                    this.padChokeGroupB[i3] = choke;
                                 }
-                            }
-                            if (dlyOnArray != null) {
-                                this.padDelayOn[i3] = dlyOnArray.getBoolean(i3);
-                            }
-                            if (dlyTArray != null) {
-                                this.padDelayTime[i3] = (float) dlyTArray.getDouble(i3);
-                            }
-                            JSONArray dlyLArray4 = dlyLArray2;
-                            if (dlyLArray4 != null) {
-                                try {
-                                    dataFile = dataFile2;
-                                    try {
-                                        this.padDelayLevel[i3] = (float) dlyLArray4.getDouble(i3);
-                                    } catch (Exception e6) {
-                                    }
-                                } catch (Exception e7) {
-                                }
-                            } else {
-                                dataFile = dataFile2;
-                            }
-                            JSONArray eqHArray3 = dlyLArray3;
-                            if (eqHArray3 != null) {
-                                try {
-                                    kitFolder = kitFolder3;
-                                    dlyLArray = dlyLArray4;
-                                    try {
-                                        this.padEqHigh[i3] = (float) eqHArray3.getDouble(i3);
-                                    } catch (Exception e8) {
-                                    }
-                                } catch (Exception e9) {
-                                }
-                            } else {
-                                kitFolder = kitFolder3;
-                                dlyLArray = dlyLArray4;
-                            }
-                            JSONArray eqMArray = eqHArray2;
-                            if (eqMArray != null) {
-                                try {
-                                    eqHArray = eqHArray3;
-                                    try {
-                                        this.padEqMid[i3] = (float) eqMArray.getDouble(i3);
-                                    } catch (Exception e10) {
-                                    }
-                                } catch (Exception e11) {
-                                }
-                            } else {
-                                eqHArray = eqHArray3;
-                            }
-                            JSONArray eqLArray2 = eqLArray;
-                            if (eqLArray2 != null) {
-                                try {
-                                    kitFolder2 = kitFolder;
-                                    try {
-                                        this.padEqLow[i3] = (float) eqLArray2.getDouble(i3);
-                                    } catch (Exception e12) {
-                                    }
-                                } catch (Exception e13) {
-                                }
-                            } else {
-                                kitFolder2 = kitFolder;
-                            }
-                            JSONArray chokeArray2 = chokeArray;
-                            if (chokeArray2 != null) {
-                                this.padChokeGroup[i3] = chokeArray2.getInt(i3);
-                            }
-                            i3++;
-                            chokeArray = chokeArray2;
-                            dataFile2 = dataFile;
-                            dlyLArray2 = dlyLArray;
-                            dlyLArray3 = eqHArray;
-                            folderName2 = folderName;
-                            eqHArray2 = eqMArray;
-                            kitFolder3 = kitFolder2;
-                            eqLArray = eqLArray2;
-                            i = 8;
+                            } catch (Exception ignored2) {}
                         }
                     } catch (Exception e14) {
                     }
                 }
             }
-            this.seekVolume.setProgress((int) (this.padVolume[this.selectedPad] * 100.0f));
-            this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));
+            // Refresh seekbars for the active bank's pad, then persist
+            refreshSeekBarsForCurrentBankAndPad();
             saveKitToMemory(this.kitIndex);
             Toast.makeText(this, "Kit Loaded Successfully!", 0).show();
         } catch (Exception ignored) {
