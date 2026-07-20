@@ -123,8 +123,10 @@ public class MainActivity extends Activity {
     private int[] padChokeGroup = new int[8];
     private int selectedPad = 0;
     private boolean editMode = false;
-    private int kitIndex = 1;
-    private String currentKitName = "KIT 1";
+    private int kitIndex  = 1;   // Bank A's active kit number
+    private int kitIndexB = 1;   // Bank B's active kit number (independent of Bank A)
+    private String currentKitName  = "KIT 1";
+    private String currentKitNameB = "KIT B:1";
     private String pendingSaveKitName = null;
     private int copySourcePad = -1;
     private int swapSourcePad = -1;
@@ -940,6 +942,9 @@ public class MainActivity extends Activity {
         if (i < 1) {
             this.kitIndex = 1;
         }
+        // Restore Bank B's independent kit index (defaults to kitIndex for backward compat)
+        this.kitIndexB = this.prefs.getInt("kit_index_B", this.kitIndex);
+        if (this.kitIndexB < 1) this.kitIndexB = 1;
         // Restore Bank mode (A / B / A+B Layer)
         this.bankMode = this.prefs.getInt("bank_mode", BANK_A);
         updateBankToggleButton();
@@ -1718,25 +1723,26 @@ public class MainActivity extends Activity {
                 editor.remove("kit_" + kitNo + "_uri_" + i);
                 editor.remove("kit_" + kitNo + "_raw_" + i);
             }
-            // Bank B
-            editor.putFloat("kit_" + kitNo + "_B_vol_" + i, this.padVolumeB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_pitch_" + i, this.padPitchB[i]);
-            editor.putBoolean("kit_" + kitNo + "_B_dlyon_" + i, this.padDelayOnB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_dlyt_" + i, this.padDelayTimeB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_dlyl_" + i, this.padDelayLevelB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_eqh_" + i, this.padEqHighB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_eqm_" + i, this.padEqMidB[i]);
-            editor.putFloat("kit_" + kitNo + "_B_eql_" + i, this.padEqLowB[i]);
-            editor.putInt("kit_" + kitNo + "_B_choke_" + i, this.padChokeGroupB[i]);
+            // Bank B — saved to Bank B's OWN kit index (independent of Bank A's kitNo)
+            int kB = this.kitIndexB;
+            editor.putFloat("kit_" + kB + "_B_vol_" + i, this.padVolumeB[i]);
+            editor.putFloat("kit_" + kB + "_B_pitch_" + i, this.padPitchB[i]);
+            editor.putBoolean("kit_" + kB + "_B_dlyon_" + i, this.padDelayOnB[i]);
+            editor.putFloat("kit_" + kB + "_B_dlyt_" + i, this.padDelayTimeB[i]);
+            editor.putFloat("kit_" + kB + "_B_dlyl_" + i, this.padDelayLevelB[i]);
+            editor.putFloat("kit_" + kB + "_B_eqh_" + i, this.padEqHighB[i]);
+            editor.putFloat("kit_" + kB + "_B_eqm_" + i, this.padEqMidB[i]);
+            editor.putFloat("kit_" + kB + "_B_eql_" + i, this.padEqLowB[i]);
+            editor.putInt("kit_" + kB + "_B_choke_" + i, this.padChokeGroupB[i]);
             if (this.selectedWavUrisB[i] != null) {
-                editor.putString("kit_" + kitNo + "_B_uri_" + i, this.selectedWavUrisB[i].toString());
-                editor.remove("kit_" + kitNo + "_B_raw_" + i);
+                editor.putString("kit_" + kB + "_B_uri_" + i, this.selectedWavUrisB[i].toString());
+                editor.remove("kit_" + kB + "_B_raw_" + i);
             } else if (this.selectedRawResIdsB[i] != 0) {
-                editor.remove("kit_" + kitNo + "_B_uri_" + i);
-                editor.putInt("kit_" + kitNo + "_B_raw_" + i, this.selectedRawResIdsB[i]);
+                editor.remove("kit_" + kB + "_B_uri_" + i);
+                editor.putInt("kit_" + kB + "_B_raw_" + i, this.selectedRawResIdsB[i]);
             } else {
-                editor.remove("kit_" + kitNo + "_B_uri_" + i);
-                editor.remove("kit_" + kitNo + "_B_raw_" + i);
+                editor.remove("kit_" + kB + "_B_uri_" + i);
+                editor.remove("kit_" + kB + "_B_raw_" + i);
             }
         }
         if (this.assistSoundUri != null) {
@@ -1761,8 +1767,15 @@ public class MainActivity extends Activity {
         } else {
             this.currentKitName = this.prefs.getString("kit_name_" + kitNo, "KIT " + kitNo);
         }
-        this.txtKitName.setText(this.currentKitName);
-        Log.i(TAG, "loadKitFromMemory: loaded kitName='" + this.currentKitName + "'");
+        // Bank B kit name (keyed by kitIndexB)
+        this.currentKitNameB = this.prefs.getString("kit_name_B_" + this.kitIndexB, "KIT B:" + this.kitIndexB);
+        // Show the active bank's kit name in the UI
+        if (this.bankMode == BANK_B) {
+            this.txtKitName.setText(this.currentKitNameB);
+        } else {
+            this.txtKitName.setText(this.currentKitName);
+        }
+        Log.i(TAG, "loadKitFromMemory: kitA=" + kitNo + " '" + this.currentKitName + "' kitB=" + this.kitIndexB + " '" + this.currentKitNameB + "'");
         for (int i = 0; i < 8; i++) {
             this.padVolume[i] = this.prefs.getFloat("kit_" + kitNo + "_vol_" + i, 0.8f);
             this.padPitch[i] = this.prefs.getFloat("kit_" + kitNo + "_pitch_" + i, 1.0f);
@@ -1836,19 +1849,20 @@ public class MainActivity extends Activity {
         } else {
             this.assistSoundUri = null;
         }
-        // ── Bank B loading ─────────────────────────────────────────────────
+        // ── Bank B loading — uses kitIndexB (independent of Bank A's kitNo) ──
+        int kB = this.kitIndexB;
         for (int i = 0; i < 8; i++) {
-            this.padVolumeB[i]     = this.prefs.getFloat("kit_" + kitNo + "_B_vol_" + i, 0.8f);
-            this.padPitchB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_pitch_" + i, 1.0f);
-            this.padDelayOnB[i]    = this.prefs.getBoolean("kit_" + kitNo + "_B_dlyon_" + i, false);
-            this.padDelayTimeB[i]  = this.prefs.getFloat("kit_" + kitNo + "_B_dlyt_" + i, 150.0f);
-            this.padDelayLevelB[i] = this.prefs.getFloat("kit_" + kitNo + "_B_dlyl_" + i, 0.5f);
-            this.padEqHighB[i]     = this.prefs.getFloat("kit_" + kitNo + "_B_eqh_" + i, 0.0f);
-            this.padEqMidB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_eqm_" + i, 0.0f);
-            this.padEqLowB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_eql_" + i, 0.0f);
-            this.padChokeGroupB[i] = this.prefs.getInt("kit_" + kitNo + "_B_choke_" + i, 0);
-            String uriBStr  = this.prefs.getString("kit_" + kitNo + "_B_uri_" + i, null);
-            int    rawBResId = this.prefs.getInt("kit_" + kitNo + "_B_raw_" + i, 0);
+            this.padVolumeB[i]     = this.prefs.getFloat("kit_" + kB + "_B_vol_" + i, 0.8f);
+            this.padPitchB[i]      = this.prefs.getFloat("kit_" + kB + "_B_pitch_" + i, 1.0f);
+            this.padDelayOnB[i]    = this.prefs.getBoolean("kit_" + kB + "_B_dlyon_" + i, false);
+            this.padDelayTimeB[i]  = this.prefs.getFloat("kit_" + kB + "_B_dlyt_" + i, 150.0f);
+            this.padDelayLevelB[i] = this.prefs.getFloat("kit_" + kB + "_B_dlyl_" + i, 0.5f);
+            this.padEqHighB[i]     = this.prefs.getFloat("kit_" + kB + "_B_eqh_" + i, 0.0f);
+            this.padEqMidB[i]      = this.prefs.getFloat("kit_" + kB + "_B_eqm_" + i, 0.0f);
+            this.padEqLowB[i]      = this.prefs.getFloat("kit_" + kB + "_B_eql_" + i, 0.0f);
+            this.padChokeGroupB[i] = this.prefs.getInt("kit_" + kB + "_B_choke_" + i, 0);
+            String uriBStr  = this.prefs.getString("kit_" + kB + "_B_uri_" + i, null);
+            int    rawBResId = this.prefs.getInt("kit_" + kB + "_B_raw_" + i, 0);
             if (uriBStr != null) {
                 try {
                     this.selectedWavUrisB[i]   = Uri.parse(uriBStr);
@@ -2324,19 +2338,33 @@ public class MainActivity extends Activity {
 
     /** Single kit step; safe to call from any thread that owns the UI. */
     private void changeKitBy(int direction) {
-        if (direction < 0) {
-            if (kitIndex > 1) {
-                saveKitToMemory(kitIndex);
-                kitIndex--;
-                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
-                loadKitFromMemory(kitIndex);
+        if (bankMode == BANK_B) {
+            // ── Bank B mode: change Bank B's kit independently ──────────────
+            int newKitB = kitIndexB + direction;
+            if (newKitB >= 1 && newKitB <= MAX_KITS) {
+                saveKitToMemory(kitIndex);           // flush Bank B to kitIndexB (see saveKitToMemory)
+                kitIndexB = newKitB;
+                prefs.edit().putInt("kit_index_B", kitIndexB).apply();
+                loadKitFromMemory(kitIndex);         // reloads Bank B from new kitIndexB
+                Toast.makeText(this,
+                    "🅱️ Bank B → Kit " + kitIndexB, Toast.LENGTH_SHORT).show();
             }
         } else {
-            if (kitIndex < MAX_KITS) {
-                saveKitToMemory(kitIndex);
-                kitIndex++;
-                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
-                loadKitFromMemory(kitIndex);
+            // ── Bank A (or Layer) mode: change Bank A's kit ─────────────────
+            if (direction < 0) {
+                if (kitIndex > 1) {
+                    saveKitToMemory(kitIndex);
+                    kitIndex--;
+                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                    loadKitFromMemory(kitIndex);
+                }
+            } else {
+                if (kitIndex < MAX_KITS) {
+                    saveKitToMemory(kitIndex);
+                    kitIndex++;
+                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                    loadKitFromMemory(kitIndex);
+                }
             }
         }
     }
@@ -2394,8 +2422,14 @@ public class MainActivity extends Activity {
                         int target = Integer.parseInt(s);
                         if (target >= 1 && target <= MAX_KITS) {
                             saveKitToMemory(kitIndex);
-                            kitIndex = target;
-                            prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                            if (bankMode == BANK_B) {
+                                // Jump Bank B's kit independently
+                                kitIndexB = target;
+                                prefs.edit().putInt("kit_index_B", kitIndexB).apply();
+                            } else {
+                                kitIndex = target;
+                                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                            }
                             loadKitFromMemory(kitIndex);
                         } else {
                             Toast.makeText(this, "1 se " + MAX_KITS + " ke beech daalo!", Toast.LENGTH_SHORT).show();

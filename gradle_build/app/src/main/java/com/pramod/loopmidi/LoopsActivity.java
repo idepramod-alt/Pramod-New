@@ -2290,15 +2290,40 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final Runnable[] refreshRef = new Runnable[1];
         final Runnable[] highlightRef = new Runnable[1];
 
+        // ── Header row: label + ⏹ Stop button side by side ────────────────
+        android.widget.LinearLayout headerRow = new android.widget.LinearLayout(this);
+        headerRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        headerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.LinearLayout.LayoutParams hrLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        hrLP.setMargins(0, 0, 0, 6);
+        headerRow.setLayoutParams(hrLP);
+
         android.widget.TextView tvPadLabel = new android.widget.TextView(this);
         tvPadLabel.setText("▼ Tap a pad to select & preview:");
         tvPadLabel.setTextColor(0xFFCCCCCC);
         tvPadLabel.setTextSize(12f);
-        android.widget.LinearLayout.LayoutParams tvLpHeader =
-            new android.widget.LinearLayout.LayoutParams(-1, -2);
-        tvLpHeader.setMargins(0, 0, 0, 6);
-        tvPadLabel.setLayoutParams(tvLpHeader);
-        root.addView(tvPadLabel);
+        tvPadLabel.setLayoutParams(
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        headerRow.addView(tvPadLabel);
+
+        // ⏹ Stop button — stops currently previewing sound immediately
+        android.widget.Button btnStop = new android.widget.Button(this);
+        btnStop.setText("⏹ Stop");
+        btnStop.setTextSize(11f);
+        btnStop.setTextColor(0xFFFFFFFF);
+        btnStop.setBackgroundColor(0xFF880000);
+        android.widget.LinearLayout.LayoutParams stopLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        stopLP.setMargins(8, 0, 0, 0);
+        btnStop.setLayoutParams(stopLP);
+        btnStop.setOnClickListener(vv -> {
+            try {
+                if (audioEngine != null) audioEngine.stopPad(selPad[0]);
+            } catch (Exception ignored) {}
+        });
+        headerRow.addView(btnStop);
+        root.addView(headerRow);
 
         for (int row = 0; row < 2; row++) {
             android.widget.LinearLayout padRowLL = new android.widget.LinearLayout(this);
@@ -2847,9 +2872,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             editor.putFloat("loop_ch_" + loopChannelIndex + "_ppitch_" + i, padLoopPitch[i]);
             editor.putFloat("loop_ch_" + loopChannelIndex + "_pan_" + i, padLoopPan[i]);
         }
-        // Per-kit BPM+Pitch memory (saved when Tempo Sync is OFF or any time kit changes)
-        editor.putFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
-        editor.putFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+        // Per-kit BPM+Pitch — only write when Tempo Sync is OFF.
+        // When Sync is ON we deliberately skip this write so the original per-kit
+        // values survive in prefs and are restored correctly when Sync is turned OFF.
+        if (!isTempoSync) {
+            editor.putFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
+            editor.putFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+        }
         editor.apply();
     }
 
