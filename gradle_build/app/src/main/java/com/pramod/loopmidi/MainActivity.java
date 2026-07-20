@@ -129,6 +129,28 @@ public class MainActivity extends Activity {
     private int copySourcePad = -1;
     private int swapSourcePad = -1;
     private AudioEngine.SampleData[] samples = new AudioEngine.SampleData[8];
+
+    // ── Bank B ─────────────────────────────────────────────────────────────────
+    // bankMode 0 = BANK A (default), 1 = BANK B, 2 = A+B LAYER (both play together)
+    // Bank B uses pad voice slots 8-15 in AudioEngine (PAD_COUNT = 16).
+    private static final int BANK_A   = 0;
+    private static final int BANK_B   = 1;
+    private static final int LAYER_AB = 2;
+    private int    bankMode      = BANK_A;
+    private Button btnBankToggle = null;
+    private Uri[]  selectedWavUrisB    = new Uri[8];
+    private int[]  selectedRawResIdsB  = new int[8];
+    private float[] padVolumeB         = new float[]{0.8f,0.8f,0.8f,0.8f,0.8f,0.8f,0.8f,0.8f};
+    private float[] padPitchB          = new float[]{1f,1f,1f,1f,1f,1f,1f,1f};
+    private boolean[] padDelayOnB      = new boolean[8];
+    private float[] padDelayTimeB      = new float[]{150f,150f,150f,150f,150f,150f,150f,150f};
+    private float[] padDelayLevelB     = new float[]{0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f};
+    private float[] padEqHighB         = new float[8];
+    private float[] padEqMidB          = new float[8];
+    private float[] padEqLowB          = new float[8];
+    private int[]   padChokeGroupB     = new int[8];
+    private AudioEngine.SampleData[] samplesB = new AudioEngine.SampleData[8];
+
     private int[] activePointerId = new int[8];
     private int currentPresetKit = 0;
     private final String[] presetKitNames = new String[25];
@@ -511,10 +533,27 @@ public class MainActivity extends Activity {
      */
     private void playPadSoundImmediate(int index, float velocityScale) {
         try {
-            AudioEngine.SampleData sampleData = this.samples[index];
-            if (sampleData != null && sampleData.loaded) {
-                float vol = this.padVolume[index] * velocityScale;
-                this.audioEngine.playSample(index, sampleData, vol, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f);
+            // Bank A: plays when bankMode is BANK_A or LAYER_AB
+            if (bankMode != BANK_B) {
+                AudioEngine.SampleData sampleData = this.samples[index];
+                if (sampleData != null && sampleData.loaded) {
+                    float vol = this.padVolume[index] * velocityScale;
+                    this.audioEngine.playSample(index, sampleData, vol, this.padPitch[index], 0,
+                        this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index],
+                        this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index],
+                        this.padChokeGroup[index], 0.0f, 0.0f);
+                }
+            }
+            // Bank B: plays when bankMode is BANK_B or LAYER_AB — uses voice slots 8-15
+            if (bankMode != BANK_A) {
+                AudioEngine.SampleData sampleDataB = this.samplesB[index];
+                if (sampleDataB != null && sampleDataB.loaded) {
+                    float volB = this.padVolumeB[index] * velocityScale;
+                    this.audioEngine.playSample(index + 8, sampleDataB, volB, this.padPitchB[index], 0,
+                        this.padDelayOnB[index], this.padDelayTimeB[index], this.padDelayLevelB[index],
+                        this.padEqLowB[index], this.padEqMidB[index], this.padEqHighB[index],
+                        this.padChokeGroupB[index], 0.0f, 0.0f);
+                }
             }
         } catch (Exception e) {
         }
@@ -736,6 +775,8 @@ public class MainActivity extends Activity {
         this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         // MIDI Key Mapping button
         this.btnMidiMap = (Button) findViewById(R.id.btnMidiMap);
+        // Bank B toggle button (already in main.xml as "BANK A")
+        this.btnBankToggle = (Button) findViewById(R.id.btnBankToggle);
         Button button = (Button) findViewById(R.id.btnLoops);
         this.btnLoops = button;
         if (button != null) {
@@ -899,6 +940,9 @@ public class MainActivity extends Activity {
         if (i < 1) {
             this.kitIndex = 1;
         }
+        // Restore Bank mode (A / B / A+B Layer)
+        this.bankMode = this.prefs.getInt("bank_mode", BANK_A);
+        updateBankToggleButton();
         loadKitFromMemory(this.kitIndex);
         updateEditButtonUI();
         this.btnEditMode.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.5
@@ -915,6 +959,20 @@ public class MainActivity extends Activity {
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
         });
+        // ── Bank B toggle button ───────────────────────────────────────────────
+        // Cycles: BANK A → BANK B → A+B LAYER → BANK A
+        if (this.btnBankToggle != null) {
+            this.btnBankToggle.setOnClickListener(v -> {
+                bankMode = (bankMode + 1) % 3;
+                prefs.edit().putInt("bank_mode", bankMode).apply();
+                updateBankToggleButton();
+                String msg;
+                if (bankMode == BANK_A)        msg = "🅰️ Bank A — only Bank A pads active";
+                else if (bankMode == BANK_B)   msg = "🅱️ Bank B — only Bank B pads active";
+                else                           msg = "🅰️+🅱️ A+B Layer — both banks play together";
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            });
+        }
         this.btnRenameKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.6
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
@@ -1144,6 +1202,21 @@ public class MainActivity extends Activity {
     public void updateEditButtonUI() {
         this.btnEditMode.setText(this.editMode ? "EDIT ON" : "EDIT OFF");
         this.btnEditMode.setBackgroundResource(this.editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
+    }
+
+    /** Updates btnBankToggle label + colour to match the current bankMode. */
+    public void updateBankToggleButton() {
+        if (btnBankToggle == null) return;
+        if (bankMode == BANK_B) {
+            btnBankToggle.setText("BANK B");
+            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_blue);
+        } else if (bankMode == LAYER_AB) {
+            btnBankToggle.setText("A+B\nLAYER");
+            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnBankToggle.setText("BANK A");
+            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_darkred);
+        }
     }
 
     public void playPadSound(int index) {
@@ -1529,6 +1602,7 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor editor = this.prefs.edit();
         editor.putString("kit_name_" + kitNo, this.currentKitName);
         for (int i = 0; i < 8; i++) {
+            // Bank A
             editor.putFloat("kit_" + kitNo + "_vol_" + i, this.padVolume[i]);
             editor.putFloat("kit_" + kitNo + "_pitch_" + i, this.padPitch[i]);
             editor.putBoolean("kit_" + kitNo + "_dlyon_" + i, this.padDelayOn[i]);
@@ -1547,6 +1621,26 @@ public class MainActivity extends Activity {
             } else {
                 editor.remove("kit_" + kitNo + "_uri_" + i);
                 editor.remove("kit_" + kitNo + "_raw_" + i);
+            }
+            // Bank B
+            editor.putFloat("kit_" + kitNo + "_B_vol_" + i, this.padVolumeB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_pitch_" + i, this.padPitchB[i]);
+            editor.putBoolean("kit_" + kitNo + "_B_dlyon_" + i, this.padDelayOnB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_dlyt_" + i, this.padDelayTimeB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_dlyl_" + i, this.padDelayLevelB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_eqh_" + i, this.padEqHighB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_eqm_" + i, this.padEqMidB[i]);
+            editor.putFloat("kit_" + kitNo + "_B_eql_" + i, this.padEqLowB[i]);
+            editor.putInt("kit_" + kitNo + "_B_choke_" + i, this.padChokeGroupB[i]);
+            if (this.selectedWavUrisB[i] != null) {
+                editor.putString("kit_" + kitNo + "_B_uri_" + i, this.selectedWavUrisB[i].toString());
+                editor.remove("kit_" + kitNo + "_B_raw_" + i);
+            } else if (this.selectedRawResIdsB[i] != 0) {
+                editor.remove("kit_" + kitNo + "_B_uri_" + i);
+                editor.putInt("kit_" + kitNo + "_B_raw_" + i, this.selectedRawResIdsB[i]);
+            } else {
+                editor.remove("kit_" + kitNo + "_B_uri_" + i);
+                editor.remove("kit_" + kitNo + "_B_raw_" + i);
             }
         }
         if (this.assistSoundUri != null) {
@@ -1645,6 +1739,40 @@ public class MainActivity extends Activity {
             this.assistSoundUri = Uri.parse(assistUriStr);
         } else {
             this.assistSoundUri = null;
+        }
+        // ── Bank B loading ─────────────────────────────────────────────────
+        for (int i = 0; i < 8; i++) {
+            this.padVolumeB[i]     = this.prefs.getFloat("kit_" + kitNo + "_B_vol_" + i, 0.8f);
+            this.padPitchB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_pitch_" + i, 1.0f);
+            this.padDelayOnB[i]    = this.prefs.getBoolean("kit_" + kitNo + "_B_dlyon_" + i, false);
+            this.padDelayTimeB[i]  = this.prefs.getFloat("kit_" + kitNo + "_B_dlyt_" + i, 150.0f);
+            this.padDelayLevelB[i] = this.prefs.getFloat("kit_" + kitNo + "_B_dlyl_" + i, 0.5f);
+            this.padEqHighB[i]     = this.prefs.getFloat("kit_" + kitNo + "_B_eqh_" + i, 0.0f);
+            this.padEqMidB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_eqm_" + i, 0.0f);
+            this.padEqLowB[i]      = this.prefs.getFloat("kit_" + kitNo + "_B_eql_" + i, 0.0f);
+            this.padChokeGroupB[i] = this.prefs.getInt("kit_" + kitNo + "_B_choke_" + i, 0);
+            String uriBStr  = this.prefs.getString("kit_" + kitNo + "_B_uri_" + i, null);
+            int    rawBResId = this.prefs.getInt("kit_" + kitNo + "_B_raw_" + i, 0);
+            if (uriBStr != null) {
+                try {
+                    this.selectedWavUrisB[i]   = Uri.parse(uriBStr);
+                    this.selectedRawResIdsB[i] = 0;
+                    this.samplesB[i] = this.audioEngine.loadWavFromUri(i + 8, this.selectedWavUrisB[i]);
+                    if (this.samplesB[i] != null) this.audioEngine.preloadSample(this.samplesB[i]);
+                    else this.selectedWavUrisB[i] = null;
+                } catch (IOException e) { this.samplesB[i] = null; }
+            } else if (rawBResId != 0) {
+                this.selectedWavUrisB[i]   = null;
+                this.selectedRawResIdsB[i] = rawBResId;
+                try {
+                    this.samplesB[i] = this.audioEngine.loadRawSound(i + 8, rawBResId);
+                    if (this.samplesB[i] != null) this.audioEngine.preloadSample(this.samplesB[i]);
+                } catch (IOException e) { this.samplesB[i] = null; }
+            } else {
+                this.selectedWavUrisB[i]   = null;
+                this.selectedRawResIdsB[i] = 0;
+                this.samplesB[i]           = null;
+            }
         }
         this.seekVolume.setProgress((int) (this.padVolume[this.selectedPad] * 100.0f));
         this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));

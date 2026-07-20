@@ -197,6 +197,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button           btnMidiMap           = null;
     private Button           btnLoopSync          = null;
     private View             loopSyncPanelScroll  = null;
+
+    // ── Tempo Sync ────────────────────────────────────────────────────────────
+    // When ON, all kits share one global BPM+Pitch.
+    // When OFF, each kit's own saved BPM+Pitch is restored on kit change.
+    private Button  btnTempoSync = null;
+    private boolean isTempoSync  = false;
+
+    // ── Per-pad EQ / Gain / Pitch / Pan (LoopsActivity) ──────────────────────
+    // EQ bands in dB (-15 to +15), default 0. Applied via playSample for
+    // drum/one-shot mode; stored for loop mode future enhancement.
+    // Gain: 0.1–2.0 multiplier on top of padVolume, default 1.0.
+    // PadPitch: per-pad multiplier on top of global currentPitch, default 1.0.
+    // Pan: -1.0 (full L) to +1.0 (full R), stored for reference; L/R balance
+    //      applied in effectiveVolume as volume gain (pan law simulation).
+    private float[] padLoopEqHigh = new float[8];
+    private float[] padLoopEqMid  = new float[8];
+    private float[] padLoopEqLow  = new float[8];
+    private float[] padLoopGain   = new float[]{1,1,1,1,1,1,1,1};
+    private float[] padLoopPitch  = new float[]{1,1,1,1,1,1,1,1};
+    private float[] padLoopPan    = new float[8];  // stored, reflected in volume balance
+
     // Saved pre-drum-mode values so switching back to Loop Mode truly restores them
     private boolean savedMultiMode    = false;
     private boolean savedOneShotMode  = false;
@@ -398,8 +419,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 drumDelayLevelToUse = 0f;
             }
             if (!audioAlreadyTriggered) {
-                this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, this.currentPitch, 0,
-                        drumDelayActive, drumDelayMs, drumDelayLevelToUse, 0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+                // Use per-pad pitch and per-pad EQ for drum/one-shot pads
+                this.audioEngine.playSample(index, sampleData, effectiveVolume(index), this.currentSpeed, effectivePitch(index), 0,
+                        drumDelayActive, drumDelayMs, drumDelayLevelToUse,
+                        padLoopEqLow[index], padLoopEqMid[index], padLoopEqHigh[index], chokeGroup, 0.0f, 0.0f);
             }
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
             if (isOneShotTriggered) {
@@ -443,7 +466,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.isOneShotMode) {
                 // OneShot ON + LOOP pad = RETRIGGER: restart loop from beginning on each tap
                 this.audioEngine.stopPad(index);
-                this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, this.currentPitch);
+                this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index));
                 this.txtLoopStatus.setText("LOOP " + (index + 1) + " ↺ RETRIGGER");
                 // loopPlaying stays true — pad is still actively looping
                 return;
@@ -461,7 +484,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // so the second call immediately tore down and recreated the Sonic
         // stream the first call had just set up, causing an audible restart
         // click at the moment playback began.
-        this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, this.currentPitch);
+        this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index));
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -487,7 +510,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      * </ul>
      */
     private float effectiveVolume(int padIndex) {
-        return isMasterVolumeMode ? masterVolume : padVolume[padIndex];
+        float base = isMasterVolumeMode ? masterVolume : padVolume[padIndex];
+        // Per-pad gain multiplier (default 1.0 — no change to existing behaviour)
+        return base * padLoopGain[padIndex];
+    }
+
+    /** Per-pad pitch = global pitch × per-pad pitch multiplier (default 1.0). */
+    private float effectivePitch(int padIndex) {
+        return currentPitch * padLoopPitch[padIndex];
     }
 
     /**
@@ -572,6 +602,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void handleProgramChange(int i) {
+        saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
         this.loopChannelIndex = i + 1;
         loadCurrentKit();
     }
@@ -1113,6 +1144,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnMidiMap         = (Button) findViewById(R.id.btnMidiMap);
         this.btnLoopSync        = (Button) findViewById(R.id.btnLoopSync);
         this.loopSyncPanelScroll = findViewById(R.id.loopSyncPanelScroll);
+        this.btnTempoSync       = (Button) findViewById(R.id.btnTempoSync);
         // ADD + REC buttons in Mode Bar
         this.btnAddLoop = (Button) findViewById(R.id.btnAddLoop);
         this.btnRec     = (Button) findViewById(R.id.btnRec);
@@ -1222,6 +1254,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.padDrumDelayTime[i] = this.prefs.getFloat("pad_drum_delay_time_" + i, 150.0f);
             this.padDrumDelayLevel[i] = this.prefs.getFloat("pad_drum_delay_level_" + i, 0.5f);
         }
+        // Restore Tempo Sync state
+        this.isTempoSync = this.prefs.getBoolean("tempo_sync_enabled", false);
+        updateTempoSyncButton();
+        // Restore per-pad EQ/Gain/Pitch/Pan for the current kit
+        for (int i = 0; i < 8; i++) {
+            this.padLoopEqHigh[i] = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eqh_" + i, 0f);
+            this.padLoopEqMid[i]  = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eqm_" + i, 0f);
+            this.padLoopEqLow[i]  = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eql_" + i, 0f);
+            this.padLoopGain[i]   = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_gain_" + i, 1f);
+            this.padLoopPitch[i]  = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_ppitch_" + i, 1f);
+            this.padLoopPan[i]    = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_pan_" + i, 0f);
+        }
         this.isMasterVolumeMode = this.prefs.getBoolean("master_vol_mode", true);
         SeekBar seekBar = this.seekMasterVolume;
         if (seekBar != null) {
@@ -1266,13 +1310,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 LoopsActivity.this.onBackPressed();
             }
         });
-        this.btnEditLoops.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.2
-            @Override // android.view.View.OnClickListener
-            public void onClick(View v) {
-                LoopsActivity.this.editMode = !LoopsActivity.this.editMode;
-                LoopsActivity.this.btnEditLoops.setText(LoopsActivity.this.editMode ? "EDIT ON" : "EDIT OFF");
-                LoopsActivity.this.btnEditLoops.setBackgroundResource(LoopsActivity.this.editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
-            }
+        this.btnEditLoops.setOnClickListener(v -> {
+            // Show dialog: toggle Edit Mode or open Pad Edit (per-pad EQ/Gain/Pitch/Pan)
+            String[] options = {
+                "✏️ Edit Mode " + (editMode ? "(currently ON — tap to turn OFF)" : "(currently OFF — tap to turn ON)"),
+                "🎛️ Pad Edit  (EQ / Gain / Pitch / Pan per pad)"
+            };
+            new android.app.AlertDialog.Builder(LoopsActivity.this)
+                .setTitle("Loop Edit")
+                .setItems(options, (dlg, which) -> {
+                    if (which == 0) {
+                        editMode = !editMode;
+                        btnEditLoops.setText(editMode ? "EDIT ON" : "EDIT OFF");
+                        btnEditLoops.setBackgroundResource(editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
+                    } else {
+                        showPadEditDialog();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
         });
         Button button = this.btnAdvancedLoops;
         if (button != null) {
@@ -1408,6 +1464,33 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 loopSyncPanelScroll.setVisibility(opening ? View.VISIBLE : View.GONE);
                 btnLoopSync.setBackgroundResource(opening ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
                 btnLoopSync.setText(opening ? "🔄SYNC\nON" : "🔄SYNC\nOFF");
+            });
+        }
+        // ── Tempo Sync button ─────────────────────────────────────────────────
+        // ON  = all loop kits share one global BPM+Pitch
+        // OFF = each kit restores its own individually-saved BPM+Pitch
+        if (this.btnTempoSync != null) {
+            this.btnTempoSync.setOnClickListener(v -> {
+                isTempoSync = !isTempoSync;
+                prefs.edit().putBoolean("tempo_sync_enabled", isTempoSync).apply();
+                if (isTempoSync) {
+                    // Entering Sync: save current BPM+Pitch as the shared global values
+                    prefs.edit()
+                        .putFloat("tempo_sync_global_speed", currentSpeed)
+                        .putFloat("tempo_sync_global_pitch", currentPitch)
+                        .apply();
+                    Toast.makeText(this, "⏱ Tempo Sync ON — saare kits yahi BPM+Pitch use karenge", Toast.LENGTH_SHORT).show();
+                } else {
+                    // Exiting Sync: restore THIS kit's own saved BPM+Pitch
+                    float spd = prefs.getFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
+                    float pit = prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+                    currentSpeed = spd;
+                    currentPitch = pit;
+                    if (seekTempo != null) seekTempo.setProgress((int)(spd * 100));
+                    if (seekPitch != null) seekPitch.setProgress((int)(pit * 100));
+                    Toast.makeText(this, "⏱ Tempo Sync OFF — kit ka apna BPM+Pitch restore hua", Toast.LENGTH_SHORT).show();
+                }
+                updateTempoSyncButton();
             });
         }
         // ── Loop Mode button ──────────────────────────────────────────────────
@@ -1616,7 +1699,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // playLoopSP ensures the loop is definitely running post-reinit.)
         for (int i = 0; i < 8; i++) {
             if (wasPlaying[i] && this.loopSamples[i] != null && this.loopSamples[i].loaded) {
-                engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, this.currentPitch);
+                engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i));
             }
         }
     }
@@ -1850,7 +1933,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 for (int i : playing) audioEngine.stopPad(i);
                 // Restart all at the exact same moment → perfect sync
                 for (int i : playing) {
-                    audioEngine.playLoopSP(i, effectiveVolume(i), currentSpeed, currentPitch);
+                    audioEngine.playLoopSP(i, effectiveVolume(i), currentSpeed, effectivePitch(i));
                 }
                 Toast.makeText(this, "✅ " + playing.size() + " loops sync ho gaye!", Toast.LENGTH_SHORT).show();
             });
@@ -1948,7 +2031,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     audioEngine.stopPad(padIdx);
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
                         if (loopPlaying[padIdx] && audioEngine != null)
-                            audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                            audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
                     }, delayMs);
                 });
                 padSyncRow.addView(btnNudgeBack);
@@ -1970,7 +2053,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         return;
                     }
                     audioEngine.stopPad(padIdx);
-                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
                 });
                 padSyncRow.addView(btnNudgeFwd);
 
@@ -1991,7 +2074,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         return;
                     }
                     audioEngine.stopPad(padIdx);
-                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, currentPitch);
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
                     Toast.makeText(this, "PAD " + (padIdx+1) + " restarted", Toast.LENGTH_SHORT).show();
                 });
                 padSyncRow.addView(btnRestart);
@@ -2122,12 +2205,198 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // the audible "cut" every time speed/pitch was dragged.
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
-                this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, this.currentPitch);
+                this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i));
             }
         }
     }
 
     private void applyPlaybackParams(Object unused) {
+    }
+
+    /** Updates the Tempo Sync button label + colour to match isTempoSync state. */
+    private void updateTempoSyncButton() {
+        if (btnTempoSync == null) return;
+        if (isTempoSync) {
+            btnTempoSync.setText("⏱TEMPO\nSYNC ON");
+            btnTempoSync.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnTempoSync.setText("⏱TEMPO\nSYNC OFF");
+            btnTempoSync.setBackgroundResource(R.drawable.btn_3d_dark);
+        }
+    }
+
+    /**
+     * Per-pad EQ / Gain / Pitch / Pan edit dialog.
+     * Supports 8 pads; changes are committed to live arrays on Save and
+     * written to SharedPreferences so they persist across kit loads.
+     */
+    private void showPadEditDialog() {
+        // Working copies — allow Cancel without side-effects
+        final float[] wEqH   = padLoopEqHigh.clone();
+        final float[] wEqM   = padLoopEqMid.clone();
+        final float[] wEqL   = padLoopEqLow.clone();
+        final float[] wGain  = padLoopGain.clone();
+        final float[] wPitch = padLoopPitch.clone();
+        final float[] wPan   = padLoopPan.clone();
+        final float[][] wArrays = {wEqH, wEqM, wEqL, wGain, wPitch, wPan};
+        final int[] selPad = {selectedPad};
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(20, 16, 20, 8);
+        root.setBackgroundColor(0xFF1a1a2e);
+
+        // ── Pad selector ──────────────────────────────────────────────────
+        android.widget.LinearLayout padRow = new android.widget.LinearLayout(this);
+        padRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        padRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.LinearLayout.LayoutParams prLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        prLP.setMargins(0, 0, 0, 14);
+        padRow.setLayoutParams(prLP);
+        android.widget.TextView tvPad = new android.widget.TextView(this);
+        tvPad.setText("Pad: ");
+        tvPad.setTextColor(0xFFCCCCCC);
+        tvPad.setTextSize(13f);
+        padRow.addView(tvPad);
+        final android.widget.Spinner spinPad = new android.widget.Spinner(this);
+        spinPad.setAdapter(new android.widget.ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item,
+            new String[]{"PAD 1","PAD 2","PAD 3","PAD 4","PAD 5","PAD 6","PAD 7","PAD 8"}));
+        spinPad.setSelection(selPad[0]);
+        android.widget.LinearLayout.LayoutParams spLP =
+            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
+        spLP.setMargins(8, 0, 0, 0);
+        spinPad.setLayoutParams(spLP);
+        padRow.addView(spinPad);
+        root.addView(padRow);
+
+        // ── Parameter rows ─────────────────────────────────────────────────
+        final String[] paramLabels  = {"EQ HIGH (dB)", "EQ MID (dB)", "EQ LOW (dB)",
+                                       "GAIN (0.1–2.0)", "PITCH (0.5–2.0)", "PAN (L←0→R)"};
+        final float[]  paramMin     = {-15f, -15f, -15f, 0.1f, 0.5f, -1.0f};
+        final float[]  paramMax     = {+15f, +15f, +15f, 2.0f, 2.0f,  1.0f};
+        final float[]  paramDefault = {  0f,   0f,   0f, 1.0f, 1.0f,  0.0f};
+        final android.widget.SeekBar[] seeks  = new android.widget.SeekBar[6];
+        final android.widget.TextView[] vTxts = new android.widget.TextView[6];
+
+        for (int p = 0; p < 6; p++) {
+            final int pi = p;
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.VERTICAL);
+            android.widget.LinearLayout.LayoutParams rowLP =
+                new android.widget.LinearLayout.LayoutParams(-1, -2);
+            rowLP.setMargins(0, 4, 0, 4);
+            row.setLayoutParams(rowLP);
+
+            android.widget.LinearLayout labelRow = new android.widget.LinearLayout(this);
+            labelRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+            android.widget.TextView tvLabel = new android.widget.TextView(this);
+            tvLabel.setText(paramLabels[p]);
+            tvLabel.setTextColor(0xFFAAAA88);
+            tvLabel.setTextSize(11f);
+            tvLabel.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+            labelRow.addView(tvLabel);
+
+            android.widget.TextView tvVal = new android.widget.TextView(this);
+            float initVal = wArrays[pi][selPad[0]];
+            tvVal.setText(String.format(java.util.Locale.US, "%.2f", initVal));
+            tvVal.setTextColor(0xFFFFFF88);
+            tvVal.setTextSize(11f);
+            tvVal.setGravity(android.view.Gravity.END);
+            android.widget.LinearLayout.LayoutParams valLP =
+                new android.widget.LinearLayout.LayoutParams(-2, -2);
+            valLP.setMargins(8, 0, 0, 0);
+            tvVal.setLayoutParams(valLP);
+            labelRow.addView(tvVal);
+            vTxts[pi] = tvVal;
+            row.addView(labelRow);
+
+            android.widget.SeekBar seek = new android.widget.SeekBar(this);
+            seek.setMax(200);
+            float range = paramMax[p] - paramMin[p];
+            seek.setProgress(Math.round((initVal - paramMin[p]) / range * 200f));
+            seek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(android.widget.SeekBar sb, int progress, boolean fromUser) {
+                    float val = paramMin[pi] + (progress / 200f) * (paramMax[pi] - paramMin[pi]);
+                    wArrays[pi][selPad[0]] = val;
+                    vTxts[pi].setText(String.format(java.util.Locale.US, "%.2f", val));
+                }
+                @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+                @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+            });
+            seeks[pi] = seek;
+            row.addView(seek);
+            root.addView(row);
+        }
+
+        // ── Reset this pad ─────────────────────────────────────────────────
+        Button btnRst = new Button(this);
+        btnRst.setText("↩ Reset This Pad to Default");
+        btnRst.setBackgroundColor(0xFF440000);
+        btnRst.setTextColor(0xFFFFFFFF);
+        btnRst.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams rstLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        rstLP.setMargins(0, 10, 0, 4);
+        btnRst.setLayoutParams(rstLP);
+        btnRst.setOnClickListener(vv -> {
+            int pad = selPad[0];
+            for (int pi2 = 0; pi2 < 6; pi2++) {
+                wArrays[pi2][pad] = paramDefault[pi2];
+                float range = paramMax[pi2] - paramMin[pi2];
+                seeks[pi2].setProgress(Math.round((paramDefault[pi2] - paramMin[pi2]) / range * 200f));
+                vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", paramDefault[pi2]));
+            }
+        });
+        root.addView(btnRst);
+
+        // Refresh seekbars when pad changes
+        spinPad.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int pos, long id) {
+                selPad[0] = pos;
+                for (int pi2 = 0; pi2 < 6; pi2++) {
+                    float val   = wArrays[pi2][pos];
+                    float range = paramMax[pi2] - paramMin[pi2];
+                    seeks[pi2].setProgress(Math.round((val - paramMin[pi2]) / range * 200f));
+                    vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", val));
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle("🎛️ Pad Edit — EQ / Gain / Pitch / Pan")
+            .setView(sv)
+            .setPositiveButton("💾 Save", (d, w) -> {
+                System.arraycopy(wEqH,   0, padLoopEqHigh, 0, 8);
+                System.arraycopy(wEqM,   0, padLoopEqMid,  0, 8);
+                System.arraycopy(wEqL,   0, padLoopEqLow,  0, 8);
+                System.arraycopy(wGain,  0, padLoopGain,   0, 8);
+                System.arraycopy(wPitch, 0, padLoopPitch,  0, 8);
+                System.arraycopy(wPan,   0, padLoopPan,    0, 8);
+                saveLoopsToMemory();
+                // Live-update any running loops
+                for (int i = 0; i < 8; i++) {
+                    if (loopPlaying[i] && audioEngine != null)
+                        audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), currentSpeed, effectivePitch(i));
+                }
+                Toast.makeText(LoopsActivity.this, "✅ Pad Edit saved!", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .create();
+        dlg.show();
+        android.view.Window wnd = dlg.getWindow();
+        if (wnd != null) {
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            wnd.setLayout((int)(screenW * 0.95f),
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void initPads() {
@@ -2489,7 +2758,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } else {
                 editor.remove("loop_uri_ch_" + this.loopChannelIndex + "_" + i);
             }
+            // Per-pad EQ / Gain / Pitch / Pan — keyed by kit index
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_eqh_" + i, padLoopEqHigh[i]);
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_eqm_" + i, padLoopEqMid[i]);
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_eql_" + i, padLoopEqLow[i]);
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_gain_" + i, padLoopGain[i]);
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_ppitch_" + i, padLoopPitch[i]);
+            editor.putFloat("loop_ch_" + loopChannelIndex + "_pan_" + i, padLoopPan[i]);
         }
+        // Per-kit BPM+Pitch memory (saved when Tempo Sync is OFF or any time kit changes)
+        editor.putFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
+        editor.putFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
         editor.apply();
     }
 
@@ -2506,6 +2785,24 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + i, false);
             this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
             updatePadLabel(i);
+            // Per-pad EQ / Gain / Pitch / Pan for this kit
+            this.padLoopEqHigh[i] = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_eqh_" + i, 0f);
+            this.padLoopEqMid[i]  = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_eqm_" + i, 0f);
+            this.padLoopEqLow[i]  = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_eql_" + i, 0f);
+            this.padLoopGain[i]   = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_gain_" + i, 1f);
+            this.padLoopPitch[i]  = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_ppitch_" + i, 1f);
+            this.padLoopPan[i]    = this.prefs.getFloat("loop_ch_" + loopChannelIndex + "_pan_" + i, 0f);
+        }
+        // Restore per-kit BPM+Pitch (unless Tempo Sync is ON — then keep the global values)
+        if (!isTempoSync) {
+            float spd = this.prefs.getFloat("loop_speed_ch_" + loopChannelIndex, currentSpeed);
+            float pit = this.prefs.getFloat("loop_pitch_ch_" + loopChannelIndex, currentPitch);
+            this.currentSpeed = spd;
+            this.currentPitch = pit;
+            if (seekTempo != null) seekTempo.setProgress((int)(spd * 100));
+            if (seekPitch != null) seekPitch.setProgress((int)(pit * 100));
+            if (txtTempoVal != null) txtTempoVal.setText(String.format(java.util.Locale.US, "%.0f BPM (%.1fx)", spd * 120f, spd));
+            if (txtPitchVal != null) txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", pit));
         }
         TextView textView = this.txtLoopStatus;
         if (textView != null) {
@@ -3095,9 +3392,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             float   drumDelayMs      = drumDelayActive ? this.padDrumDelayTime[index]  : 0f;
             float   drumDelayLevel   = drumDelayActive ? this.padDrumDelayLevel[index] : 0f;
             engine.playSample(index, sampleData,
-                    vol, this.currentSpeed, this.currentPitch, 0,
+                    vol, this.currentSpeed, effectivePitch(index), 0,
                     drumDelayActive, drumDelayMs, drumDelayLevel,
-                    0.0f, 0.0f, 0.0f, chokeGroup, 0.0f, 0.0f);
+                    padLoopEqLow[index], padLoopEqMid[index], padLoopEqHigh[index],
+                    chokeGroup, 0.0f, 0.0f);
             return true;
 
         } else {
@@ -3106,7 +3404,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (this.isOneShotMode) {
                     // OneShot ON + LOOP pad via MIDI = retrigger (restart from beginning)
                     try { engine.stopPad(index); } catch (Exception ignored) {}
-                    try { engine.playLoopSP(index, vol, this.currentSpeed, this.currentPitch); }
+                    try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index)); }
                     catch (Exception ignored) {}
                     // loopPlaying stays true
                 } else {
@@ -3115,7 +3413,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             } else {
                 try { engine.playLoopSP(index, vol,
-                                        this.currentSpeed, this.currentPitch); }
+                                        this.currentSpeed, effectivePitch(index)); }
                 catch (Exception ignored) {}
                 this.loopPlaying[index] = true;
             }

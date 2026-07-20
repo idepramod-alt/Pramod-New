@@ -111,6 +111,12 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="4dp" android:text="🔄SYNC\nOFF" android:layout_weight="1"/>
 
+        <!-- Tempo Sync: ON = all kits share one BPM+Pitch; OFF = per-kit BPM+Pitch -->
+        <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnTempoSync" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp" android:text="⏱TEMPO&#10;SYNC OFF" android:layout_weight="1"/>
+
         <!-- Brand name: no plate, just bold yellow text with a black stroke -->
         <TextView android:id="@+id/txtBrandName"
             android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffff00"
