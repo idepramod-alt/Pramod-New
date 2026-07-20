@@ -1413,18 +1413,36 @@ public class MainActivity extends Activity {
                         Toast.makeText(MainActivity.this, "Exchange Mode ON: Now tap second PAD to swap", 0).show();
                         return;
                     } else if (which == 3) {
-                        MainActivity.this.selectedWavUris[padIndex] = null;
-                        MainActivity.this.selectedRawResIds[padIndex] = 0;
-                        MainActivity.this.samples[padIndex] = null;
-                        MainActivity.this.padVolume[padIndex] = 0.8f;
-                        MainActivity.this.padPitch[padIndex] = 1.0f;
-                        MainActivity.this.padDelayOn[padIndex] = false;
-                        MainActivity.this.padDelayTime[padIndex] = 150.0f;
-                        MainActivity.this.padDelayLevel[padIndex] = 0.5f;
-                        MainActivity.this.padEqHigh[padIndex] = 0.0f;
-                        MainActivity.this.padEqMid[padIndex] = 0.0f;
-                        MainActivity.this.padEqLow[padIndex] = 0.0f;
-                        MainActivity.this.padChokeGroup[padIndex] = 0;
+                        // ── Bank-aware Clear Pad ─────────────────────────────
+                        if (MainActivity.this.bankMode == BANK_B) {
+                            // Clear Bank B pad
+                            MainActivity.this.selectedWavUrisB[padIndex] = null;
+                            MainActivity.this.selectedRawResIdsB[padIndex] = 0;
+                            MainActivity.this.samplesB[padIndex] = null;
+                            MainActivity.this.padVolumeB[padIndex] = 0.8f;
+                            MainActivity.this.padPitchB[padIndex] = 1.0f;
+                            MainActivity.this.padDelayOnB[padIndex] = false;
+                            MainActivity.this.padDelayTimeB[padIndex] = 150.0f;
+                            MainActivity.this.padDelayLevelB[padIndex] = 0.5f;
+                            MainActivity.this.padEqHighB[padIndex] = 0.0f;
+                            MainActivity.this.padEqMidB[padIndex] = 0.0f;
+                            MainActivity.this.padEqLowB[padIndex] = 0.0f;
+                            MainActivity.this.padChokeGroupB[padIndex] = 0;
+                        } else {
+                            // Clear Bank A pad
+                            MainActivity.this.selectedWavUris[padIndex] = null;
+                            MainActivity.this.selectedRawResIds[padIndex] = 0;
+                            MainActivity.this.samples[padIndex] = null;
+                            MainActivity.this.padVolume[padIndex] = 0.8f;
+                            MainActivity.this.padPitch[padIndex] = 1.0f;
+                            MainActivity.this.padDelayOn[padIndex] = false;
+                            MainActivity.this.padDelayTime[padIndex] = 150.0f;
+                            MainActivity.this.padDelayLevel[padIndex] = 0.5f;
+                            MainActivity.this.padEqHigh[padIndex] = 0.0f;
+                            MainActivity.this.padEqMid[padIndex] = 0.0f;
+                            MainActivity.this.padEqLow[padIndex] = 0.0f;
+                            MainActivity.this.padChokeGroup[padIndex] = 0;
+                        }
                         MainActivity mainActivity = MainActivity.this;
                         mainActivity.saveKitToMemory(mainActivity.kitIndex);
                         Toast.makeText(MainActivity.this, "PAD " + (padIndex + 1) + " Cleared!", 0).show();
@@ -1447,55 +1465,66 @@ public class MainActivity extends Activity {
         if (fromPad == toPad) {
             return;
         }
-        Uri[] uriArr = this.selectedWavUris;
-        Uri uri = uriArr[fromPad];
-        uriArr[toPad] = uri;
-        int[] iArr = this.selectedRawResIds;
-        iArr[toPad] = iArr[fromPad];
-        float[] fArr = this.padVolume;
-        fArr[toPad] = fArr[fromPad];
-        float[] fArr2 = this.padPitch;
-        fArr2[toPad] = fArr2[fromPad];
-        boolean[] zArr = this.padDelayOn;
-        zArr[toPad] = zArr[fromPad];
-        float[] fArr3 = this.padDelayTime;
-        fArr3[toPad] = fArr3[fromPad];
-        float[] fArr4 = this.padDelayLevel;
-        fArr4[toPad] = fArr4[fromPad];
-        float[] fArr5 = this.padEqHigh;
-        fArr5[toPad] = fArr5[fromPad];
-        float[] fArr6 = this.padEqMid;
-        fArr6[toPad] = fArr6[fromPad];
-        float[] fArr7 = this.padEqLow;
-        fArr7[toPad] = fArr7[fromPad];
-        int[] iArr2 = this.padChokeGroup;
-        iArr2[toPad] = iArr2[fromPad];
-        if (uri != null) {
+        // ── Bank-aware copy: operate on the active bank's arrays ─────────────
+        if (bankMode == BANK_B) {
+            Uri srcUri = this.selectedWavUrisB[fromPad];
+            this.selectedWavUrisB[toPad]  = srcUri;
+            this.selectedRawResIdsB[toPad] = this.selectedRawResIdsB[fromPad];
+            this.padVolumeB[toPad]     = this.padVolumeB[fromPad];
+            this.padPitchB[toPad]      = this.padPitchB[fromPad];
+            this.padDelayOnB[toPad]    = this.padDelayOnB[fromPad];
+            this.padDelayTimeB[toPad]  = this.padDelayTimeB[fromPad];
+            this.padDelayLevelB[toPad] = this.padDelayLevelB[fromPad];
+            this.padEqHighB[toPad]     = this.padEqHighB[fromPad];
+            this.padEqMidB[toPad]      = this.padEqMidB[fromPad];
+            this.padEqLowB[toPad]      = this.padEqLowB[fromPad];
+            this.padChokeGroupB[toPad] = this.padChokeGroupB[fromPad];
             try {
-                this.samples[toPad] = this.audioEngine.loadWavFromUri(toPad, uri);
+                if (srcUri != null) {
+                    this.samplesB[toPad] = this.audioEngine.loadWavFromUri(toPad + 8, srcUri);
+                } else {
+                    int rawId = this.selectedRawResIdsB[toPad];
+                    this.samplesB[toPad] = (rawId != 0) ? this.audioEngine.loadRawSound(toPad + 8, rawId) : null;
+                }
             } catch (IOException e) {
+                this.samplesB[toPad] = null;
                 Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
-                this.samples[toPad] = null;
-                saveKitToMemory(this.kitIndex);
-                Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
             }
         } else {
+            // Bank A (or Layer — copy applies to Bank A)
+            Uri[] uriArr = this.selectedWavUris;
+            Uri uri = uriArr[fromPad];
+            uriArr[toPad] = uri;
+            int[] iArr = this.selectedRawResIds;
+            iArr[toPad] = iArr[fromPad];
+            float[] fArr = this.padVolume;
+            fArr[toPad] = fArr[fromPad];
+            float[] fArr2 = this.padPitch;
+            fArr2[toPad] = fArr2[fromPad];
+            boolean[] zArr = this.padDelayOn;
+            zArr[toPad] = zArr[fromPad];
+            float[] fArr3 = this.padDelayTime;
+            fArr3[toPad] = fArr3[fromPad];
+            float[] fArr4 = this.padDelayLevel;
+            fArr4[toPad] = fArr4[fromPad];
+            float[] fArr5 = this.padEqHigh;
+            fArr5[toPad] = fArr5[fromPad];
+            float[] fArr6 = this.padEqMid;
+            fArr6[toPad] = fArr6[fromPad];
+            float[] fArr7 = this.padEqLow;
+            fArr7[toPad] = fArr7[fromPad];
+            int[] iArr2 = this.padChokeGroup;
+            iArr2[toPad] = iArr2[fromPad];
             try {
-                int i = iArr[toPad];
-                try {
-                    if (i == 0) {
-                        this.samples[toPad] = null;
-                    } else {
-                        this.samples[toPad] = this.audioEngine.loadRawSound(toPad, i);
-                    }
-                } catch (IOException e2) {
-                    Toast.makeText(this, "Error copying sound: " + e2.getMessage(), 0).show();
-                    this.samples[toPad] = null;
-                    saveKitToMemory(this.kitIndex);
-                    Toast.makeText(this, "Copied PAD " + (fromPad + 1) + " -> PAD " + (toPad + 1), 0).show();
+                if (uri != null) {
+                    this.samples[toPad] = this.audioEngine.loadWavFromUri(toPad, uri);
+                } else {
+                    int i = iArr[toPad];
+                    this.samples[toPad] = (i != 0) ? this.audioEngine.loadRawSound(toPad, i) : null;
                 }
-            } catch (Exception e3) {
-
+            } catch (IOException e) {
+                this.samples[toPad] = null;
+                Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
             }
         }
         saveKitToMemory(this.kitIndex);
@@ -1503,87 +1532,91 @@ public class MainActivity extends Activity {
     }
 
     public void swapPadSound(int padA, int padB) {
-        Uri uri = null;
         if (padA == padB) {
             return;
         }
-        Uri[] uriArr = this.selectedWavUris;
-        Uri tempUri = uriArr[padA];
-        uriArr[padA] = uriArr[padB];
-        uriArr[padB] = tempUri;
-        int[] iArr = this.selectedRawResIds;
-        int tempRaw = iArr[padA];
-        iArr[padA] = iArr[padB];
-        iArr[padB] = tempRaw;
-        float[] fArr = this.padVolume;
-        float tempVol = fArr[padA];
-        fArr[padA] = fArr[padB];
-        fArr[padB] = tempVol;
-        float[] fArr2 = this.padPitch;
-        float tempPitch = fArr2[padA];
-        fArr2[padA] = fArr2[padB];
-        fArr2[padB] = tempPitch;
-        boolean[] zArr = this.padDelayOn;
-        boolean tempDlyOn = zArr[padA];
-        zArr[padA] = zArr[padB];
-        zArr[padB] = tempDlyOn;
-        float[] fArr3 = this.padDelayTime;
-        float tempDlyT = fArr3[padA];
-        fArr3[padA] = fArr3[padB];
-        fArr3[padB] = tempDlyT;
-        float[] fArr4 = this.padDelayLevel;
-        float tempDlyL = fArr4[padA];
-        fArr4[padA] = fArr4[padB];
-        fArr4[padB] = tempDlyL;
-        float[] fArr42 = this.padEqHigh;
-        float tempEqH = fArr42[padA];
-        fArr42[padA] = fArr42[padB];
-        fArr42[padB] = tempEqH;
-        float[] fArr5 = this.padEqMid;
-        float tempEqM = fArr5[padA];
-        fArr5[padA] = fArr5[padB];
-        fArr5[padB] = tempEqM;
-        float[] fArr6 = this.padEqLow;
-        float tempEqL = fArr6[padA];
-        fArr6[padA] = fArr6[padB];
-        fArr6[padB] = tempEqL;
-        int[] fArr7 = this.padChokeGroup;
-        int tempChoke = fArr7[padA];
-        fArr7[padA] = fArr7[padB];
-        fArr7[padB] = tempChoke;
+        // ── Bank-aware swap: operate on the active bank's arrays ─────────────
         try {
-            uri = uriArr[padA];
-        } catch (Exception e) {
-        }
-        try {
-            if (uri != null) {
-                this.samples[padA] = this.audioEngine.loadWavFromUri(padA, uri);
+            if (bankMode == BANK_B) {
+                // Swap Bank B arrays
+                Uri tempUri = this.selectedWavUrisB[padA];
+                this.selectedWavUrisB[padA] = this.selectedWavUrisB[padB];
+                this.selectedWavUrisB[padB] = tempUri;
+                int tempRaw = this.selectedRawResIdsB[padA];
+                this.selectedRawResIdsB[padA] = this.selectedRawResIdsB[padB];
+                this.selectedRawResIdsB[padB] = tempRaw;
+                float tempVol = this.padVolumeB[padA];
+                this.padVolumeB[padA] = this.padVolumeB[padB];
+                this.padVolumeB[padB] = tempVol;
+                float tempPitch = this.padPitchB[padA];
+                this.padPitchB[padA] = this.padPitchB[padB];
+                this.padPitchB[padB] = tempPitch;
+                boolean tempDly = this.padDelayOnB[padA];
+                this.padDelayOnB[padA] = this.padDelayOnB[padB];
+                this.padDelayOnB[padB] = tempDly;
+                float tempDlyT = this.padDelayTimeB[padA];
+                this.padDelayTimeB[padA] = this.padDelayTimeB[padB];
+                this.padDelayTimeB[padB] = tempDlyT;
+                float tempDlyL = this.padDelayLevelB[padA];
+                this.padDelayLevelB[padA] = this.padDelayLevelB[padB];
+                this.padDelayLevelB[padB] = tempDlyL;
+                float tempEqH = this.padEqHighB[padA];
+                this.padEqHighB[padA] = this.padEqHighB[padB];
+                this.padEqHighB[padB] = tempEqH;
+                float tempEqM = this.padEqMidB[padA];
+                this.padEqMidB[padA] = this.padEqMidB[padB];
+                this.padEqMidB[padB] = tempEqM;
+                float tempEqL = this.padEqLowB[padA];
+                this.padEqLowB[padA] = this.padEqLowB[padB];
+                this.padEqLowB[padB] = tempEqL;
+                int tempChoke = this.padChokeGroupB[padA];
+                this.padChokeGroupB[padA] = this.padChokeGroupB[padB];
+                this.padChokeGroupB[padB] = tempChoke;
+                // Reload swapped Bank B native slots (8-15)
+                Uri uriA = this.selectedWavUrisB[padA];
+                if (uriA != null) this.samplesB[padA] = this.audioEngine.loadWavFromUri(padA + 8, uriA);
+                else { int r = this.selectedRawResIdsB[padA]; this.samplesB[padA] = (r != 0) ? this.audioEngine.loadRawSound(padA + 8, r) : null; }
+                Uri uriB = this.selectedWavUrisB[padB];
+                if (uriB != null) this.samplesB[padB] = this.audioEngine.loadWavFromUri(padB + 8, uriB);
+                else { int r = this.selectedRawResIdsB[padB]; this.samplesB[padB] = (r != 0) ? this.audioEngine.loadRawSound(padB + 8, r) : null; }
             } else {
-                int i = iArr[padA];
-                if (i != 0) {
-                    this.samples[padA] = this.audioEngine.loadRawSound(padA, i);
-                } else {
-                    this.samples[padA] = null;
-                }
+                // Swap Bank A arrays (also used in Layer mode)
+                Uri[] uriArr = this.selectedWavUris;
+                Uri tempUri = uriArr[padA];
+                uriArr[padA] = uriArr[padB];
+                uriArr[padB] = tempUri;
+                int[] iArr = this.selectedRawResIds;
+                int tempRaw = iArr[padA];
+                iArr[padA] = iArr[padB];
+                iArr[padB] = tempRaw;
+                float[] fArr = this.padVolume;
+                float tempVol = fArr[padA]; fArr[padA] = fArr[padB]; fArr[padB] = tempVol;
+                float[] fArr2 = this.padPitch;
+                float tempPitch = fArr2[padA]; fArr2[padA] = fArr2[padB]; fArr2[padB] = tempPitch;
+                boolean[] zArr = this.padDelayOn;
+                boolean tempDly = zArr[padA]; zArr[padA] = zArr[padB]; zArr[padB] = tempDly;
+                float[] fArr3 = this.padDelayTime;
+                float tempDlyT = fArr3[padA]; fArr3[padA] = fArr3[padB]; fArr3[padB] = tempDlyT;
+                float[] fArr4 = this.padDelayLevel;
+                float tempDlyL = fArr4[padA]; fArr4[padA] = fArr4[padB]; fArr4[padB] = tempDlyL;
+                float[] fArr5 = this.padEqHigh;
+                float tempEqH = fArr5[padA]; fArr5[padA] = fArr5[padB]; fArr5[padB] = tempEqH;
+                float[] fArr6 = this.padEqMid;
+                float tempEqM = fArr6[padA]; fArr6[padA] = fArr6[padB]; fArr6[padB] = tempEqM;
+                float[] fArr7 = this.padEqLow;
+                float tempEqL = fArr7[padA]; fArr7[padA] = fArr7[padB]; fArr7[padB] = tempEqL;
+                int[] fArr8 = this.padChokeGroup;
+                int tempChoke = fArr8[padA]; fArr8[padA] = fArr8[padB]; fArr8[padB] = tempChoke;
+                // Reload swapped Bank A native slots (0-7)
+                Uri uriA = uriArr[padA];
+                if (uriA != null) this.samples[padA] = this.audioEngine.loadWavFromUri(padA, uriA);
+                else { int r = iArr[padA]; this.samples[padA] = (r != 0) ? this.audioEngine.loadRawSound(padA, r) : null; }
+                Uri uriB = uriArr[padB];
+                if (uriB != null) this.samples[padB] = this.audioEngine.loadWavFromUri(padB, uriB);
+                else { int r = iArr[padB]; this.samples[padB] = (r != 0) ? this.audioEngine.loadRawSound(padB, r) : null; }
             }
-            Uri uri2 = this.selectedWavUris[padB];
-            if (uri2 != null) {
-                this.samples[padB] = this.audioEngine.loadWavFromUri(padB, uri2);
-            } else {
-                int i2 = this.selectedRawResIds[padB];
-                if (i2 != 0) {
-                    this.samples[padB] = this.audioEngine.loadRawSound(padB, i2);
-                } else {
-                    this.samples[padB] = null;
-                }
-            }
-        } catch (IOException e2) {
-
-            Toast.makeText(this, "Error swapping sounds: " + e2.getMessage(), 0).show();
-            this.samples[padA] = null;
-            this.samples[padB] = null;
-            saveKitToMemory(this.kitIndex);
-            Toast.makeText(this, "Swapped PAD " + (padA + 1) + " <-> PAD " + (padB + 1), 0).show();
+        } catch (IOException e) {
+            Toast.makeText(this, "Error swapping sounds: " + e.getMessage(), 0).show();
         }
         saveKitToMemory(this.kitIndex);
         Toast.makeText(this, "Swapped PAD " + (padA + 1) + " <-> PAD " + (padB + 1), 0).show();
