@@ -1052,7 +1052,12 @@ public class MainActivity extends Activity {
         this.seekVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.MainActivity.12
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                MainActivity.this.padVolume[MainActivity.this.selectedPad] = progress / 100.0f;
+                // ── Bank-aware volume ──────────────────────────────────────
+                if (MainActivity.this.bankMode == BANK_B) {
+                    MainActivity.this.padVolumeB[MainActivity.this.selectedPad] = progress / 100.0f;
+                } else {
+                    MainActivity.this.padVolume[MainActivity.this.selectedPad] = progress / 100.0f;
+                }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
@@ -1068,7 +1073,12 @@ public class MainActivity extends Activity {
         this.seekPitch.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.MainActivity.13
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                MainActivity.this.padPitch[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
+                // ── Bank-aware pitch ───────────────────────────────────────
+                if (MainActivity.this.bankMode == BANK_B) {
+                    MainActivity.this.padPitchB[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
+                } else {
+                    MainActivity.this.padPitch[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
+                }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
@@ -1084,7 +1094,12 @@ public class MainActivity extends Activity {
         this.chkDelay.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: com.pramod.loopmidi.MainActivity.14
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                MainActivity.this.padDelayOn[MainActivity.this.selectedPad] = isChecked;
+                // ── Bank-aware delay on/off ────────────────────────────────
+                if (MainActivity.this.bankMode == BANK_B) {
+                    MainActivity.this.padDelayOnB[MainActivity.this.selectedPad] = isChecked;
+                } else {
+                    MainActivity.this.padDelayOn[MainActivity.this.selectedPad] = isChecked;
+                }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
@@ -1093,7 +1108,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padDelayTime[MainActivity.this.selectedPad] = progress;
+                    // ── Bank-aware delay time ──────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padDelayTimeB[MainActivity.this.selectedPad] = progress;
+                    } else {
+                        MainActivity.this.padDelayTime[MainActivity.this.selectedPad] = progress;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1111,7 +1131,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padDelayLevel[MainActivity.this.selectedPad] = progress / 100.0f;
+                    // ── Bank-aware delay level ─────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padDelayLevelB[MainActivity.this.selectedPad] = progress / 100.0f;
+                    } else {
+                        MainActivity.this.padDelayLevel[MainActivity.this.selectedPad] = progress / 100.0f;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1129,7 +1154,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padEqHigh[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    // ── Bank-aware EQ High ─────────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padEqHighB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    } else {
+                        MainActivity.this.padEqHigh[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1147,7 +1177,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padEqMid[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    // ── Bank-aware EQ Mid ──────────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padEqMidB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    } else {
+                        MainActivity.this.padEqMid[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1165,7 +1200,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padEqLow[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    // ── Bank-aware EQ Low ──────────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padEqLowB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    } else {
+                        MainActivity.this.padEqLow[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1183,7 +1223,12 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    MainActivity.this.padChokeGroup[MainActivity.this.selectedPad] = progress;
+                    // ── Bank-aware choke group ─────────────────────────────
+                    if (MainActivity.this.bankMode == BANK_B) {
+                        MainActivity.this.padChokeGroupB[MainActivity.this.selectedPad] = progress;
+                    } else {
+                        MainActivity.this.padChokeGroup[MainActivity.this.selectedPad] = progress;
+                    }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
                 }
@@ -1216,6 +1261,35 @@ public class MainActivity extends Activity {
         } else {
             btnBankToggle.setText("BANK A");
             btnBankToggle.setBackgroundResource(R.drawable.btn_3d_darkred);
+        }
+        // ── Refresh seekbars to show correct bank's values for current pad ──
+        refreshSeekBarsForCurrentBankAndPad();
+    }
+
+    /** Refresh all FX seekbars to reflect the currently selected bank + pad. */
+    private void refreshSeekBarsForCurrentBankAndPad() {
+        if (seekVolume == null) return; // UI not yet inflated
+        int pad = this.selectedPad;
+        if (bankMode == BANK_B) {
+            seekVolume.setProgress((int) (padVolumeB[pad] * 100.0f));
+            seekPitch.setProgress((int) ((padPitchB[pad] - 0.5f) * 100.0f));
+            if (chkDelay != null) chkDelay.setChecked(padDelayOnB[pad]);
+            if (seekDelayTime != null) seekDelayTime.setProgress((int) padDelayTimeB[pad]);
+            if (seekDelayLevel != null) seekDelayLevel.setProgress((int) (padDelayLevelB[pad] * 100.0f));
+            if (seekEqHigh != null) seekEqHigh.setProgress(((int) (padEqHighB[pad] / 0.15f)) + 100);
+            if (seekEqMid  != null) seekEqMid.setProgress(((int) (padEqMidB[pad]  / 0.15f)) + 100);
+            if (seekEqLow  != null) seekEqLow.setProgress(((int) (padEqLowB[pad]  / 0.15f)) + 100);
+            if (seekChokeGroup != null) seekChokeGroup.setProgress(padChokeGroupB[pad]);
+        } else {
+            seekVolume.setProgress((int) (padVolume[pad] * 100.0f));
+            seekPitch.setProgress((int) ((padPitch[pad] - 0.5f) * 100.0f));
+            if (chkDelay != null) chkDelay.setChecked(padDelayOn[pad]);
+            if (seekDelayTime != null) seekDelayTime.setProgress((int) padDelayTime[pad]);
+            if (seekDelayLevel != null) seekDelayLevel.setProgress((int) (padDelayLevel[pad] * 100.0f));
+            if (seekEqHigh != null) seekEqHigh.setProgress(((int) (padEqHigh[pad] / 0.15f)) + 100);
+            if (seekEqMid  != null) seekEqMid.setProgress(((int) (padEqMid[pad]  / 0.15f)) + 100);
+            if (seekEqLow  != null) seekEqLow.setProgress(((int) (padEqLow[pad]  / 0.15f)) + 100);
+            if (seekChokeGroup != null) seekChokeGroup.setProgress(padChokeGroup[pad]);
         }
     }
 
@@ -1272,15 +1346,28 @@ public class MainActivity extends Activity {
                             MainActivity.this.showEditPadOptions(this.index);
                         }
                         MainActivity.this.txtSelectedPad.setText("Selected: PAD " + (this.index + 1));
-                        MainActivity.this.seekVolume.setProgress((int) (MainActivity.this.padVolume[this.index] * 100.0f));
-                        MainActivity.this.seekPitch.setProgress((int) ((MainActivity.this.padPitch[this.index] - 0.5f) * 100.0f));
-                        MainActivity.this.chkDelay.setChecked(MainActivity.this.padDelayOn[this.index]);
-                        MainActivity.this.seekDelayTime.setProgress((int) MainActivity.this.padDelayTime[this.index]);
-                        MainActivity.this.seekDelayLevel.setProgress((int) (MainActivity.this.padDelayLevel[this.index] * 100.0f));
-                        MainActivity.this.seekEqHigh.setProgress(((int) (MainActivity.this.padEqHigh[this.index] / 0.15f)) + 100);
-                        MainActivity.this.seekEqMid.setProgress(((int) (MainActivity.this.padEqMid[this.index] / 0.15f)) + 100);
-                        MainActivity.this.seekEqLow.setProgress(((int) (MainActivity.this.padEqLow[this.index] / 0.15f)) + 100);
-                        MainActivity.this.seekChokeGroup.setProgress(MainActivity.this.padChokeGroup[this.index]);
+                        // ── Bank-aware seekbar refresh ──────────────────────────────
+                        if (MainActivity.this.bankMode == BANK_B) {
+                            MainActivity.this.seekVolume.setProgress((int) (MainActivity.this.padVolumeB[this.index] * 100.0f));
+                            MainActivity.this.seekPitch.setProgress((int) ((MainActivity.this.padPitchB[this.index] - 0.5f) * 100.0f));
+                            MainActivity.this.chkDelay.setChecked(MainActivity.this.padDelayOnB[this.index]);
+                            MainActivity.this.seekDelayTime.setProgress((int) MainActivity.this.padDelayTimeB[this.index]);
+                            MainActivity.this.seekDelayLevel.setProgress((int) (MainActivity.this.padDelayLevelB[this.index] * 100.0f));
+                            MainActivity.this.seekEqHigh.setProgress(((int) (MainActivity.this.padEqHighB[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekEqMid.setProgress(((int) (MainActivity.this.padEqMidB[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekEqLow.setProgress(((int) (MainActivity.this.padEqLowB[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekChokeGroup.setProgress(MainActivity.this.padChokeGroupB[this.index]);
+                        } else {
+                            MainActivity.this.seekVolume.setProgress((int) (MainActivity.this.padVolume[this.index] * 100.0f));
+                            MainActivity.this.seekPitch.setProgress((int) ((MainActivity.this.padPitch[this.index] - 0.5f) * 100.0f));
+                            MainActivity.this.chkDelay.setChecked(MainActivity.this.padDelayOn[this.index]);
+                            MainActivity.this.seekDelayTime.setProgress((int) MainActivity.this.padDelayTime[this.index]);
+                            MainActivity.this.seekDelayLevel.setProgress((int) (MainActivity.this.padDelayLevel[this.index] * 100.0f));
+                            MainActivity.this.seekEqHigh.setProgress(((int) (MainActivity.this.padEqHigh[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekEqMid.setProgress(((int) (MainActivity.this.padEqMid[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekEqLow.setProgress(((int) (MainActivity.this.padEqLow[this.index] / 0.15f)) + 100);
+                            MainActivity.this.seekChokeGroup.setProgress(MainActivity.this.padChokeGroup[this.index]);
+                        }
                         return true;
                     }
                     MainActivity mainActivity = MainActivity.this;
@@ -1518,13 +1605,22 @@ public class MainActivity extends Activity {
             if (requestCode == REQ_PICK_SINGLE_WAV) {
                 int takeFlags = data.getFlags() & 3;
                 getContentResolver().takePersistableUriPermission(uri, takeFlags);
-                Uri[] uriArr = this.selectedWavUris;
                 int i = this.selectedPad;
-                uriArr[i] = uri;
-                this.samples[i] = this.audioEngine.loadWavFromUri(i, uri);
-                AudioEngine.SampleData sampleData = this.samples[this.selectedPad];
-                if (sampleData != null) {
-                    this.audioEngine.preloadSample(sampleData);
+                // ── Bank-aware single WAV load ─────────────────────────────
+                if (this.bankMode == BANK_B) {
+                    this.selectedWavUrisB[i] = uri;
+                    this.selectedRawResIdsB[i] = 0;
+                    this.samplesB[i] = this.audioEngine.loadWavFromUri(i + 8, uri);
+                    if (this.samplesB[i] != null) {
+                        this.audioEngine.preloadSample(this.samplesB[i]);
+                    }
+                } else {
+                    this.selectedWavUris[i] = uri;
+                    this.selectedRawResIds[i] = 0;
+                    this.samples[i] = this.audioEngine.loadWavFromUri(i, uri);
+                    if (this.samples[i] != null) {
+                        this.audioEngine.preloadSample(this.samples[i]);
+                    }
                 }
                 saveKitToMemory(this.kitIndex);
                 Toast.makeText(this, "Sound Loaded & Saved!", 0).show();
@@ -1774,8 +1870,14 @@ public class MainActivity extends Activity {
                 this.samplesB[i]           = null;
             }
         }
-        this.seekVolume.setProgress((int) (this.padVolume[this.selectedPad] * 100.0f));
-        this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));
+        // ── Bank-aware seekbar refresh after kit load ──────────────────────
+        if (this.bankMode == BANK_B) {
+            this.seekVolume.setProgress((int) (this.padVolumeB[this.selectedPad] * 100.0f));
+            this.seekPitch.setProgress((int) ((this.padPitchB[this.selectedPad] - 0.5f) * 100.0f));
+        } else {
+            this.seekVolume.setProgress((int) (this.padVolume[this.selectedPad] * 100.0f));
+            this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));
+        }
     }
 
     public void loadKitFromFolder(Uri folderUri) throws IOException {

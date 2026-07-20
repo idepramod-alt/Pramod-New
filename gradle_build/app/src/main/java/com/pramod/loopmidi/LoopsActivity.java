@@ -461,6 +461,28 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             return;
         }
+        // ── MIDI fast path: audio + state were already handled in midiTriggerDrumPadImmediate.
+        // Just sync UI to whatever loopPlaying[index] is now — do NOT re-toggle audio.
+        if (audioAlreadyTriggered) {
+            if (this.loopPlaying[index]) {
+                this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
+                this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
+                // In single-pad mode, stop any other loops that were left running
+                if (!this.isMultiMode) {
+                    for (int i = 0; i < 8; i++) {
+                        if (i != index && this.loopPlaying[i]) {
+                            this.audioEngine.stopPad(i);
+                            this.loopPlaying[i] = false;
+                            updatePadLabel(i);
+                        }
+                    }
+                }
+            } else {
+                this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
+                updatePadLabel(index);
+            }
+            return;
+        }
         // LOOP mode: loops the sample continuously until pad is tapped again.
         if (this.loopPlaying[index]) {
             if (this.isOneShotMode) {
@@ -2246,48 +2268,95 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         root.setPadding(20, 16, 20, 8);
         root.setBackgroundColor(0xFF1a1a2e);
 
-        // ── Pad selector ──────────────────────────────────────────────────
-        android.widget.LinearLayout padRow = new android.widget.LinearLayout(this);
-        padRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        padRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        android.widget.LinearLayout.LayoutParams prLP =
+        // ── Octapad-style 8 pad buttons (2 rows × 4 columns) ──────────────
+        // User taps pad → select it (highlight) + play real-time preview
+        android.widget.LinearLayout.LayoutParams btnLP =
+            new android.widget.LinearLayout.LayoutParams(0, 110, 1f);
+        btnLP.setMargins(4, 4, 4, 4);
+
+        final android.widget.Button[] padBtns = new android.widget.Button[8];
+        android.widget.LinearLayout.LayoutParams rowsLP =
             new android.widget.LinearLayout.LayoutParams(-1, -2);
-        prLP.setMargins(0, 0, 0, 14);
-        padRow.setLayoutParams(prLP);
-        android.widget.TextView tvPad = new android.widget.TextView(this);
-        tvPad.setText("Pad: ");
-        tvPad.setTextColor(0xFFCCCCCC);
-        tvPad.setTextSize(13f);
-        padRow.addView(tvPad);
-        final android.widget.Spinner spinPad = new android.widget.Spinner(this);
-        spinPad.setAdapter(new android.widget.ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item,
-            new String[]{"PAD 1","PAD 2","PAD 3","PAD 4","PAD 5","PAD 6","PAD 7","PAD 8"}));
-        spinPad.setSelection(selPad[0]);
-        android.widget.LinearLayout.LayoutParams spLP =
-            new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-        spLP.setMargins(8, 0, 0, 0);
-        spinPad.setLayoutParams(spLP);
-        padRow.addView(spinPad);
-        root.addView(padRow);
+        rowsLP.setMargins(0, 0, 0, 14);
+
+        // Helper: refresh seekbars for current pad selection
+        final android.widget.SeekBar[] seeks  = new android.widget.SeekBar[6];
+        final android.widget.TextView[] vTxts = new android.widget.TextView[6];
+        final float[]  paramMin     = {-15f, -15f, -15f, 0.1f, 0.5f, -1.0f};
+        final float[]  paramMax     = {+15f, +15f, +15f, 2.0f, 2.0f,  1.0f};
+        final float[]  paramDefault = {  0f,   0f,   0f, 1.0f, 1.0f,  0.0f};
+
+        // refreshSeekbarsForPad and highlightPad are called after seeks[] / padBtns[] are built
+        final Runnable[] refreshRef = new Runnable[1];
+        final Runnable[] highlightRef = new Runnable[1];
+
+        android.widget.TextView tvPadLabel = new android.widget.TextView(this);
+        tvPadLabel.setText("▼ Tap a pad to select & preview:");
+        tvPadLabel.setTextColor(0xFFCCCCCC);
+        tvPadLabel.setTextSize(12f);
+        android.widget.LinearLayout.LayoutParams tvLpHeader =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        tvLpHeader.setMargins(0, 0, 0, 6);
+        tvPadLabel.setLayoutParams(tvLpHeader);
+        root.addView(tvPadLabel);
+
+        for (int row = 0; row < 2; row++) {
+            android.widget.LinearLayout padRowLL = new android.widget.LinearLayout(this);
+            padRowLL.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            padRowLL.setLayoutParams(rowsLP);
+            for (int col = 0; col < 4; col++) {
+                final int padIdx = row * 4 + col;
+                android.widget.Button pb = new android.widget.Button(this);
+                pb.setText("P" + (padIdx + 1));
+                pb.setTextSize(13f);
+                pb.setTextColor(0xFFFFFFFF);
+                pb.setBackgroundColor(padIdx == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+                android.widget.LinearLayout.LayoutParams pbLP =
+                    new android.widget.LinearLayout.LayoutParams(0, 110, 1f);
+                pbLP.setMargins(4, 4, 4, 4);
+                pb.setLayoutParams(pbLP);
+                pb.setOnClickListener(vv -> {
+                    selPad[0] = padIdx;
+                    // Highlight selected pad, dim others
+                    if (highlightRef[0] != null) highlightRef[0].run();
+                    // Refresh seekbars for this pad
+                    if (refreshRef[0] != null) refreshRef[0].run();
+                    // Real-time preview: play pad sound if sample loaded
+                    try {
+                        AudioEngine.SampleData sd = loopSamples[padIdx];
+                        if (sd != null && sd.loaded && audioEngine != null) {
+                            audioEngine.playSample(padIdx, sd,
+                                effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), 0,
+                                false, 0f, 0f,
+                                wEqL[padIdx], wEqM[padIdx], wEqH[padIdx], 0, 0f, 0f);
+                        }
+                    } catch (Exception ignored) {}
+                });
+                padBtns[padIdx] = pb;
+                padRowLL.addView(pb);
+            }
+            root.addView(padRowLL);
+        }
+
+        // Wire the highlight runnable now that padBtns[] is complete
+        highlightRef[0] = () -> {
+            for (int i = 0; i < 8; i++) {
+                padBtns[i].setBackgroundColor(i == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+            }
+        };
 
         // ── Parameter rows ─────────────────────────────────────────────────
         final String[] paramLabels  = {"EQ HIGH (dB)", "EQ MID (dB)", "EQ LOW (dB)",
                                        "GAIN (0.1–2.0)", "PITCH (0.5–2.0)", "PAN (L←0→R)"};
-        final float[]  paramMin     = {-15f, -15f, -15f, 0.1f, 0.5f, -1.0f};
-        final float[]  paramMax     = {+15f, +15f, +15f, 2.0f, 2.0f,  1.0f};
-        final float[]  paramDefault = {  0f,   0f,   0f, 1.0f, 1.0f,  0.0f};
-        final android.widget.SeekBar[] seeks  = new android.widget.SeekBar[6];
-        final android.widget.TextView[] vTxts = new android.widget.TextView[6];
 
         for (int p = 0; p < 6; p++) {
             final int pi = p;
-            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
-            row.setOrientation(android.widget.LinearLayout.VERTICAL);
+            android.widget.LinearLayout paramRow = new android.widget.LinearLayout(this);
+            paramRow.setOrientation(android.widget.LinearLayout.VERTICAL);
             android.widget.LinearLayout.LayoutParams rowLP =
                 new android.widget.LinearLayout.LayoutParams(-1, -2);
             rowLP.setMargins(0, 4, 0, 4);
-            row.setLayoutParams(rowLP);
+            paramRow.setLayoutParams(rowLP);
 
             android.widget.LinearLayout labelRow = new android.widget.LinearLayout(this);
             labelRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -2311,7 +2380,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             tvVal.setLayoutParams(valLP);
             labelRow.addView(tvVal);
             vTxts[pi] = tvVal;
-            row.addView(labelRow);
+            paramRow.addView(labelRow);
 
             android.widget.SeekBar seek = new android.widget.SeekBar(this);
             seek.setMax(200);
@@ -2324,12 +2393,39 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     vTxts[pi].setText(String.format(java.util.Locale.US, "%.2f", val));
                 }
                 @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
-                @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+                @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {
+                    // Real-time apply: re-play pad preview with updated EQ/Gain/Pitch/Pan
+                    try {
+                        int pad = selPad[0];
+                        AudioEngine.SampleData sd = loopSamples[pad];
+                        if (sd != null && sd.loaded && audioEngine != null) {
+                            float gain   = wGain[pad];
+                            float pitch  = wPitch[pad];
+                            float eqL    = wEqL[pad];
+                            float eqM    = wEqM[pad];
+                            float eqH    = wEqH[pad];
+                            float vol    = effectiveVolume(pad) * gain;
+                            audioEngine.playSample(pad, sd, vol, currentSpeed, pitch, 0,
+                                false, 0f, 0f, eqL, eqM, eqH, 0, 0f, wPan[pad]);
+                        }
+                    } catch (Exception ignored) {}
+                }
             });
             seeks[pi] = seek;
-            row.addView(seek);
-            root.addView(row);
+            paramRow.addView(seek);
+            root.addView(paramRow);
         }
+
+        // Wire the seekbar refresh runnable now that seeks[] is complete
+        refreshRef[0] = () -> {
+            int pad = selPad[0];
+            for (int pi2 = 0; pi2 < 6; pi2++) {
+                float val   = wArrays[pi2][pad];
+                float range = paramMax[pi2] - paramMin[pi2];
+                seeks[pi2].setProgress(Math.round((val - paramMin[pi2]) / range * 200f));
+                vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", val));
+            }
+        };
 
         // ── Reset this pad ─────────────────────────────────────────────────
         Button btnRst = new Button(this);
@@ -2352,28 +2448,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         });
         root.addView(btnRst);
 
-        // Refresh seekbars when pad changes
-        spinPad.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int pos, long id) {
-                selPad[0] = pos;
-                for (int pi2 = 0; pi2 < 6; pi2++) {
-                    float val   = wArrays[pi2][pos];
-                    float range = paramMax[pi2] - paramMin[pi2];
-                    seeks[pi2].setProgress(Math.round((val - paramMin[pi2]) / range * 200f));
-                    vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", val));
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
-
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(root);
 
         final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle("🎛️ Pad Edit — EQ / Gain / Pitch / Pan")
             .setView(sv)
-            .setPositiveButton("💾 Save", (d, w) -> {
+            .setPositiveButton("💾 Save to Kit", (d, w) -> {
                 System.arraycopy(wEqH,   0, padLoopEqHigh, 0, 8);
                 System.arraycopy(wEqM,   0, padLoopEqMid,  0, 8);
                 System.arraycopy(wEqL,   0, padLoopEqLow,  0, 8);
@@ -2381,12 +2462,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 System.arraycopy(wPitch, 0, padLoopPitch,  0, 8);
                 System.arraycopy(wPan,   0, padLoopPan,    0, 8);
                 saveLoopsToMemory();
-                // Live-update any running loops
+                // Live-update any running loops with new settings
                 for (int i = 0; i < 8; i++) {
                     if (loopPlaying[i] && audioEngine != null)
                         audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), currentSpeed, effectivePitch(i));
                 }
-                Toast.makeText(LoopsActivity.this, "✅ Pad Edit saved!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(LoopsActivity.this, "✅ Pad Edit saved to kit!", Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Cancel", null)
             .create();
