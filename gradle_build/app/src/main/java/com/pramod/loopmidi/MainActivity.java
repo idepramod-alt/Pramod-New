@@ -1638,6 +1638,11 @@ public class MainActivity extends Activity {
             AudioEngine eng = new AudioEngine(this);
             this.audioEngine = eng;
             eng.start();
+            // ── Restore existing Bank A+B sounds into the fresh engine ──────────
+            // onStop() destroyed the old engine. We must reload all previously
+            // loaded sounds so that e.g. switching Bank mode then loading a new
+            // folder kit doesn't silently lose the other bank's sounds.
+            try { loadKitFromMemory(this.kitIndex); } catch (Exception ignored) {}
         }
         try {
             if (requestCode == REQ_PICK_SINGLE_WAV) {
@@ -1665,6 +1670,20 @@ public class MainActivity extends Activity {
             } else if (requestCode == REQ_LOAD_FOLDER) {
                 getContentResolver().takePersistableUriPermission(uri, 1);
                 loadKitFromFolder(uri);
+                // ── Persist individual file URI permissions so sounds survive app restart ──
+                // takePersistableUriPermission is called on the folder tree URI above, but
+                // individual child-document URIs also need their permissions persisted so
+                // loadKitFromMemory() can open them after a process restart.
+                for (int pi = 0; pi < 8; pi++) {
+                    try {
+                        if (selectedWavUris[pi] != null)
+                            getContentResolver().takePersistableUriPermission(selectedWavUris[pi], 1);
+                    } catch (Exception ignored) {}
+                    try {
+                        if (selectedWavUrisB[pi] != null)
+                            getContentResolver().takePersistableUriPermission(selectedWavUrisB[pi], 1);
+                    } catch (Exception ignored) {}
+                }
                 saveKitToMemory(this.kitIndex);
             } else if (requestCode == REQ_SAVE_FOLDER) {
                 getContentResolver().takePersistableUriPermission(uri, 3);
@@ -1992,7 +2011,14 @@ public class MainActivity extends Activity {
                     this.currentKitNameB = "B:" + stripped;
                     this.txtKitName.setText(this.currentKitNameB);
                     prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).apply();
+                } else if (bankMode == LAYER_AB) {
+                    // A+B Layer mode: update both bank names from the same folder
+                    this.currentKitName  = stripped;
+                    this.currentKitNameB = "B:" + stripped;
+                    this.txtKitName.setText(stripped + " [A+B]");
+                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).apply();
                 } else {
+                    // Bank A mode
                     this.currentKitName = stripped;
                     this.txtKitName.setText(stripped);
                 }
@@ -2447,6 +2473,14 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         this.isVisible = false;
+        // Persist kit indices explicitly so they survive a process kill between
+        // onPause and the next onCreate (changeKitBy/showKitJumpDialog already do
+        // this on navigation, but a folder-load without any navigation won't).
+        prefs.edit()
+            .putInt(KEY_KIT_INDEX, kitIndex)
+            .putInt("kit_index_B", kitIndexB)
+            .putInt("bank_mode", bankMode)
+            .apply();
         saveKitToMemory(this.kitIndex);
     }
 
