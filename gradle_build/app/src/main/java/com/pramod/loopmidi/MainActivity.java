@@ -397,9 +397,21 @@ public class MainActivity extends Activity {
                                         byte note = (byte) val;
                                         MainActivity.this.handleMidiNoteOff(note);
                                         i += 2;
+                                    } else if (type == 0xB0) {
+                                        // ── Control Change (CC) — Roland SPD-20 Pro controls ──
+                                        if (i + 1 < end) {
+                                            int ccNum  = val;
+                                            int ccVal2 = msg[i + 1] & 0xFF;
+                                            MainActivity.this.handleMidiCC(ccNum, ccVal2);
+                                            i += 2;
+                                        } else { i++; }
+                                    } else if (type == 0xC0) {
+                                        // Program Change → drum kit change
+                                        int prog = val;
+                                        MainActivity.this.handleProgramChangeMain(prog);
+                                        i++;
                                     } else {
-                                        // Program Change, Pitch Bend, CC, etc. — skip data byte
-                                        // (old code had `continue` here which skipped i++ → infinite loop!)
+                                        // Pitch Bend, SysEx, etc. — skip data byte
                                         i++;
                                     }
                                 }
@@ -523,6 +535,82 @@ public class MainActivity extends Activity {
      */
     public void handleMidiNoteOff(byte note) {
         // No-op — see javadoc above.
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIDI CC (Control Change) — Roland SPD-20 Pro drum-pad controls
+    //
+    // Default mapping (shares same SharedPrefs keys as LoopsActivity):
+    //   CC  7  → Volume  (delegates to LoopsActivity master volume)
+    //   CC 20  → Tempo   (delegates to LoopsActivity seekTempo)
+    //   CC 21  → Pitch   (delegates to LoopsActivity seekPitch)
+    //   CC 123 → Stop All drums immediately
+    //   CC 24  → Kit Prev (Bank A)
+    //   CC 25  → Kit Next (Bank A)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Handle MIDI Control Change from Roland SPD-20 Pro in drum-pad screen.
+     * For Volume/Tempo/Pitch, delegates to LoopsActivity if it is alive
+     * (drum pad runs on top of LoopsActivity). Stop All works locally.
+     */
+    public void handleMidiCC(int cc, int value) {
+        int ccVolume  = prefs.getInt("midi_cc_volume",   7);
+        int ccTempo   = prefs.getInt("midi_cc_tempo",   20);
+        int ccPitch   = prefs.getInt("midi_cc_pitch",   21);
+        int ccStop    = prefs.getInt("midi_cc_stop",   123);
+        int ccKitPrev = prefs.getInt("midi_cc_kit_prev", 24);
+        int ccKitNext = prefs.getInt("midi_cc_kit_next", 25);
+
+        if (cc == ccStop) {
+            // Stop all drum sounds immediately on MIDI thread
+            LoopsActivity loops = LoopsActivity.globalInstance;
+            if (loops != null && loops.audioEngine != null) {
+                loops.audioEngine.stopAll();
+            }
+
+        } else if (cc == ccVolume || cc == ccTempo || cc == ccPitch) {
+            // Delegate volume/tempo/pitch controls to LoopsActivity (shared audio engine)
+            LoopsActivity loops = LoopsActivity.globalInstance;
+            if (loops != null) loops.handleMidiCC(cc, value);
+
+        } else if (cc == ccKitPrev && value >= 64) {
+            // Kit Prev — Bank A
+            runOnUiThread(() -> {
+                if (kitIndex > 1) {
+                    saveKitToMemory(kitIndex);
+                    kitIndex--;
+                    loadKitFromMemory(kitIndex);
+                    if (txtKitName != null) txtKitName.setText(
+                        prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex));
+                }
+            });
+
+        } else if (cc == ccKitNext && value >= 64) {
+            // Kit Next — Bank A
+            runOnUiThread(() -> {
+                saveKitToMemory(kitIndex);
+                kitIndex++;
+                loadKitFromMemory(kitIndex);
+                if (txtKitName != null) txtKitName.setText(
+                    prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex));
+            });
+        }
+    }
+
+    /**
+     * Handle MIDI Program Change in the drum-pad screen.
+     * Program number (0-based) → switches Bank A to that kit index (1-based).
+     */
+    public void handleProgramChangeMain(int program) {
+        final int newKit = program + 1; // MIDI programs are 0-based
+        runOnUiThread(() -> {
+            saveKitToMemory(kitIndex);
+            kitIndex = Math.max(1, newKit);
+            loadKitFromMemory(kitIndex);
+            currentKitName = prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex);
+            if (txtKitName != null) txtKitName.setText(currentKitName);
+        });
     }
 
     private void playPadSoundImmediate(int index) {

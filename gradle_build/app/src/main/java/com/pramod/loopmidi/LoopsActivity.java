@@ -3118,6 +3118,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         LoopsActivity inst = LoopsActivity.globalInstance;
                                         if (inst != null) inst.handleMidiNoteOff(note);
                                         i += 2;
+                                    } else if (type == 0xB0) {
+                                        // ── Control Change (CC) — Roland SPD-20 Pro controls ──
+                                        // CC number = val (first data byte), value = msg[i+1]
+                                        if (i + 1 < end) {
+                                            int ccNum  = val;
+                                            int ccVal2 = msg[i + 1] & 0xFF;
+                                            LoopsActivity inst = LoopsActivity.globalInstance;
+                                            if (inst != null) inst.handleMidiCC(ccNum, ccVal2);
+                                            i += 2;
+                                        } else { i++; }
                                     } else if (type == 0xC0) {
                                         // Program Change (0xCn)
                                         LoopsActivity inst = LoopsActivity.globalInstance;
@@ -3174,6 +3184,191 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // No-op — see javadoc above. Kept as a named handler (rather than
         // removing the Note-Off parsing branch) so future work — e.g. an
         // opt-in "sustain while held" mode — has a clear place to hook in.
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIDI CC (Control Change) — Roland SPD-20 Pro remote controls
+    //
+    // Default CC mapping (user-configurable via Settings → MIDI CC Settings):
+    //   CC  7  → Master Volume   (0-127 → 0%-100%)
+    //   CC 20  → Tempo / Speed   (0-127 → 0.0x-2.0x)
+    //   CC 21  → Pitch           (0-127 → 0.0x-2.0x)
+    //   CC 123 → Stop All        (value ≥ 64 triggers stop)
+    //   CC 24  → Kit / Loop Prev (value ≥ 64 steps back one channel)
+    //   CC 25  → Kit / Loop Next (value ≥ 64 steps forward one channel)
+    //
+    // Kit change via Program Change (0xC0) is already implemented separately.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Handle a MIDI Control Change message from the Roland SPD-20 Pro.
+     * Runs on the MIDI thread; all UI updates are posted to the UI thread.
+     *
+     * CC numbers are read from SharedPreferences so the user can remap them
+     * from the "MIDI CC Settings" dialog without rebuilding the app.
+     */
+    public void handleMidiCC(int cc, int value) {
+        // Read user-configured CC assignments (defaults match Roland SPD-20 Pro)
+        int ccVolume  = prefs.getInt("midi_cc_volume",   7);
+        int ccTempo   = prefs.getInt("midi_cc_tempo",   20);
+        int ccPitch   = prefs.getInt("midi_cc_pitch",   21);
+        int ccStop    = prefs.getInt("midi_cc_stop",   123);
+        int ccKitPrev = prefs.getInt("midi_cc_kit_prev", 24);
+        int ccKitNext = prefs.getInt("midi_cc_kit_next", 25);
+
+        if (cc == ccStop) {
+            // Stop All — fire on MIDI thread immediately for zero latency
+            AudioEngine eng = audioEngine;
+            if (eng != null) eng.stopAll();
+            runOnUiThread(() -> {
+                for (int i = 0; i < 8; i++) {
+                    loopPlaying[i] = false;
+                    updatePadLabel(i);
+                }
+                if (speedPitchRunnable != null) {
+                    speedPitchHandler.removeCallbacks(speedPitchRunnable);
+                    speedPitchRunnable = null;
+                }
+            });
+
+        } else if (cc == ccVolume) {
+            // CC 0-127 → volume 0.0-1.0
+            final float vol = value / 127.0f;
+            masterVolume = vol;
+            runOnUiThread(() -> {
+                prefs.edit().putFloat("loop_master_volume", vol).apply();
+                if (seekMasterVolume != null)
+                    seekMasterVolume.setProgress(Math.round(vol * 100f));
+                if (txtMasterVolVal != null)
+                    txtMasterVolVal.setText(Math.round(vol * 100f) + "%");
+            });
+
+        } else if (cc == ccTempo) {
+            // CC 0-127 → seekTempo 0-200 (100 = 1.0x = 120 BPM)
+            final int prog = Math.round(value * 200f / 127f);
+            runOnUiThread(() -> {
+                if (seekTempo != null) seekTempo.setProgress(prog);
+            });
+
+        } else if (cc == ccPitch) {
+            // CC 0-127 → seekPitch 0-200 (100 = 1.0x = normal pitch)
+            final int prog = Math.round(value * 200f / 127f);
+            runOnUiThread(() -> {
+                if (seekPitch != null) seekPitch.setProgress(prog);
+            });
+
+        } else if (cc == ccKitPrev && value >= 64) {
+            runOnUiThread(() -> changeLoopBy(-1));
+
+        } else if (cc == ccKitNext && value >= 64) {
+            runOnUiThread(() -> changeLoopBy(1));
+        }
+    }
+
+    /**
+     * Dialog: MIDI CC Settings
+     * Lets the user remap which CC number controls each function.
+     * All existing system behavior is untouched when this dialog is not open.
+     */
+    public void showMidiCCSettingsDialog() {
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(32, 24, 32, 16);
+        root.setBackgroundColor(0xFF1A1A1A);
+
+        // Title
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("🎛️ MIDI CC Settings (Roland SPD-20 Pro)");
+        title.setTextColor(0xFFFFCC00);
+        title.setTextSize(15f);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(title);
+
+        android.widget.TextView sub = new android.widget.TextView(this);
+        sub.setText("Enter the CC number your SPD-20 Pro sends for each control:");
+        sub.setTextColor(0xFFAAAAAA);
+        sub.setTextSize(11f);
+        sub.setPadding(0, 4, 0, 16);
+        root.addView(sub);
+
+        // Helper: one row per control
+        String[] labels = {"Volume", "Tempo / Speed", "Pitch", "Stop All", "Kit Prev", "Kit Next"};
+        String[] keys   = {"midi_cc_volume", "midi_cc_tempo", "midi_cc_pitch",
+                           "midi_cc_stop", "midi_cc_kit_prev", "midi_cc_kit_next"};
+        int[]    defs   = {7, 20, 21, 123, 24, 25};
+        android.widget.EditText[] edits = new android.widget.EditText[labels.length];
+
+        for (int i = 0; i < labels.length; i++) {
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            row.setPadding(0, 6, 0, 6);
+
+            android.widget.TextView lbl = new android.widget.TextView(this);
+            lbl.setText(labels[i]);
+            lbl.setTextColor(0xFFDDDDDD);
+            lbl.setTextSize(13f);
+            android.widget.LinearLayout.LayoutParams lp =
+                new android.widget.LinearLayout.LayoutParams(0,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            lbl.setLayoutParams(lp);
+            row.addView(lbl);
+
+            android.widget.EditText ed = new android.widget.EditText(this);
+            ed.setText(String.valueOf(prefs.getInt(keys[i], defs[i])));
+            ed.setTextColor(0xFFFFFFFF);
+            ed.setHintTextColor(0xFF888888);
+            ed.setBackgroundColor(0xFF333333);
+            ed.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            ed.setSelectAllOnFocus(true);
+            android.widget.LinearLayout.LayoutParams edLp =
+                new android.widget.LinearLayout.LayoutParams(
+                    (int)(80 * getResources().getDisplayMetrics().density),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            ed.setLayoutParams(edLp);
+            row.addView(ed);
+            edits[i] = ed;
+            root.addView(row);
+        }
+
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("• CC 0-127. Default: Vol=7, Tempo=20, Pitch=21, Stop=123, Prev=24, Next=25\n" +
+                     "• Program Change (Kit/Loop channel change) is always active, no CC needed.");
+        hint.setTextColor(0xFF888888);
+        hint.setTextSize(10f);
+        hint.setPadding(0, 12, 0, 0);
+        root.addView(hint);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("MIDI CC Settings")
+            .setView(sv)
+            .setPositiveButton("Save", (d, w) -> {
+                SharedPreferences.Editor ed2 = prefs.edit();
+                for (int i = 0; i < keys.length; i++) {
+                    try {
+                        int v = Integer.parseInt(edits[i].getText().toString().trim());
+                        if (v < 0) v = 0; if (v > 127) v = 127;
+                        ed2.putInt(keys[i], v);
+                    } catch (NumberFormatException ignored) {}
+                }
+                ed2.apply();
+                android.widget.Toast.makeText(this,
+                    "MIDI CC mapping saved ✅", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Reset Defaults", (d, w) -> {
+                SharedPreferences.Editor ed2 = prefs.edit();
+                String[] k = {"midi_cc_volume","midi_cc_tempo","midi_cc_pitch",
+                              "midi_cc_stop","midi_cc_kit_prev","midi_cc_kit_next"};
+                int[]    v = {7, 20, 21, 123, 24, 25};
+                for (int i = 0; i < k.length; i++) ed2.putInt(k[i], v[i]);
+                ed2.apply();
+                android.widget.Toast.makeText(this,
+                    "Reset to defaults ✅", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .show();
     }
 
     public void handleMidiNoteOn(byte note, byte velocity) {
