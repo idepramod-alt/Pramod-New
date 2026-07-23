@@ -93,6 +93,16 @@ public class MainActivity extends Activity {
     private volatile boolean midiLearnMode        = false;
     private volatile int     midiLearnTargetPad   = -1;
     private Button           btnMidiMap           = null;
+
+    // ── MIDI CC → Pad mapping ─────────────────────────────────────────────────
+    private static final int[] MIDI_CC_PAD_DEFAULT = {-1,-1,-1,-1,-1,-1,-1,-1};
+    private int[]              midiCCPadMap         = MIDI_CC_PAD_DEFAULT.clone();
+    private volatile boolean   midiCCLearnMode      = false;
+    private volatile int       midiCCLearnTargetPad = -1;
+
+    // ── MIDI Connect/Disconnect button ────────────────────────────────────────
+    private Button btnMidiConnect = null;
+
     private MidiManager midiManager;
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
@@ -337,6 +347,7 @@ public class MainActivity extends Activity {
                         e.printStackTrace();
                     }
                     ((TextView) MainActivity.this.findViewById(R.id.txtMidiStatus)).setText("MIDI disconnected");
+                    runOnUiThread(() -> updateMidiConnectButton(false));
                 }
             }
         }, new Handler(Looper.getMainLooper()));
@@ -361,6 +372,7 @@ public class MainActivity extends Activity {
                         if (MainActivity.this.txtMidiStatus != null) {
                             MainActivity.this.txtMidiStatus.setText("MIDI connected");
                         }
+                        runOnUiThread(() -> updateMidiConnectButton(true));
                         port.connect(new MidiReceiver() {
                             @Override
                             public void onSend(byte[] msg, int offset, int count, long timestamp) {
@@ -555,12 +567,27 @@ public class MainActivity extends Activity {
      * (drum pad runs on top of LoopsActivity). Stop All works locally.
      */
     public void handleMidiCC(int cc, int value) {
-        int ccVolume  = prefs.getInt("midi_cc_volume",   7);
-        int ccTempo   = prefs.getInt("midi_cc_tempo",   20);
-        int ccPitch   = prefs.getInt("midi_cc_pitch",   21);
-        int ccStop    = prefs.getInt("midi_cc_stop",   123);
-        int ccKitPrev = prefs.getInt("midi_cc_kit_prev", 24);
-        int ccKitNext = prefs.getInt("midi_cc_kit_next", 25);
+        // ── CC Learn mode (captures any CC → assigns to pad) ──────────────────
+        if (midiCCLearnMode && midiCCLearnTargetPad >= 0) {
+            final int lp  = midiCCLearnTargetPad;
+            final int lcc = cc;
+            midiCCLearnMode      = false;
+            midiCCLearnTargetPad = -1;
+            midiCCPadMap[lp]     = lcc;
+            saveMidiCCPadMap();
+            runOnUiThread(() -> android.widget.Toast.makeText(this,
+                "PAD " + (lp + 1) + " → CC " + lcc + " mapped! ✅",
+                android.widget.Toast.LENGTH_SHORT).show());
+            return;
+        }
+
+        int ccVolume     = prefs.getInt("midi_cc_volume",          7);
+        int ccTempo      = prefs.getInt("midi_cc_tempo",          20);
+        int ccPitch      = prefs.getInt("midi_cc_pitch",          21);
+        int ccStop       = prefs.getInt("midi_cc_stop",          123);
+        int ccKitPrev    = prefs.getInt("midi_cc_kit_prev",       24);
+        int ccKitNext    = prefs.getInt("midi_cc_kit_next",       25);
+        int ccMidiToggle = prefs.getInt("midi_cc_connect_toggle", 26);
 
         if (cc == ccStop) {
             // Stop all drum sounds immediately on MIDI thread
@@ -568,6 +595,10 @@ public class MainActivity extends Activity {
             if (loops != null && loops.audioEngine != null) {
                 loops.audioEngine.stopAll();
             }
+
+        } else if (cc == ccMidiToggle && value >= 64) {
+            // ── SPD-20 Pro button → connect / disconnect MIDI live ─────────────
+            runOnUiThread(this::toggleMidiConnection);
 
         } else if (cc == ccVolume || cc == ccTempo || cc == ccPitch) {
             // Delegate volume/tempo/pitch controls to LoopsActivity (shared audio engine)
@@ -595,7 +626,36 @@ public class MainActivity extends Activity {
                 if (txtKitName != null) txtKitName.setText(
                     prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex));
             });
+
+        } else {
+            // ── CC → Pad trigger (user-defined CC-to-pad mapping) ─────────────
+            if (value > 0) {
+                for (int i = 0; i < 8; i++) {
+                    if (midiCCPadMap[i] >= 0 && cc == midiCCPadMap[i]) {
+                        final float velScale = velocitySensitiveMode
+                                ? Math.min(1.4f, 0.2f + 1.2f * (value / 127.0f))
+                                : 1.0f;
+                        playPadSoundImmediate(i, velScale);
+                        final int padIdx = i;
+                        runOnUiThread(() -> {
+                            android.view.View pad = findViewById(getPadResId(padIdx));
+                            if (pad != null) {
+                                pad.setPressed(true);
+                                new android.os.Handler(android.os.Looper.getMainLooper())
+                                    .postDelayed(() -> pad.setPressed(false), 100);
+                            }
+                        });
+                        break;
+                    }
+                }
+            }
         }
+    }
+
+    private int getPadResId(int padIdx) {
+        int[] ids = {R.id.pad1, R.id.pad2, R.id.pad3, R.id.pad4,
+                     R.id.pad5, R.id.pad6, R.id.pad7, R.id.pad8};
+        return (padIdx >= 0 && padIdx < 8) ? ids[padIdx] : -1;
     }
 
     /**
@@ -679,6 +739,57 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ── MIDI CC → Pad map helpers ─────────────────────────────────────────────
+
+    private void loadMidiCCPadMap() {
+        for (int i = 0; i < 8; i++) {
+            midiCCPadMap[i] = prefs.getInt("midi_cc_pad_" + i, MIDI_CC_PAD_DEFAULT[i]);
+        }
+    }
+
+    private void saveMidiCCPadMap() {
+        SharedPreferences.Editor ed = prefs.edit();
+        for (int i = 0; i < 8; i++) ed.putInt("midi_cc_pad_" + i, midiCCPadMap[i]);
+        ed.apply();
+    }
+
+    // ── MIDI Connect / Disconnect toggle ──────────────────────────────────────────────
+
+    public void toggleMidiConnection() {
+        if (openedMidiDevice != null) {
+            try { closeMidiDevice(); } catch (Exception ignored) {}
+            if (txtMidiStatus != null) txtMidiStatus.setText("MIDI: disconnected");
+            updateMidiConnectButton(false);
+            Toast.makeText(this,
+                "🔌 MIDI disconnected — SPD-20 Pro plays original kit",
+                Toast.LENGTH_SHORT).show();
+        } else {
+            if (midiManager == null) midiManager = (android.media.midi.MidiManager) getSystemService("midi");
+            if (midiManager != null) {
+                android.media.midi.MidiDeviceInfo[] infos = midiManager.getDevices();
+                if (infos != null && infos.length > 0) {
+                    for (android.media.midi.MidiDeviceInfo info : infos) openMidiDevice(info);
+                    Toast.makeText(this, "🔌 MIDI connecting…", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this,
+                        "❌ Koi MIDI device nahi mila — USB check karo",
+                        Toast.LENGTH_LONG).show();
+                }
+            }
+        }
+    }
+
+    private void updateMidiConnectButton(boolean connected) {
+        if (btnMidiConnect == null) return;
+        if (connected) {
+            btnMidiConnect.setText("🔌MIDI\nON");
+            btnMidiConnect.setBackgroundResource(R.drawable.btn_3d_orange);
+        } else {
+            btnMidiConnect.setText("🔌MIDI\nOFF");
+            btnMidiConnect.setBackgroundResource(R.drawable.btn_3d_dark);
+        }
+    }
+
     private void showMidiKeyMappingDialog() {
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -705,8 +816,10 @@ public class MainActivity extends Activity {
         tvInfo.setLayoutParams(infoLP);
         root.addView(tvInfo);
 
-        final android.widget.EditText[] noteEdits = new android.widget.EditText[8];
-        final Button[] learnBtns = new Button[8];
+        final android.widget.EditText[] noteEdits  = new android.widget.EditText[8];
+        final android.widget.EditText[] ccEdits    = new android.widget.EditText[8];
+        final Button[]                  learnBtns  = new Button[8];
+        final Button[]                  ccLearnBtns = new Button[8];
         for (int i = 0; i < 8; i++) {
             final int padIdx = i;
             android.widget.LinearLayout row = new android.widget.LinearLayout(this);
@@ -717,9 +830,9 @@ public class MainActivity extends Activity {
             row.setLayoutParams(rowLP);
 
             android.widget.TextView lbl = new android.widget.TextView(this);
-            lbl.setText("PAD " + (i + 1) + " →");
+            lbl.setText("PAD " + (i + 1));
             lbl.setTextColor(0xFFCCCCCC);
-            lbl.setTextSize(12f);
+            lbl.setTextSize(11f);
             lbl.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
 
             android.widget.EditText et = new android.widget.EditText(this);
@@ -727,32 +840,68 @@ public class MainActivity extends Activity {
             et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
             et.setTextColor(0xFFFFFFFF);
             et.setBackgroundColor(0xFF222244);
-            et.setTextSize(13f);
+            et.setTextSize(12f);
             et.setGravity(android.view.Gravity.CENTER);
             android.widget.LinearLayout.LayoutParams etLP = new android.widget.LinearLayout.LayoutParams(0, -2, 1f);
-            etLP.setMargins(8, 0, 8, 0);
+            etLP.setMargins(6, 0, 4, 0);
             et.setLayoutParams(etLP);
             noteEdits[i] = et;
 
             Button btnLearn = new Button(this);
-            btnLearn.setText("🎹 LEARN");
+            btnLearn.setText("🎹NOTE
+LEARN");
             btnLearn.setBackgroundColor(0xFF003399);
             btnLearn.setTextColor(0xFFFFFFFF);
-            btnLearn.setTextSize(10f);
+            btnLearn.setTextSize(9f);
             btnLearn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
             learnBtns[i] = btnLearn;
             btnLearn.setOnClickListener(vv -> {
                 for (Button b : learnBtns) if (b != null) b.setBackgroundColor(0xFF003399);
                 midiLearnTargetPad = padIdx;
                 midiLearnMode      = true;
+                midiCCLearnMode    = false;
                 btnLearn.setBackgroundColor(0xFFCC8800);
-                btnLearn.setText("⏳ WAIT...");
-                Toast.makeText(this, "PAD " + (padIdx + 1) + ": MIDI controller se koi note dabao...", Toast.LENGTH_SHORT).show();
+                btnLearn.setText("⏳NOTE...");
+                Toast.makeText(this, "PAD " + (padIdx + 1) + ": Note dabao...", Toast.LENGTH_SHORT).show();
+            });
+
+            android.widget.EditText etCC = new android.widget.EditText(this);
+            int savedCC = midiCCPadMap[i];
+            etCC.setText(savedCC >= 0 ? String.valueOf(savedCC) : "");
+            etCC.setHint("CC");
+            etCC.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            etCC.setTextColor(0xFFFFFF88);
+            etCC.setBackgroundColor(0xFF332200);
+            etCC.setTextSize(12f);
+            etCC.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams etCCLP = new android.widget.LinearLayout.LayoutParams(0, -2, 0.9f);
+            etCCLP.setMargins(4, 0, 4, 0);
+            etCC.setLayoutParams(etCCLP);
+            ccEdits[i] = etCC;
+
+            Button btnCCLearn = new Button(this);
+            btnCCLearn.setText("🎛️CC
+LEARN");
+            btnCCLearn.setBackgroundColor(0xFF664400);
+            btnCCLearn.setTextColor(0xFFFFFFFF);
+            btnCCLearn.setTextSize(9f);
+            btnCCLearn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
+            ccLearnBtns[i] = btnCCLearn;
+            btnCCLearn.setOnClickListener(vv -> {
+                for (Button b : ccLearnBtns) if (b != null) b.setBackgroundColor(0xFF664400);
+                midiCCLearnTargetPad = padIdx;
+                midiCCLearnMode      = true;
+                midiLearnMode        = false;
+                btnCCLearn.setBackgroundColor(0xFFFF8800);
+                btnCCLearn.setText("⏳CC...");
+                Toast.makeText(this, "PAD " + (padIdx + 1) + ": SPD-20 CC button dabao...", Toast.LENGTH_SHORT).show();
             });
 
             row.addView(lbl);
             row.addView(et);
             row.addView(btnLearn);
+            row.addView(etCC);
+            row.addView(btnCCLearn);
             root.addView(row);
         }
 
@@ -803,18 +952,34 @@ public class MainActivity extends Activity {
                     midiNoteMap[i] = Math.max(0, Math.min(127, val));
                     noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
                 } catch (NumberFormatException ignored) {}
+                String ccTxt = ccEdits[i].getText().toString().trim();
+                if (ccTxt.isEmpty()) {
+                    midiCCPadMap[i] = -1;
+                } else {
+                    try {
+                        int cv = Integer.parseInt(ccTxt);
+                        midiCCPadMap[i] = Math.max(0, Math.min(127, cv));
+                        ccEdits[i].setText(String.valueOf(midiCCPadMap[i]));
+                    } catch (NumberFormatException ignored) {}
+                }
             }
             saveMidiNoteMap();
-            Toast.makeText(this, "✅ Mapping save ho gaya!", Toast.LENGTH_SHORT).show();
+            saveMidiCCPadMap();
+            Toast.makeText(this, "✅ Note + CC Mapping save ho gaya!", Toast.LENGTH_SHORT).show();
         });
 
         btnReset.setOnClickListener(vv -> new android.app.AlertDialog.Builder(this)
             .setTitle("Reset to Default?")
-            .setMessage("Sab pads ke notes wapas default par aa jayenge.")
+            .setMessage("Notes default par aur CC map clear ho jayega.")
             .setPositiveButton("RESET", (d, w) -> {
                 System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 8);
-                for (int i = 0; i < 8; i++) noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
+                System.arraycopy(MIDI_CC_PAD_DEFAULT, 0, midiCCPadMap, 0, 8);
+                for (int i = 0; i < 8; i++) {
+                    noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
+                    ccEdits[i].setText("");
+                }
                 saveMidiNoteMap();
+                saveMidiCCPadMap();
                 Toast.makeText(this, "↩ Default mapping restore ho gaya!", Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Cancel", null)
@@ -1010,9 +1175,16 @@ public class MainActivity extends Activity {
         // Restore velocity sensitivity mode from prefs
         this.velocitySensitiveMode = this.prefs.getBoolean("velocity_sensitive_mode", false);
         updateVelocityButton();
-        // Restore MIDI key mapping
+        // Restore MIDI key mapping (note map + CC pad map)
         loadMidiNoteMap();
+        loadMidiCCPadMap();
         updateMidiMapButton();
+        // MIDI Connect button
+        this.btnMidiConnect = (Button) findViewById(R.id.btnMidiConnect);
+        updateMidiConnectButton(openedMidiDevice != null);
+        if (this.btnMidiConnect != null) {
+            this.btnMidiConnect.setOnClickListener(v -> toggleMidiConnection());
+        }
         if (this.btnVelocity != null) {
             this.btnVelocity.setOnClickListener(v -> {
                 velocitySensitiveMode = !velocitySensitiveMode;
