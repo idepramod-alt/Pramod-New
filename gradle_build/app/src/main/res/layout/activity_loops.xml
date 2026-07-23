@@ -142,8 +142,7 @@
         <Button android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
             android:id="@+id/btnMidiConnect" android:background="@drawable/btn_3d_dark"
             android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_marginLeft="6dp" android:text="🔌MIDI
-OFF" android:layout_weight="1.1"/>
+            android:layout_marginLeft="6dp" android:text="🔌MIDI&#10;OFF" android:layout_weight="1.1"/>
     </LinearLayout>
 
     <!-- ── Advanced Panel (ADV button toggles visibility) ── -->

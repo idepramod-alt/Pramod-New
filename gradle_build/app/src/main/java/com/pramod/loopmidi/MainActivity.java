@@ -848,8 +848,7 @@ public class MainActivity extends Activity {
             noteEdits[i] = et;
 
             Button btnLearn = new Button(this);
-            btnLearn.setText("🎹NOTE
-LEARN");
+            btnLearn.setText("🎹NOTE\nLEARN");
             btnLearn.setBackgroundColor(0xFF003399);
             btnLearn.setTextColor(0xFFFFFFFF);
             btnLearn.setTextSize(9f);
@@ -880,8 +879,7 @@ LEARN");
             ccEdits[i] = etCC;
 
             Button btnCCLearn = new Button(this);
-            btnCCLearn.setText("🎛️CC
-LEARN");
+            btnCCLearn.setText("🎛️CC\nLEARN");
             btnCCLearn.setBackgroundColor(0xFF664400);
             btnCCLearn.setTextColor(0xFFFFFFFF);
             btnCCLearn.setTextSize(9f);
