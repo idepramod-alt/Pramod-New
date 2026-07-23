@@ -100,6 +100,15 @@ public class MainActivity extends Activity {
     private volatile boolean   midiCCLearnMode      = false;
     private volatile int       midiCCLearnTargetPad = -1;
 
+    // ── MIDI CC → Global Controls learn mode ─────────────────────────────────
+    private volatile boolean          midiCCControlLearnMode = false;
+    private volatile String           midiCCControlLearnKey  = null;
+    private android.widget.TextView[] midiCCCtrlValViews     = null;
+    private Button[]                  midiCCCtrlLearnBtns    = null;
+    private String[]                  midiCCCtrlKeys         = null;
+    private android.app.AlertDialog   midiCCCtrlDialog       = null;
+    private Button                    btnCCCtrl              = null;
+
     // ── MIDI Connect/Disconnect button ────────────────────────────────────────
     private Button btnMidiConnect = null;
 
@@ -561,12 +570,173 @@ public class MainActivity extends Activity {
     //   CC 25  → Kit Next (Bank A)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /** Open the MIDI CC → Global Controls mapping dialog with live LEARN support. */
+    private void showMidiCCControlDialog() {
+        midiCCControlLearnMode = false;
+        midiCCControlLearnKey  = null;
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(28, 20, 28, 12);
+        root.setBackgroundColor(0xFF1A1A1A);
+
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("🎛️ MIDI CC → App Controls");
+        title.setTextColor(0xFFFFCC00);
+        title.setTextSize(15f);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(title);
+
+        android.widget.TextView sub = new android.widget.TextView(this);
+        sub.setText("LEARN dabao → Roland SPD-20 Pro ka button dabao → auto-map! ✅");
+        sub.setTextColor(0xFFAAAAAA);
+        sub.setTextSize(10f);
+        sub.setPadding(0, 4, 0, 14);
+        root.addView(sub);
+
+        final String[] labels = {"🔊 Volume",      "⏱ Tempo / Speed", "🎵 Pitch",
+                                  "⏹ Stop All",    "⏮ Kit Prev",      "⏭ Kit Next",
+                                  "🔌 MIDI Connect"};
+        final String[] keys   = {"midi_cc_volume", "midi_cc_tempo",    "midi_cc_pitch",
+                                  "midi_cc_stop",   "midi_cc_kit_prev", "midi_cc_kit_next",
+                                  "midi_cc_connect_toggle"};
+        final int[]    defs   = {7, 20, 21, 123, 24, 25, 26};
+
+        final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
+        final Button[]                  learnBtns = new Button[labels.length];
+        midiCCCtrlKeys      = keys;
+        midiCCCtrlValViews  = valViews;
+        midiCCCtrlLearnBtns = learnBtns;
+
+        for (int i = 0; i < labels.length; i++) {
+            final int    idx = i;
+            final String key = keys[i];
+
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            row.setPadding(0, 5, 0, 5);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+            android.widget.TextView lbl = new android.widget.TextView(this);
+            lbl.setText(labels[i]);
+            lbl.setTextColor(0xFFDDDDDD);
+            lbl.setTextSize(12f);
+            lbl.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f));
+            row.addView(lbl);
+
+            android.widget.TextView valView = new android.widget.TextView(this);
+            valView.setText("CC:" + prefs.getInt(key, defs[i]));
+            valView.setTextColor(0xFF00FF88);
+            valView.setTextSize(12f);
+            valView.setTypeface(null, android.graphics.Typeface.BOLD);
+            valView.setGravity(android.view.Gravity.CENTER);
+            valView.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 0.6f));
+            valViews[idx] = valView;
+            row.addView(valView);
+
+            Button lb = new Button(this);
+            lb.setText("LEARN");
+            lb.setTextSize(9f);
+            lb.setTextColor(0xFFFFFFFF);
+            lb.setBackgroundColor(0xFF334466);
+            android.widget.LinearLayout.LayoutParams lbLp =
+                new android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            lbLp.setMargins(6, 0, 0, 0);
+            lb.setLayoutParams(lbLp);
+            learnBtns[idx] = lb;
+
+            lb.setOnClickListener(vv -> {
+                midiCCControlLearnMode = false;
+                midiCCControlLearnKey  = null;
+                for (Button b : learnBtns) {
+                    if (b != null) { b.setBackgroundColor(0xFF334466); b.setText("LEARN"); }
+                }
+                midiCCControlLearnMode = true;
+                midiCCControlLearnKey  = key;
+                lb.setBackgroundColor(0xFFFF6600);
+                lb.setText("⏳SPD...");
+            });
+            row.addView(lb);
+            root.addView(row);
+        }
+
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("Default: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26");
+        hint.setTextColor(0xFF666666);
+        hint.setTextSize(9f);
+        hint.setPadding(0, 12, 0, 0);
+        root.addView(hint);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+
+        midiCCCtrlDialog = new android.app.AlertDialog.Builder(this)
+            .setTitle("🎛️ CC → Controls")
+            .setView(sv)
+            .setNeutralButton("Reset Defaults", (d, w) -> {
+                midiCCControlLearnMode = false;
+                midiCCControlLearnKey  = null;
+                android.content.SharedPreferences.Editor ed2 = prefs.edit();
+                for (int i = 0; i < keys.length; i++) ed2.putInt(keys[i], defs[i]);
+                ed2.apply();
+                android.widget.Toast.makeText(this,
+                    "Reset to defaults ✅", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Close", (d, w) -> {
+                midiCCControlLearnMode = false;
+                midiCCControlLearnKey  = null;
+            })
+            .setOnDismissListener(d -> {
+                midiCCControlLearnMode = false;
+                midiCCControlLearnKey  = null;
+                midiCCCtrlDialog    = null;
+                midiCCCtrlValViews  = null;
+                midiCCCtrlLearnBtns = null;
+                midiCCCtrlKeys      = null;
+            })
+            .show();
+    }
+
     /**
      * Handle MIDI Control Change from Roland SPD-20 Pro in drum-pad screen.
      * For Volume/Tempo/Pitch, delegates to LoopsActivity if it is alive
      * (drum pad runs on top of LoopsActivity). Stop All works locally.
      */
     public void handleMidiCC(int cc, int value) {
+        // ── CC Control Learn (Vol/Tempo/Pitch/Stop/KitPrev/KitNext/Connect) ───
+        if (midiCCControlLearnMode && midiCCControlLearnKey != null) {
+            final String lKey = midiCCControlLearnKey;
+            final int    lCC  = cc;
+            midiCCControlLearnMode = false;
+            midiCCControlLearnKey  = null;
+            prefs.edit().putInt(lKey, lCC).apply();
+            runOnUiThread(() -> {
+                if (midiCCCtrlKeys != null) {
+                    for (int ki = 0; ki < midiCCCtrlKeys.length; ki++) {
+                        if (lKey.equals(midiCCCtrlKeys[ki])) {
+                            if (midiCCCtrlValViews  != null && midiCCCtrlValViews[ki]  != null)
+                                midiCCCtrlValViews[ki].setText("CC:" + lCC);
+                            if (midiCCCtrlLearnBtns != null && midiCCCtrlLearnBtns[ki] != null) {
+                                midiCCCtrlLearnBtns[ki].setBackgroundColor(0xFF005500);
+                                midiCCCtrlLearnBtns[ki].setText("✅" + lCC);
+                            }
+                            break;
+                        }
+                    }
+                }
+                String name = lKey.replace("midi_cc_","").replace("_"," ")
+                                  .toUpperCase(java.util.Locale.US);
+                android.widget.Toast.makeText(this,
+                    "✅ CC " + lCC + " → " + name + " saved!",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            });
+            return;
+        }
+
         // ── CC Learn mode (captures any CC → assigns to pad) ──────────────────
         if (midiCCLearnMode && midiCCLearnTargetPad >= 0) {
             final int lp  = midiCCLearnTargetPad;
@@ -1193,6 +1363,11 @@ public class MainActivity extends Activity {
         // ── MIDI Key Mapping button ────────────────────────────────────────────
         if (this.btnMidiMap != null) {
             this.btnMidiMap.setOnClickListener(v -> showMidiKeyMappingDialog());
+        }
+        // ── CC Controls mapping button ─────────────────────────────────────────
+        this.btnCCCtrl = (Button) findViewById(R.id.btnCCCtrl);
+        if (this.btnCCCtrl != null) {
+            this.btnCCCtrl.setOnClickListener(v -> showMidiCCControlDialog());
         }
         this.editMode = this.prefs.getBoolean(KEY_EDIT_MODE, false);
         int i = this.prefs.getInt(KEY_KIT_INDEX, 1);

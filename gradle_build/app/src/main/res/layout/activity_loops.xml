@@ -143,6 +143,11 @@
             android:id="@+id/btnMidiConnect" android:background="@drawable/btn_3d_dark"
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="6dp" android:text="🔌MIDI&#10;OFF" android:layout_weight="1.1"/>
+        <!-- CC Controls: assign any Roland SPD-20 Pro button → Vol/Tempo/Pitch/Stop via LEARN -->
+        <Button android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnCCCtrl" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="4dp" android:text="🎛️CC&#10;CTRL" android:layout_weight="1.1"/>
     </LinearLayout>
 
     <!-- ── Advanced Panel (ADV button toggles visibility) ── -->
