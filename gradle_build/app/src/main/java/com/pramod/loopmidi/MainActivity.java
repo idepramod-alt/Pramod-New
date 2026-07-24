@@ -477,8 +477,10 @@ public class MainActivity extends Activity {
         // (SPD-20 ka apna original kit sound uske khud ke output se bajega)
         if (midiKitLockNumber != -1) {
             // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi
-            // → safe default: agar lock hai to unknown state me bhi ignore karo
-            if (currentSpdKitNum != midiKitLockNumber) {
+            // (e.g. app restart ke baad). Is case mein notes allow karo —
+            // lock ke saath paida hona chahiye, na notes block karna.
+            // Jab SPD-20 pehli Program Change bhejega tab se proper filtering shuru.
+            if (currentSpdKitNum != -1 && currentSpdKitNum != midiKitLockNumber) {
                 return;  // Yeh kit locked nahi → app chup rahega
             }
         }

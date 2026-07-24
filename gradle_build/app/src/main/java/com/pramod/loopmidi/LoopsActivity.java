@@ -211,6 +211,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private android.app.AlertDialog   midiCCCtrlDialog       = null;
     private Button                    btnCCCtrl              = null;
 
+    // ── MIDI Kit Lock — SPD-20 Pro kit filter (Loop Activity) ────────────────
+    // midiKitLockNumber: SPD-20 Pro kit no. jis pe loops ka channel change hoga (-1 = off)
+    // currentSpdKitNum : SPD-20 Pro ka abhi active kit (Program Change se track hota hai)
+    private volatile int  midiKitLockNumber = -1;   // -1 = lock OFF
+    private volatile int  currentSpdKitNum  = -1;   // -1 = unknown (pehle PC nahi aayi)
+    private Button        btnKitLock        = null;  // CC Control dialog me toggle button
+
     // ── MIDI Connect/Disconnect button ────────────────────────────────────────
     private Button btnMidiConnect = null;
     private Button           btnLoopSync          = null;
@@ -642,8 +649,31 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void handleProgramChange(int i) {
+        final int newKit = i + 1; // MIDI programs are 0-based
+
+        // ── Kit Lock: SPD-20 Pro ka current kit track karo ───────────────────
+        currentSpdKitNum = newKit;
+
+        // Agar lock ON hai → loop channel mat badlo, sirf SPD track karo
+        // Lock button ka color update karo (locked kit pe green, baki pe orange)
+        if (midiKitLockNumber != -1) {
+            final boolean onLockedKit = (newKit == midiKitLockNumber);
+            runOnUiThread(() -> {
+                if (btnKitLock != null) {
+                    if (onLockedKit) {
+                        btnKitLock.setBackgroundColor(0xFF006600);
+                        btnKitLock.setText("🔒 LOCKED: SPD Kit " + midiKitLockNumber + " ✅ (Loops bajenge)");
+                    } else {
+                        btnKitLock.setBackgroundColor(0xFFAA4400);
+                        btnKitLock.setText("🔒 LOCKED: SPD Kit " + midiKitLockNumber + " ❌ (Kit " + newKit + " pe)");
+                    }
+                }
+            });
+            return; // Loop channel mat badlo jab lock ON ho
+        }
+
         saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
-        this.loopChannelIndex = i + 1;
+        this.loopChannelIndex = newKit;
         loadCurrentKit();
     }
 
@@ -1281,6 +1311,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         updateMidiMapButton();
         // Restore global drum mode from prefs
         this.isGlobalDrumMode = this.prefs.getBoolean("global_drum_mode", false);
+        // Restore MIDI Kit Lock (SPD-20 Pro loop channel filter)
+        // Note: currentSpdKitNum stays -1 until first Program Change arrives —
+        // this means on restart, lock is ON but notes are allowed until SPD sends PC.
+        midiKitLockNumber = prefs.getInt("loop_midi_kit_lock", -1);
         String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
@@ -3336,6 +3370,88 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         hint.setPadding(0, 12, 0, 0);
         root.addView(hint);
 
+        // ── MIDI Kit Lock Section ─────────────────────────────────────────────
+        android.widget.TextView divider = new android.widget.TextView(this);
+        divider.setText("──────────────────────────────");
+        divider.setTextColor(0xFF444444);
+        divider.setTextSize(10f);
+        divider.setPadding(0, 16, 0, 4);
+        root.addView(divider);
+
+        android.widget.TextView lockTitle = new android.widget.TextView(this);
+        lockTitle.setText("🎯 SPD-20 Pro Kit Lock (Loop Channel)");
+        lockTitle.setTextColor(0xFFFFCC00);
+        lockTitle.setTextSize(13f);
+        lockTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(lockTitle);
+
+        android.widget.TextView lockDesc = new android.widget.TextView(this);
+        lockDesc.setText(
+            "Jis kit pe ho abhi SPD-20 pe → LOCK dabao\n" +
+            "✅ Sirf us kit pe loop channel change hoga\n" +
+            "❌ Baki kits pe loop channel nahi badlega\n\n" +
+            "💡 Useful jab SPD-20 ke kit change se\n" +
+            "   aapka Loop channel accidentally na badle.");
+        lockDesc.setTextColor(0xFFAAAAAA);
+        lockDesc.setTextSize(10f);
+        lockDesc.setPadding(0, 4, 0, 10);
+        root.addView(lockDesc);
+
+        // Lock toggle button — state current lock ke hisaab se dikhai deta hai
+        btnKitLock = new Button(this);
+        final boolean lockIsOn = (midiKitLockNumber != -1);
+        if (lockIsOn) {
+            final boolean onKit = (currentSpdKitNum == midiKitLockNumber || currentSpdKitNum == -1);
+            btnKitLock.setBackgroundColor(onKit ? 0xFF006600 : 0xFFAA4400);
+            btnKitLock.setText(onKit
+                ? "🔒 LOCKED: SPD Kit " + midiKitLockNumber + " ✅  |  UNLOCK karne ke liye dabao"
+                : "🔒 LOCKED: SPD Kit " + midiKitLockNumber + " ❌ (Kit " + currentSpdKitNum + " pe) | UNLOCK");
+        } else {
+            btnKitLock.setBackgroundColor(0xFF334466);
+            btnKitLock.setText("🔓 LOCK: Abhi wali SPD Kit ko lock karo");
+        }
+        btnKitLock.setTextColor(0xFFFFFFFF);
+        btnKitLock.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams lockLp =
+            new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        lockLp.setMargins(0, 0, 0, 6);
+        btnKitLock.setLayoutParams(lockLp);
+
+        btnKitLock.setOnClickListener(lockView -> {
+            if (midiKitLockNumber != -1) {
+                // ── Lock OFF → unlock karo ───────────────────────────────────
+                midiKitLockNumber = -1;
+                prefs.edit().putInt("loop_midi_kit_lock", -1).apply();
+                btnKitLock.setBackgroundColor(0xFF334466);
+                btnKitLock.setText("🔓 LOCK: Abhi wali SPD Kit ko lock karo");
+                Toast.makeText(this,
+                    "🔓 Loop Kit Lock OFF — SPD-20 kit change se loop channel badlega",
+                    Toast.LENGTH_SHORT).show();
+            } else {
+                // ── Lock ON → current SPD kit lock karo ─────────────────────
+                if (currentSpdKitNum == -1) {
+                    // SPD-20 ne abhi tak koi Program Change nahi bheja
+                    Toast.makeText(this,
+                        "⚠️ Pehle SPD-20 Pro pe koi bhi kit change karo,\n" +
+                        "phir LOCK dabao! (Program Change zaroori hai)",
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+                midiKitLockNumber = currentSpdKitNum;
+                prefs.edit().putInt("loop_midi_kit_lock", midiKitLockNumber).apply();
+                btnKitLock.setBackgroundColor(0xFF006600);
+                btnKitLock.setText("🔒 LOCKED: SPD Kit " + midiKitLockNumber +
+                    " ✅  |  UNLOCK karne ke liye dabao");
+                Toast.makeText(this,
+                    "🔒 Loop Kit Lock: SPD Kit " + midiKitLockNumber + " LOCKED!\n" +
+                    "Sirf is kit pe loop channel change hoga.",
+                    Toast.LENGTH_SHORT).show();
+            }
+        });
+        root.addView(btnKitLock);
+
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(root);
 
@@ -3361,6 +3477,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 midiCCCtrlValViews  = null;
                 midiCCCtrlLearnBtns = null;
                 midiCCCtrlKeys      = null;
+                btnKitLock          = null;
             })
             .show();
     }
