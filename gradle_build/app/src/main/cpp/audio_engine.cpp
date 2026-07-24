@@ -285,7 +285,7 @@ public:
             oboe::AudioStream*, void* audioData, int32_t numFrames) override {
 
         float* out = static_cast<float*>(audioData);
-        memset(out, 0, sizeof(float) * numFrames);
+        memset(out, 0, sizeof(float) * numFrames * 2); // stereo: 2 floats per frame
 
         // Process all pending commands (lock-free)
         Cmd c;
@@ -501,6 +501,15 @@ public:
             if (pos + (size_t)n > cap) n = (int)(cap > pos ? cap - pos : 0);
             for (int i = 0; i < n; i++) dst[pos + i] = out[i];
             recordWritePos.store(pos + (size_t)n, std::memory_order_relaxed);
+        }
+
+        // ── Mono → Stereo expansion ───────────────────────────────────────────
+        // Mix was accumulated in mono (out[0..numFrames-1]). Expand to
+        // interleaved L+R pairs. Iterate backwards so no source sample is
+        // overwritten before it is copied.
+        for (int i = numFrames - 1; i >= 0; i--) {
+            out[2 * i]     = out[i];
+            out[2 * i + 1] = out[i];
         }
 
         return oboe::DataCallbackResult::Continue;
@@ -797,7 +806,7 @@ public:
             ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
             ->setSharingMode(oboe::SharingMode::Exclusive)
             ->setFormat(oboe::AudioFormat::Float)
-            ->setChannelCount(1)
+            ->setChannelCount(2)            // stereo: same mono mix on L + R
             ->setSampleRate(sampleRate)            // MATCH device native SR — no resampling
             ->setFramesPerCallback(framesPerBurst) // MATCH hardware burst — no extra buffering
             ->setBufferCapacityInFrames(framesPerBurst * 3)

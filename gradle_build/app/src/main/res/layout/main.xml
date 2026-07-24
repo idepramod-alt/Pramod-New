@@ -88,9 +88,9 @@
             android:shadowRadius="2"/>
         <TextView android:textSize="12sp" android:textStyle="bold" android:textColor="#ff00ff00" android:gravity="center" android:id="@+id/txtMidiStatus" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginLeft="8dp" android:text="MIDI: disconnected"/>
         <!-- MIDI Connect/Disconnect toggle button -->
-        <Button android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnMidiConnect" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="6dp" android:text="🔌MIDI&#10;OFF" android:layout_weight="1.1"/>
+        <Button android:textSize="8sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnMidiConnect" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="4dp" android:text="🔌MIDI&#10;OFF" android:layout_weight="0.7"/>
         <!-- CC Controls: assign any Roland SPD-20 Pro button → Vol/Tempo/Pitch/Stop via LEARN -->
-        <Button android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnCCCtrl" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="4dp" android:text="🎛️CC&#10;CTRL" android:layout_weight="1.1"/>
+        <Button android:textSize="8sp" android:textStyle="bold" android:textColor="#ffffffff" android:id="@+id/btnCCCtrl" android:background="@drawable/btn_3d_dark" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginLeft="3dp" android:text="🎛️CC&#10;CTRL" android:layout_weight="0.7"/>
     </LinearLayout>
     <LinearLayout android:orientation="vertical" android:id="@+id/padArea" android:padding="2dp" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="2">
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">

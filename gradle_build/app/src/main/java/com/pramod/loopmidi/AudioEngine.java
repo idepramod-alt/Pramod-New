@@ -544,10 +544,10 @@ public class AudioEngine {
             if (abs > peak) peak = abs;
         }
         if (peak == 0) return pcm;                    // silence — nothing to do
-        final float TARGET = 23170f;                  // -3 dBFS = 32767 × 0.707
+        final float TARGET = 30000f;                  // ≈ -0.75 dBFS — significantly louder
         if (peak >= (int) TARGET) return pcm;         // already loud — don't reduce
         float gain = TARGET / peak;
-        if (gain > 4.0f) gain = 4.0f;                // cap at +12 dB; avoid amplifying noise
+        if (gain > 8.0f) gain = 8.0f;                // cap at +18 dB (was +12 dB)
         short[] out = new short[pcm.length];
         for (int i = 0; i < pcm.length; i++) {
             int v = Math.round(pcm[i] * gain);

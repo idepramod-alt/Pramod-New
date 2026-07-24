@@ -603,12 +603,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             int progress = seekBar.getProgress();
             int progress2 = seekBar2.getProgress();
-            short s = (short) ((progress - 50) * 30);
-            short progress3 = (short) ((seekBar3.getProgress() - 50) * 30);
+            short s = (short) ((progress - 50) * 300);        // ±15 dB range (was ±1.5 dB)
+            short progress3 = (short) ((seekBar3.getProgress() - 50) * 300);
             Equalizer equalizer2 = this.globalEq;
             equalizer2.setBandLevel((short) 0, progress3);
             equalizer2.setBandLevel((short) 1, progress3);
-            equalizer2.setBandLevel((short) 2, (short) ((progress2 - 50) * 30));
+            equalizer2.setBandLevel((short) 2, (short) ((progress2 - 50) * 300));
             equalizer2.setBandLevel((short) 3, s);
             equalizer2.setBandLevel((short) 4, s);
         } catch (Throwable th) {
