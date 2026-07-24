@@ -236,6 +236,10 @@ public:
     // Using native SR avoids Android's internal resampler and cuts ~20-40 ms latency
     int sampleRate    = 48000;
     int framesPerBurst = 256;
+    // Actual channel count reported by Oboe after stream open. We request 2
+    // (stereo) but the device may fall back to 1 (mono). Stored here so the
+    // audio callback can use the real value for memset and L+R expansion.
+    int streamChannels = 1;
 
     // Per-voice delay lines (NOT a single shared/global buffer). Each voice
     // (i.e. each individual pad hit) gets its own delay history, so a pad
@@ -285,7 +289,8 @@ public:
             oboe::AudioStream*, void* audioData, int32_t numFrames) override {
 
         float* out = static_cast<float*>(audioData);
-        memset(out, 0, sizeof(float) * numFrames * 2); // stereo: 2 floats per frame
+        const int nCh = streamChannels;               // 1 (mono) or 2 (stereo)
+        memset(out, 0, sizeof(float) * numFrames * nCh);
 
         // Process all pending commands (lock-free)
         Cmd c;
@@ -482,15 +487,14 @@ public:
             }
         }
 
-        // Soft saturation (tanh): smoother than hard clip; avoids the harsh
-        // click that hard clipping adds when transients exceed ±1.0.
+        // Soft saturation (tanh) on mono mix before stereo expansion.
         for (int i = 0; i < numFrames; i++) {
             out[i] = tanhf(out[i]);
         }
 
         // ── Internal/system-audio recording tap ─────────────────────────────
-        // Runs AFTER saturation so the captured take matches exactly what the
-        // listener hears. recordBuffer is preallocated (see startRecording),
+        // Runs AFTER saturation but BEFORE stereo expansion so the mono mix
+        // is captured cleanly. recordBuffer is preallocated (startRecording),
         // so this only ever writes into already-owned memory — no malloc,
         // no lock, safe for the realtime thread.
         if (recordActive.load(std::memory_order_relaxed)) {
@@ -503,13 +507,14 @@ public:
             recordWritePos.store(pos + (size_t)n, std::memory_order_relaxed);
         }
 
-        // ── Mono → Stereo expansion ───────────────────────────────────────────
-        // Mix was accumulated in mono (out[0..numFrames-1]). Expand to
-        // interleaved L+R pairs. Iterate backwards so no source sample is
-        // overwritten before it is copied.
-        for (int i = numFrames - 1; i >= 0; i--) {
-            out[2 * i]     = out[i];
-            out[2 * i + 1] = out[i];
+        // ── Mono → Stereo expansion (only when stream opened as 2ch) ─────────
+        // All voices mix into out[0..numFrames-1]. Expand in-place (backwards
+        // so no source sample is clobbered before it is copied).
+        if (nCh == 2) {
+            for (int i = numFrames - 1; i >= 0; i--) {
+                out[2 * i]     = out[i];
+                out[2 * i + 1] = out[i];
+            }
         }
 
         return oboe::DataCallbackResult::Continue;
@@ -828,14 +833,19 @@ public:
         // latency; hardware glitch-guard is the driver's job in Exclusive+LowLatency.
         stream->setBufferSizeInFrames(framesPerBurst * 1);
 
+        // Store the actual channel count Oboe negotiated with the device.
+        // We request 2 but some devices silently open as 1 in exclusive mode.
+        streamChannels = stream->getChannelCount();
+
         r = stream->start();
         if (r != oboe::Result::OK) { LOGE("stream start: %s", oboe::convertToText(r)); return false; }
 
-        LOGI("Oboe OK — rate=%d burst=%d bufSize=%d cap=%d api=%s sharing=%s",
+        LOGI("Oboe OK — rate=%d burst=%d bufSize=%d cap=%d ch=%d api=%s sharing=%s",
              stream->getSampleRate(),
              stream->getFramesPerBurst(),
              stream->getBufferSizeInFrames(),
              stream->getBufferCapacityInFrames(),
+             streamChannels,
              oboe::convertToText(stream->getAudioApi()),
              stream->getSharingMode() == oboe::SharingMode::Exclusive ? "exclusive" : "shared");
         streamGeneration.fetch_add(1, std::memory_order_release);
