@@ -85,7 +85,6 @@
             android:singleLine="true"
             android:ellipsize="marquee"
             android:marqueeRepeatLimit="marquee_forever"
-            android:selected="true"
             android:shadowColor="#7a4400"
             android:shadowDx="2"
             android:shadowDy="3"
