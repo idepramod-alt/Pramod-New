@@ -672,6 +672,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return; // Loop channel mat badlo jab lock ON ho
         }
 
+        // ── Same-kit guard: agar kit nahi badla (e.g. MIDI connect pe SPD apna
+        //    current program re-sends karta hai) to playing loops mat roko.
+        //    Sirf tab reload karo jab kit actually change ho.
+        if (newKit == this.loopChannelIndex) return;
+
         saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
         this.loopChannelIndex = newKit;
         loadCurrentKit();

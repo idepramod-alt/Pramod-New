@@ -885,8 +885,8 @@ public class MainActivity extends Activity {
                     saveKitToMemory(kitIndex);
                     kitIndex--;
                     loadKitFromMemory(kitIndex);
-                    if (txtKitName != null) txtKitName.setText(
-                        prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex));
+                    // loadKitFromMemory already sets currentKitName (with preset-name
+                    // fallback) and updates txtKitName — no duplicate setText needed.
                 }
             });
 
@@ -896,8 +896,8 @@ public class MainActivity extends Activity {
                 saveKitToMemory(kitIndex);
                 kitIndex++;
                 loadKitFromMemory(kitIndex);
-                if (txtKitName != null) txtKitName.setText(
-                    prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex));
+                // loadKitFromMemory already sets currentKitName (with preset-name
+                // fallback) and updates txtKitName — no duplicate setText needed.
             });
 
         } else {
@@ -963,8 +963,8 @@ public class MainActivity extends Activity {
             saveKitToMemory(kitIndex);
             kitIndex = Math.max(1, newKit);
             loadKitFromMemory(kitIndex);
-            currentKitName = prefs.getString("kit_name_" + kitIndex, "KIT " + kitIndex);
-            if (txtKitName != null) txtKitName.setText(currentKitName);
+            // loadKitFromMemory already sets currentKitName (using preset-name fallback
+            // for kits 1–25 so "Intro Patch" etc. show correctly) and updates txtKitName.
         });
     }
 
