@@ -479,14 +479,14 @@ public class MainActivity extends Activity {
     public void handleMidiNoteOn(byte note, byte velocity) {
         // ── MIDI Kit Lock filter ──────────────────────────────────────────────
         // Agar lock ON hai aur SPD-20 us kit pe nahi hai → note ignore karo
-        // (SPD-20 ka apna original kit sound uske khud ke output se bajega)
+        // (SPD-20 ka apna original kit sound uske khud ke output se bajega).
+        // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi —
+        // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
+        // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
+        // karne lagega. Isse lock ON karte hi instantly protect milta hai.
         if (midiKitLockNumber != -1) {
-            // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi
-            // (e.g. app restart ke baad). Is case mein notes allow karo —
-            // lock ke saath paida hona chahiye, na notes block karna.
-            // Jab SPD-20 pehli Program Change bhejega tab se proper filtering shuru.
-            if (currentSpdKitNum != -1 && currentSpdKitNum != midiKitLockNumber) {
-                return;  // Yeh kit locked nahi → app chup rahega
+            if (currentSpdKitNum == -1 || currentSpdKitNum != midiKitLockNumber) {
+                return;  // Lock ON: sirf locked kit se app play karo
             }
         }
 
@@ -1022,16 +1022,22 @@ public class MainActivity extends Activity {
     public void handleProgramChangeMain(int program) {
         final int newKit = program + 1; // MIDI programs are 0-based
 
-        // ── Same-kit guard ────────────────────────────────────────────────────
-        // Cross-forward loop prevent karo: agar kit already same hai to skip karo.
-        // Ye tab fire hota hai jab LoopsActivity ne hamen forward kiya ho.
-        if (newKit == this.kitIndex && currentSpdKitNum == newKit) return;
-
         // ── Kit Lock: SPD-20 Pro ka current kit track karo ───────────────────
+        // Hamesha update karo (visibility se nahi banta) taaki lock check
+        // sahi rahe jab activity dobara visible ho.
         currentSpdKitNum = newKit;
 
-        // Agar lock ON hai → app ka internal kit mat badlo, sirf SPD track karo
-        // Lock button ka color update karo (locked kit pe green, baki pe orange)
+        // ── Independent activity routing ──────────────────────────────────────
+        // Sirf wahi activity apna kit badle jo abhi screen pe dikh rahi ho.
+        // Agar MainActivity background me hai to kit change ignore karo;
+        // LoopsActivity apna khud ka kit apni visibility ke hisaab se sambhalegi.
+        if (!isVisible) return;
+
+        // ── Same-kit guard ────────────────────────────────────────────────────
+        if (newKit == this.kitIndex) return;
+
+        // Agar lock ON hai → app ka internal kit mat badlo, sirf SPD track karo.
+        // Lock button ka color update karo (locked kit pe green, baki pe orange).
         if (midiKitLockNumber != -1) {
             final boolean onLockedKit = (newKit == midiKitLockNumber);
             runOnUiThread(() -> {
@@ -1056,14 +1062,10 @@ public class MainActivity extends Activity {
             // for kits 1–25 so "Intro Patch" etc. show correctly) and updates txtKitName.
         });
 
-        // ── Cross-forward to LoopsActivity ────────────────────────────────────
-        // Jab MainActivity MIDI se kit change receive kare, LoopsActivity ka
-        // loop channel bhi usi kit pe switch karo (agar wo alive hai).
-        // LoopsActivity ka same-kit guard double-processing prevent karega.
-        LoopsActivity loops = LoopsActivity.globalInstance;
-        if (loops != null) {
-            loops.runOnUiThread(() -> loops.handleProgramChange(program));
-        }
+        // NOTE: Cross-forward to LoopsActivity REMOVED.
+        // Har activity apna kit independently manage karti hai jis screen pe
+        // woh visible ho. Isse ek activity ka MIDI kit dono activities ko
+        // simultaneously change nahi karta — Bug 2 (cross-contamination) fix.
     }
 
     private void playPadSoundImmediate(int index) {

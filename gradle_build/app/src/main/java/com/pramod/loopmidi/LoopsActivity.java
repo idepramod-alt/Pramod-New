@@ -178,6 +178,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // fresh sample has no explicit user choice yet.
     private boolean[] padModeOverride = new boolean[8];
 
+    // ── MIDI rolling protection ───────────────────────────────────────────────
+    // System.currentTimeMillis() when each loop was last started via MIDI.
+    // Used in midiTriggerDrumPadImmediate to retrigger (instead of toggle-stop)
+    // when rapid rolls arrive before the loop has been playing 400 ms.
+    private long[] loopStartTimeMs = new long[8];
+
     // ── Loop Mode / Drum Mode (Roland SPD-SX Pro style) ──────────────────────
     // LOOP MODE (default): pads continuously loop their sample, tap again to stop
     // DRUM MODE: pads play one-shot on every hit, ALL pads can fire simultaneously
@@ -652,11 +658,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final int newKit = i + 1; // MIDI programs are 0-based
 
         // ── Kit Lock: SPD-20 Pro ka current kit track karo ───────────────────
-        // currentSpdKitNum volatile hai — MIDI thread pe safe write
+        // currentSpdKitNum volatile hai — MIDI thread pe safe write.
+        // Hamesha update karo (visibility se nahi banta) taaki lock check
+        // sahi rahe jab activity dobara visible ho.
         currentSpdKitNum = newKit;
 
-        // Agar lock ON hai → loop channel mat badlo, sirf SPD track karo
-        // Lock button ka color update karo (locked kit pe green, baki pe orange)
+        // ── Independent activity routing ──────────────────────────────────────
+        // Sirf wahi activity apna kit badle jo abhi screen pe dikh rahi ho.
+        // Agar LoopsActivity background me hai to kit change ignore karo;
+        // MainActivity apna khud ka kit apni visibility ke hisaab se sambhalegi.
+        if (!isVisible) return;
+
+        // Agar lock ON hai → loop channel mat badlo, sirf SPD track karo.
+        // Lock button ka color update karo (locked kit pe green, baki pe orange).
         if (midiKitLockNumber != -1) {
             final boolean onLockedKit = (newKit == midiKitLockNumber);
             runOnUiThread(() -> {
@@ -673,29 +687,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return; // Loop channel mat badlo jab lock ON ho
         }
 
-        // ── Same-kit guard: agar kit nahi badla (e.g. MIDI connect pe SPD apna
-        //    current program re-sends karta hai) to playing loops mat roko.
-        //    Sirf tab reload karo jab kit actually change ho.
-        //    Note: cross-forward guard bhi yahi kaam karta hai — agar MainActivity ne
-        //    pehle se hamen forward kiya aur hum ne apna kit set kar diya, to
-        //    duplicate call yahan return kar degi.
+        // ── Same-kit guard: agar kit nahi badla to playing loops mat roko ────
         if (newKit == this.loopChannelIndex) return;
 
         // ── UI thread pe run karo — MIDI thread se direct UI touch unsafe hai ─
-        // saveLoopsToMemory() aur loadCurrentKit() main thread pe chalne chahiye.
         runOnUiThread(() -> {
             saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
             this.loopChannelIndex = newKit;
             loadCurrentKit();
-
-            // ── Cross-forward to MainActivity ─────────────────────────────────
-            // Jab LoopsActivity MIDI se kit change receive kare, MainActivity ka
-            // drum kit bhi usi number pe switch karo (agar wo alive hai).
-            // MainActivity ka same-kit guard double-processing prevent karega.
-            MainActivity main = MainActivity.globalInstance;
-            if (main != null) {
-                main.handleProgramChangeMain(i);   // i is 0-based (program number)
-            }
+            // NOTE: Cross-forward to MainActivity REMOVED.
+            // Har activity apna kit independently manage karti hai jis screen pe
+            // woh visible ho. Isse ek activity ka MIDI kit dono activities ko
+            // simultaneously change nahi karta — Bug 2 (cross-contamination) fix.
         });
     }
 
@@ -3831,10 +3834,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Lock ON hai aur SPD-20 abhi locked kit pe nahi hai → note ignore karo.
         // SPD-20 apne original sounds khud bajayega; app chup rahega.
         // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi —
-        // tab tak notes allow karo (lock milne ke baad filtering shuru hogi).
-        if (midiKitLockNumber != -1 && currentSpdKitNum != -1
-                && currentSpdKitNum != midiKitLockNumber) {
-            return;
+        // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
+        // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
+        // karne lagega. Isse lock ON karte hi instantly protect milta hai.
+        if (midiKitLockNumber != -1) {
+            if (currentSpdKitNum == -1 || currentSpdKitNum != midiKitLockNumber) {
+                return;  // Lock ON: sirf locked kit se loops trigger karo
+            }
         }
 
         // ── MIDI Learn: capture incoming note for the pad being learned ────────
@@ -4320,16 +4326,34 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     try { engine.stopPad(index); } catch (Exception ignored) {}
                     try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index)); }
                     catch (Exception ignored) {}
+                    loopStartTimeMs[index] = System.currentTimeMillis();
                     // loopPlaying stays true
                 } else {
+                    // Rolling guard: if the loop just started < 400 ms ago, retrigger
+                    // (stop + restart from top) instead of toggling it off.  This prevents
+                    // rapid MIDI drum-rolls from cutting the loop on every alternate hit —
+                    // the natural MIDI "roll" pattern is many quick hits, not a deliberate
+                    // toggle-stop, so we treat short intervals as a retrigger.
+                    long elapsed = System.currentTimeMillis() - loopStartTimeMs[index];
                     try { engine.stopPad(index); } catch (Exception ignored) {}
-                    this.loopPlaying[index] = false;
+                    if (elapsed < 400) {
+                        // Retrigger: restart loop without stopping it perceptibly
+                        try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index)); }
+                        catch (Exception ignored) {}
+                        loopStartTimeMs[index] = System.currentTimeMillis();
+                        // loopPlaying stays true
+                    } else {
+                        // Deliberate toggle-off: loop was playing long enough to be intentional
+                        this.loopPlaying[index] = false;
+                        loopStartTimeMs[index] = 0;
+                    }
                 }
             } else {
                 try { engine.playLoopSP(index, vol,
                                         this.currentSpeed, effectivePitch(index)); }
                 catch (Exception ignored) {}
                 this.loopPlaying[index] = true;
+                loopStartTimeMs[index] = System.currentTimeMillis();
             }
             return true;
         }
