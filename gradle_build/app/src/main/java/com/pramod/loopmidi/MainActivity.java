@@ -62,6 +62,11 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_SINGLE_WAV = 5001;
     private static final int REQ_SAVE_FOLDER = 2001;
     private static final String TAG = "MainActivity";
+
+    // ── Global instance — LoopsActivity kit change forward ke liye ───────────
+    // Set in onCreate, cleared in onDestroy. Volatile for MIDI-thread visibility.
+    public static volatile MainActivity globalInstance = null;
+
     private View advControlBar;
     private AudioEngine.SampleData assistSoundId;
     private Uri assistSoundUri;
@@ -1017,6 +1022,11 @@ public class MainActivity extends Activity {
     public void handleProgramChangeMain(int program) {
         final int newKit = program + 1; // MIDI programs are 0-based
 
+        // ── Same-kit guard ────────────────────────────────────────────────────
+        // Cross-forward loop prevent karo: agar kit already same hai to skip karo.
+        // Ye tab fire hota hai jab LoopsActivity ne hamen forward kiya ho.
+        if (newKit == this.kitIndex && currentSpdKitNum == newKit) return;
+
         // ── Kit Lock: SPD-20 Pro ka current kit track karo ───────────────────
         currentSpdKitNum = newKit;
 
@@ -1045,6 +1055,15 @@ public class MainActivity extends Activity {
             // loadKitFromMemory already sets currentKitName (using preset-name fallback
             // for kits 1–25 so "Intro Patch" etc. show correctly) and updates txtKitName.
         });
+
+        // ── Cross-forward to LoopsActivity ────────────────────────────────────
+        // Jab MainActivity MIDI se kit change receive kare, LoopsActivity ka
+        // loop channel bhi usi kit pe switch karo (agar wo alive hai).
+        // LoopsActivity ka same-kit guard double-processing prevent karega.
+        LoopsActivity loops = LoopsActivity.globalInstance;
+        if (loops != null) {
+            loops.runOnUiThread(() -> loops.handleProgramChange(program));
+        }
     }
 
     private void playPadSoundImmediate(int index) {
@@ -1379,6 +1398,7 @@ public class MainActivity extends Activity {
 
     @Override // android.app.Activity
     protected void onCreate(Bundle savedInstanceState) {
+        MainActivity.globalInstance = this;   // cross-activity kit sync ke liye
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
         hideSystemUI();
@@ -3148,6 +3168,7 @@ public class MainActivity extends Activity {
 
     @Override // android.app.Activity
     protected void onDestroy() {
+        if (MainActivity.globalInstance == this) MainActivity.globalInstance = null;
         super.onDestroy();
         if (deactivateListener != null && deactivateRef != null) {
             deactivateRef.removeEventListener(deactivateListener);

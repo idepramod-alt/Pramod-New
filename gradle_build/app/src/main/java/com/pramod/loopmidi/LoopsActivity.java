@@ -652,6 +652,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final int newKit = i + 1; // MIDI programs are 0-based
 
         // ── Kit Lock: SPD-20 Pro ka current kit track karo ───────────────────
+        // currentSpdKitNum volatile hai — MIDI thread pe safe write
         currentSpdKitNum = newKit;
 
         // Agar lock ON hai → loop channel mat badlo, sirf SPD track karo
@@ -675,11 +676,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // ── Same-kit guard: agar kit nahi badla (e.g. MIDI connect pe SPD apna
         //    current program re-sends karta hai) to playing loops mat roko.
         //    Sirf tab reload karo jab kit actually change ho.
+        //    Note: cross-forward guard bhi yahi kaam karta hai — agar MainActivity ne
+        //    pehle se hamen forward kiya aur hum ne apna kit set kar diya, to
+        //    duplicate call yahan return kar degi.
         if (newKit == this.loopChannelIndex) return;
 
-        saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
-        this.loopChannelIndex = newKit;
-        loadCurrentKit();
+        // ── UI thread pe run karo — MIDI thread se direct UI touch unsafe hai ─
+        // saveLoopsToMemory() aur loadCurrentKit() main thread pe chalne chahiye.
+        runOnUiThread(() -> {
+            saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
+            this.loopChannelIndex = newKit;
+            loadCurrentKit();
+
+            // ── Cross-forward to MainActivity ─────────────────────────────────
+            // Jab LoopsActivity MIDI se kit change receive kare, MainActivity ka
+            // drum kit bhi usi number pe switch karo (agar wo alive hai).
+            // MainActivity ka same-kit guard double-processing prevent karega.
+            MainActivity main = MainActivity.globalInstance;
+            if (main != null) {
+                main.handleProgramChangeMain(i);   // i is 0-based (program number)
+            }
+        });
     }
 
     public void loadCurrentKit() {
