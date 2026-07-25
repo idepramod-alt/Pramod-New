@@ -474,7 +474,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // false here) still uses isMultiMode to decide whether a new one-shot hit
             // should stop other pads; real Drum Mode pads are excluded from this
             // cross-pad stop loop entirely.
-            if (!effectiveDrumMode && !this.isMultiMode) {
+            //
+            // MIDI multi-pad fix: when audio was already triggered by the MIDI fast path
+            // (midiTriggerDrumPadImmediate), skip cross-pad stopping entirely.  If the
+            // user physically hits multiple pads on the SPD-20 Pro at once, all of those
+            // Note-Ons have already started their audio before the UI thread runs this
+            // handler — stopping other pads here would silence pads the user deliberately
+            // triggered.  Single-pad (isMultiMode=false) enforcement is intentional only
+            // for touch input, not for MIDI polyphonic input.
+            if (!effectiveDrumMode && !this.isMultiMode && !audioAlreadyTriggered) {
                 // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
                 // one-shot hits never set loopPlaying=true, so gating this on that flag
                 // meant a still-ringing one-shot on another pad was NEVER actually choked
@@ -498,16 +506,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.loopPlaying[index]) {
                 this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
                 this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
-                // In single-pad mode, stop any other loops that were left running
-                if (!this.isMultiMode) {
-                    for (int i = 0; i < 8; i++) {
-                        if (i != index && this.loopPlaying[i]) {
-                            this.audioEngine.stopPad(i);
-                            this.loopPlaying[i] = false;
-                            updatePadLabel(i);
-                        }
-                    }
-                }
+                // MIDI multi-pad fix: do NOT enforce single-pad choke here.
+                // By the time this UI-thread handler runs, all simultaneously-triggered
+                // MIDI pads have already started their audio in midiTriggerDrumPadImmediate.
+                // Stopping other loopPlaying[] pads here would silence pads the user
+                // deliberately hit on the physical device at the same time.
+                // Touch single-pad mode (isMultiMode=false) is enforced in the touch
+                // path below (after the audioAlreadyTriggered early-return).
             } else {
                 this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
                 updatePadLabel(index);
