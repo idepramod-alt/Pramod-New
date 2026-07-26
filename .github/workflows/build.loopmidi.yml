@@ -1,25 +1,18 @@
-name: Build Pramod Octapad Loop MIDI APKs
+name: Build Pramod Octapad Loop MIDI APK
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - 'gradle_build/**'
-      - '.github/workflows/build.yml'
-  pull_request:
-    paths:
-      - 'gradle_build/**'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/build.loopmidi.yml'
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
-    name: Build debug APKs
+    name: Build Debug APKs (Full / Loops / Drums)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -38,7 +31,7 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK platform and build tools
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;25.2.9519653"
 
@@ -47,21 +40,27 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Generate Gradle wrapper
+      - name: Create Gradle wrapper in app project
         working-directory: gradle_build
         run: |
           gradle wrapper --gradle-version 8.11.1 --distribution-type bin
           chmod +x gradlew
 
-      - name: Build APKs
+      - name: Build Android APKs
         working-directory: gradle_build
         run: |
+          set -o pipefail
           ./gradlew assembleFullDebug assembleLoopsDebug assembleDrumsDebug \
             --no-daemon \
             --stacktrace \
-            --warning-mode all
+            --warning-mode all \
+            2>&1 | tee /tmp/build_loopmidi.log
 
-      - name: Prepare artifacts
+      - name: Show build log on failure
+        if: failure()
+        run: tail -n 400 /tmp/build_loopmidi.log || true
+
+      - name: Prepare APK artifacts
         if: success()
         run: |
           mkdir -p artifacts
@@ -72,11 +71,29 @@ jobs:
           cp "gradle_build/app/build/outputs/apk/drums/debug/app-drums-debug.apk" "artifacts/PramodOctapad-Drums-v1.0-debug-${SHORT}.apk"
           ls -lh artifacts/
 
-      - name: Upload APK artifacts
+      - name: Upload Full APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: pramod-octapad-apks
-          path: artifacts/*.apk
+          name: PramodOctapad-Full-Debug-APK
+          path: artifacts/PramodOctapad-Full-v1.0-debug-*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Loops APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PramodOctapad-Loops-Debug-APK
+          path: artifacts/PramodOctapad-Loops-v1.0-debug-*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Drums APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PramodOctapad-Drums-Debug-APK
+          path: artifacts/PramodOctapad-Drums-v1.0-debug-*.apk
           retention-days: 30
           if-no-files-found: error

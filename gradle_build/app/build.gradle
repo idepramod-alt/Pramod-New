@@ -106,4 +106,6 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.11.0'
     // Oboe — low-latency audio (required by native audio_engine.cpp via Prefab)
     implementation 'com.google.oboe:oboe:1.8.1'
+
+    testImplementation 'junit:junit:4.13.2'
 }

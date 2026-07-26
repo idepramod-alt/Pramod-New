@@ -482,12 +482,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // handler — stopping other pads here would silence pads the user deliberately
             // triggered.  Single-pad (isMultiMode=false) enforcement is intentional only
             // for touch input, not for MIDI polyphonic input.
-            if (!effectiveDrumMode && !this.isMultiMode && !audioAlreadyTriggered) {
-                // Always send stopPad() for every other pad, regardless of loopPlaying[i] —
-                // one-shot hits never set loopPlaying=true, so gating this on that flag
-                // meant a still-ringing one-shot on another pad was NEVER actually choked
-                // when a new pad was tapped, letting both sounds play together. stopPad()
-                // is a harmless no-op on the native side if that pad has nothing active.
+            if (MidiPlaybackPolicy.shouldEnforceSinglePadModeForMidi(this.isMultiMode, audioAlreadyTriggered, !effectiveDrumMode)) {
+                // One-shot hits should stop other active pads only when multi-play is OFF
+                // and the audio was not already fired by the MIDI fast path.
                 for (int i = 0; i < 8; i++) {
                     if (i != index) {
                         this.audioEngine.stopPad(i);
@@ -546,7 +543,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
-        if (this.isMultiMode) {
+        if (this.isMultiMode || audioAlreadyTriggered) {
             return;
         }
         // Single-pad mode: new pad starts → previous pad stops automatically
@@ -3698,8 +3695,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         } else {
             // ── CC → Pad trigger (user-defined CC-to-pad mapping) ─────────────
             // Kit Lock guard: agar lock ON hai aur SPD wrong kit pe hai → block
-            if (midiKitLockNumber != -1 && currentSpdKitNum != -1
-                    && currentSpdKitNum != midiKitLockNumber) {
+            if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
                 return;
             }
             if (value > 0) {
@@ -3842,10 +3838,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
         // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
         // karne lagega. Isse lock ON karte hi instantly protect milta hai.
-        if (midiKitLockNumber != -1) {
-            if (currentSpdKitNum == -1 || currentSpdKitNum != midiKitLockNumber) {
-                return;  // Lock ON: sirf locked kit se loops trigger karo
-            }
+        if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
+            return;  // Lock ON: sirf locked kit se loops trigger karo
         }
 
         // ── MIDI Learn: capture incoming note for the pad being learned ────────

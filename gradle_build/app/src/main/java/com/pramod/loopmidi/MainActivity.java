@@ -484,10 +484,8 @@ public class MainActivity extends Activity {
         // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
         // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
         // karne lagega. Isse lock ON karte hi instantly protect milta hai.
-        if (midiKitLockNumber != -1) {
-            if (currentSpdKitNum == -1 || currentSpdKitNum != midiKitLockNumber) {
-                return;  // Lock ON: sirf locked kit se app play karo
-            }
+        if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
+            return;  // Lock ON: sirf locked kit se app play karo
         }
 
         // ── MIDI Learn: capture incoming note for the pad being learned ────────
@@ -982,8 +980,7 @@ public class MainActivity extends Activity {
         } else {
             // ── CC → Pad trigger (user-defined CC-to-pad mapping) ─────────────
             // Kit Lock guard: agar lock ON hai aur SPD wrong kit pe hai → block
-            if (midiKitLockNumber != -1 && currentSpdKitNum != -1
-                    && currentSpdKitNum != midiKitLockNumber) {
+            if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
                 return;
             }
             if (value > 0) {
