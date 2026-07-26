@@ -8,10 +8,13 @@ public final class MidiPlaybackPolicy {
             boolean audioAlreadyTriggered,
             boolean isLoopModePath
     ) {
-        return isLoopModePath && !audioAlreadyTriggered && !isMultiMode;
+        // MIDI input should behave like single-trigger input when Multi-Play is off:
+        // - loop/one-shot mode: stop the previous pad on the next MIDI hit
+        // - drum mode: also stop the previous pad for MIDI so only one pad plays at a time
+        return !isMultiMode && (audioAlreadyTriggered || isLoopModePath);
     }
 
     public static boolean shouldBlockMidiPlaybackForLockedKit(int lockedKit, int currentSpdKit) {
-        return lockedKit != -1 && currentSpdKit != -1 && currentSpdKit != lockedKit;
+        return lockedKit != -1 && currentSpdKit != lockedKit;
     }
 }
