@@ -478,12 +478,8 @@ public class MainActivity extends Activity {
 
     public void handleMidiNoteOn(byte note, byte velocity) {
         // ── MIDI Kit Lock filter ──────────────────────────────────────────────
-        // Agar lock ON hai aur SPD-20 us kit pe nahi hai → note ignore karo
-        // (SPD-20 ka apna original kit sound uske khud ke output se bajega).
-        // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi —
-        // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
-        // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
-        // karne lagega. Isse lock ON karte hi instantly protect milta hai.
+        // When lock is ON, only the locked SPD-20 Pro kit should trigger app playback.
+        // All other kits are ignored, even if a different kit is currently selected.
         if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
             return;  // Lock ON: sirf locked kit se app play karo
         }

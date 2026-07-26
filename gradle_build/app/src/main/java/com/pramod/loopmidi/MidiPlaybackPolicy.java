@@ -15,6 +15,10 @@ public final class MidiPlaybackPolicy {
     }
 
     public static boolean shouldBlockMidiPlaybackForLockedKit(int lockedKit, int currentSpdKit) {
-        return lockedKit != -1 && currentSpdKit != lockedKit;
+        // Strict lock behavior:
+        // - if lock is OFF, allow playback
+        // - if lock is ON and current SPD kit is unknown, block playback for safety
+        // - if lock is ON and current SPD kit differs from the locked kit, block playback
+        return lockedKit != -1 && (currentSpdKit == -1 || currentSpdKit != lockedKit);
     }
 }

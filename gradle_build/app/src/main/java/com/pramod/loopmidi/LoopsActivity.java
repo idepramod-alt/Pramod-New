@@ -543,7 +543,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
-        if (this.isMultiMode || audioAlreadyTriggered) {
+        if (audioAlreadyTriggered) {
+            return;
+        }
+        // Touch-input single-pad mode: a new tap should stop the previous pad only
+        // when Multi-Play is OFF. MIDI input should always use the single-trigger
+        // behavior above and should not be affected by the Multi-Play checkbox.
+        if (this.isMultiMode) {
             return;
         }
         // Single-pad mode: new pad starts → previous pad stops automatically
@@ -3832,12 +3838,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void handleMidiNoteOn(byte note, byte velocity) {
         // ── MIDI Kit Lock filter ──────────────────────────────────────────────
-        // Lock ON hai aur SPD-20 abhi locked kit pe nahi hai → note ignore karo.
-        // SPD-20 apne original sounds khud bajayega; app chup rahega.
-        // currentSpdKitNum == -1 matlab pehle koi Program Change nahi aayi —
-        // jab lock ON ho aur SPD kit unknown ho, notes block karo (safe default).
-        // SPD-20 pe koi bhi kit press karne se pehli PC aayegi aur lock sahi kaam
-        // karne lagega. Isse lock ON karte hi instantly protect milta hai.
+        // When lock is ON, only the locked SPD-20 Pro kit should trigger app playback.
+        // All other kits are ignored, including when the current kit is unknown.
+        // This keeps the app fully gated to the chosen kit number.
         if (MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(midiKitLockNumber, currentSpdKitNum)) {
             return;  // Lock ON: sirf locked kit se loops trigger karo
         }
