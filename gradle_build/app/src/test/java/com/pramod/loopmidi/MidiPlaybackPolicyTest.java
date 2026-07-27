@@ -28,10 +28,20 @@ public class MidiPlaybackPolicyTest {
     }
 
     @Test
-    public void midiKitLockShouldBlockDifferentKitNumbersAndUnknownKits() {
+    public void midiKitLockShouldBlockDifferentKitNumbersButAllowUnknownKit() {
+        // Lock ON + different known kit → BLOCK (SPD is on a different kit)
         assertTrue(MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(3, 5));
+
+        // Lock ON + correct kit → ALLOW
         assertFalse(MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(3, 3));
-        assertTrue(MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(3, -1));
+
+        // Lock ON + unknown kit (-1) → ALLOW
+        // Live performance: app start pe SPD already locked kit pe hoga.
+        // Strict block se live pe sound nahi aata jab tak kit switch na ho.
+        // Lenient behavior: jab tak SPD koi aur kit send na kare, ALLOW karo.
+        assertFalse(MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(3, -1));
+
+        // Lock OFF → ALLOW (regardless of current SPD kit)
         assertFalse(MidiPlaybackPolicy.shouldBlockMidiPlaybackForLockedKit(-1, 5));
     }
 }

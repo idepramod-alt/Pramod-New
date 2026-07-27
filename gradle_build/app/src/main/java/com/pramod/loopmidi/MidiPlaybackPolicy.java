@@ -23,10 +23,15 @@ public final class MidiPlaybackPolicy {
     }
 
     public static boolean shouldBlockMidiPlaybackForLockedKit(int lockedKit, int currentSpdKit) {
-        // Strict lock behavior:
-        // - if lock is OFF, allow playback
-        // - if lock is ON and current SPD kit is unknown, block playback for safety
-        // - if lock is ON and current SPD kit differs from the locked kit, block playback
-        return lockedKit != -1 && (currentSpdKit == -1 || currentSpdKit != lockedKit);
+        // Live-performance lock behavior:
+        // - if lock is OFF (-1), always allow playback
+        // - if lock is ON and current SPD kit is unknown (-1), ALLOW playback.
+        //   Reason: app start pe SPD Program Change nahi aaya hoga, par SPD already
+        //   locked kit pe hoga. Strict block karne se live pe sound nahi aata jab tak
+        //   user SPD pe kit switch na kare — yeh unacceptable hai.
+        // - if lock is ON and current SPD kit matches locked kit, allow playback
+        // - if lock is ON and current SPD kit is a DIFFERENT known kit, block playback
+        //   (SPD apni original sounds bajata rahega, app silent rahega)
+        return lockedKit != -1 && currentSpdKit != -1 && currentSpdKit != lockedKit;
     }
 }
