@@ -87,7 +87,7 @@ public class MainActivity extends Activity {
     private Button btnSaveKit;
     private CheckBox chkDelay;
     private View fxControlBar;
-    private boolean isVisible;
+    private volatile boolean isVisible;
     // Velocity Sensitivity: when ON, MIDI velocity (0-127) scales the hit volume
     private boolean velocitySensitiveMode = false;
     private Button btnVelocity = null;

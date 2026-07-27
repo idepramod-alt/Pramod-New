@@ -98,7 +98,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private boolean isForceLogoutInProgress = false;
     private CheckBox chkMultiMode;
     private CheckBox chkOneShotMode;
-    private boolean isDrumOctapadMode = false;
+    private volatile boolean isDrumOctapadMode = false;
     // Drum-mode-only FX (ADV panel): choke + delay. Only affects real DRUM MODE
     // hits (effectiveDrumMode == true) — One-Shot and Loop mode keep their own
     // existing, untouched behavior.
@@ -121,7 +121,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private EditText editCustomBpm;
     private Equalizer globalEq;
     private PresetReverb globalReverb;
-    private boolean isVisible;
+    private volatile boolean isVisible;
     private MidiManager midiManager;
     private MidiOutputPort midiOutputPort;
     private MidiDevice openedMidiDevice;
@@ -146,8 +146,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private float currentPitch = 1.0f;
     private float masterVolume = 1.0f;
     private int reverbLevel = 0;
-    private boolean isMultiMode = false;
-    private boolean isOneShotMode = false;
+    private volatile boolean isMultiMode = false;
+    private volatile boolean isOneShotMode = false;
     private boolean editMode = false;
     private int selectedPad = 0;
     private Uri[] loopUris = new Uri[8];
@@ -187,7 +187,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ── Loop Mode / Drum Mode (Roland SPD-SX Pro style) ──────────────────────
     // LOOP MODE (default): pads continuously loop their sample, tap again to stop
     // DRUM MODE: pads play one-shot on every hit, ALL pads can fire simultaneously
-    private boolean isGlobalDrumMode = false;
+    private volatile boolean isGlobalDrumMode = false;
     private Button btnLoopMode = null;
     private Button btnDrumMode = null;
     // Velocity Sensitivity: when ON, MIDI velocity (0-127) scales the hit volume
@@ -4353,9 +4353,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } else {
                 // Single-pad mode: MIDI se naya loop start karne se pehle baaki pads stop karo
                 // jab tak Multi-Play button manually ON na ho tab tak multi-play nahi chalna chahiye.
+                //
+                // MULTI-PAD FIX: Sirf un pads ko stop karo jo 150ms se zyada pehle se chal rahe
+                // hain. Jo pad abhi-abhi (<150ms pehle) start hua hai, woh ek hi MIDI burst ke
+                // simultaneous hit se start hua hai — use rokna galat hoga. Is check ki wajah se
+                // ek saath kai pads hit karne pe sab ek saath bajenge, jabki manually ek-ke-baad-
+                // ek pad start karne pe purana pad ruk jaata hai (normal single-pad behaviour).
                 if (!this.isMultiMode) {
+                    long nowMs = System.currentTimeMillis();
                     for (int i = 0; i < 8; i++) {
-                        if (i != index && this.loopPlaying[i]) {
+                        if (i != index && this.loopPlaying[i]
+                                && (nowMs - loopStartTimeMs[i]) > 150) {
                             try { engine.stopPad(i); } catch (Exception ignored2) {}
                             this.loopPlaying[i] = false;
                             loopStartTimeMs[i] = 0;
