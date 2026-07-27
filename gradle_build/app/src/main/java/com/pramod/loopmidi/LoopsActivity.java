@@ -503,13 +503,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.loopPlaying[index]) {
                 this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
                 this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
-                // MIDI multi-pad fix: do NOT enforce single-pad choke here.
-                // By the time this UI-thread handler runs, all simultaneously-triggered
-                // MIDI pads have already started their audio in midiTriggerDrumPadImmediate.
-                // Stopping other loopPlaying[] pads here would silence pads the user
-                // deliberately hit on the physical device at the same time.
-                // Touch single-pad mode (isMultiMode=false) is enforced in the touch
-                // path below (after the audioAlreadyTriggered early-return).
+                // Jo pads midiTriggerDrumPadImmediate ne single-pad enforcement se stop kiye,
+                // unka UI label bhi sync karo (loopPlaying[] already false set ho chuka hai).
+                for (int i = 0; i < 8; i++) {
+                    if (i != index && !this.loopPlaying[i]) {
+                        updatePadLabel(i);
+                    }
+                }
             } else {
                 this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
                 updatePadLabel(index);
@@ -4351,6 +4351,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             } else {
+                // Single-pad mode: MIDI se naya loop start karne se pehle baaki pads stop karo
+                // jab tak Multi-Play button manually ON na ho tab tak multi-play nahi chalna chahiye.
+                if (!this.isMultiMode) {
+                    for (int i = 0; i < 8; i++) {
+                        if (i != index && this.loopPlaying[i]) {
+                            try { engine.stopPad(i); } catch (Exception ignored2) {}
+                            this.loopPlaying[i] = false;
+                            loopStartTimeMs[i] = 0;
+                        }
+                    }
+                }
                 try { engine.playLoopSP(index, vol,
                                         this.currentSpeed, effectivePitch(index)); }
                 catch (Exception ignored) {}
