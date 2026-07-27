@@ -616,22 +616,54 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 equalizer.setEnabled(true);
             }
             View decorView = getWindow().getDecorView();
-            SeekBar seekBar = (SeekBar) decorView.findViewWithTag("seekEqHi");
+            SeekBar seekBar  = (SeekBar) decorView.findViewWithTag("seekEqHi");
             SeekBar seekBar2 = (SeekBar) decorView.findViewWithTag("seekEqMid");
             SeekBar seekBar3 = (SeekBar) decorView.findViewWithTag("seekEqLow");
             if (seekBar == null || seekBar2 == null || seekBar3 == null) {
                 return;
             }
-            int progress = seekBar.getProgress();
-            int progress2 = seekBar2.getProgress();
-            short s = (short) ((progress - 50) * 300);        // ±15 dB range (was ±1.5 dB)
-            short progress3 = (short) ((seekBar3.getProgress() - 50) * 300);
-            Equalizer equalizer2 = this.globalEq;
-            equalizer2.setBandLevel((short) 0, progress3);
-            equalizer2.setBandLevel((short) 1, progress3);
-            equalizer2.setBandLevel((short) 2, (short) ((progress2 - 50) * 300));
-            equalizer2.setBandLevel((short) 3, s);
-            equalizer2.setBandLevel((short) 4, s);
+
+            // ── Device-adaptive scaling ──────────────────────────────────────────
+            // Android Equalizer uses MILLIBELS (1 dB = 1000 mB).
+            // Device support range varies:  ±1500 mB (±1.5 dB) on most devices,
+            // up to ±15000 mB (±15 dB) on some high-end hardware.
+            //
+            // BUG that was here: old formula used a fixed ×300 multiplier which
+            // produced ±15 000 mB.  On a typical device (max ±1500 mB) this means
+            // even 1-tick of slider movement from centre = 300 mB = 20% of the full
+            // range, so the EQ snaps to max-cut/boost after barely any movement —
+            // the "sound dab ya cut" symptom.
+            //
+            // FIX: query the device's actual min/max band level and map slider
+            //   0   → minLevel (max cut)
+            //   50  → 0 mB    (neutral / flat response)
+            //   100 → maxLevel (max boost)
+            // This distributes the full device EQ range smoothly across 100 steps.
+            short[] bandRange = this.globalEq.getBandLevelRange();
+            short minLevel = bandRange[0];
+            short maxLevel = bandRange[1];
+
+            // Clamp to sane defaults if the device returns garbage values
+            if (minLevel >= 0) minLevel = -1500;
+            if (maxLevel <= 0) maxLevel =  1500;
+
+            int hiProg  = seekBar.getProgress();
+            int midProg = seekBar2.getProgress();
+            int lowProg = seekBar3.getProgress();
+
+            // Linear map: 0..100 → minLevel..maxLevel
+            // At progress=50 (seekbar default): hiLevel = minLevel + 50*(range/100)
+            // Since range is symmetric around 0, that gives exactly 0 mB (flat). ✓
+            short hiLevel  = (short) Math.round(minLevel + hiProg  * (maxLevel - minLevel) / 100.0);
+            short midLevel = (short) Math.round(minLevel + midProg * (maxLevel - minLevel) / 100.0);
+            short lowLevel = (short) Math.round(minLevel + lowProg * (maxLevel - minLevel) / 100.0);
+
+            Equalizer eq = this.globalEq;
+            eq.setBandLevel((short) 0, lowLevel);   // band 0 → LOW
+            eq.setBandLevel((short) 1, lowLevel);   // band 1 → LOW
+            eq.setBandLevel((short) 2, midLevel);   // band 2 → MID
+            eq.setBandLevel((short) 3, hiLevel);    // band 3 → HIGH
+            eq.setBandLevel((short) 4, hiLevel);    // band 4 → HIGH
         } catch (Throwable th) {
         }
     }
