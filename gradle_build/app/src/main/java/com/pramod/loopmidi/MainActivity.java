@@ -1076,10 +1076,13 @@ public class MainActivity extends Activity {
                 AudioEngine.SampleData sampleData = this.samples[index];
                 if (sampleData != null && sampleData.loaded) {
                     float vol = this.padVolume[index] * velocityScale;
+                    // Keep MIDI drum playback polyphonic: each hit should trigger its own
+                    // voice immediately, without getting collapsed by the pad's global choke
+                    // settings in a way that suppresses simultaneous hits from the SPD-20 Pro.
                     this.audioEngine.playSample(index, sampleData, vol, this.padPitch[index], 0,
                         this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index],
                         this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index],
-                        this.padChokeGroup[index], 0.0f, 0.0f);
+                        0, 0.0f, 0.0f);
                 }
             }
             // Bank B: plays when bankMode is BANK_B or LAYER_AB — uses voice slots 8-15
@@ -1090,7 +1093,7 @@ public class MainActivity extends Activity {
                     this.audioEngine.playSample(index + 8, sampleDataB, volB, this.padPitchB[index], 0,
                         this.padDelayOnB[index], this.padDelayTimeB[index], this.padDelayLevelB[index],
                         this.padEqLowB[index], this.padEqMidB[index], this.padEqHighB[index],
-                        this.padChokeGroupB[index], 0.0f, 0.0f);
+                        0, 0.0f, 0.0f);
                 }
             }
         } catch (Exception e) {

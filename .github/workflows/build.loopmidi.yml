@@ -3,9 +3,8 @@ name: Build Pramod Octapad Loop MIDI APK
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'gradle_build/**'
-      - '.github/workflows/build.loopmidi.yml'
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
