@@ -4353,17 +4353,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             } else {
                 // Single-pad mode: MIDI se naya loop start karne se pehle baaki pads stop karo
                 // jab tak Multi-Play button manually ON na ho tab tak multi-play nahi chalna chahiye.
-                //
-                // MULTI-PAD FIX: Sirf un pads ko stop karo jo 150ms se zyada pehle se chal rahe
-                // hain. Jo pad abhi-abhi (<150ms pehle) start hua hai, woh ek hi MIDI burst ke
-                // simultaneous hit se start hua hai — use rokna galat hoga. Is check ki wajah se
-                // ek saath kai pads hit karne pe sab ek saath bajenge, jabki manually ek-ke-baad-
-                // ek pad start karne pe purana pad ruk jaata hai (normal single-pad behaviour).
                 if (!this.isMultiMode) {
-                    long nowMs = System.currentTimeMillis();
                     for (int i = 0; i < 8; i++) {
-                        if (i != index && this.loopPlaying[i]
-                                && (nowMs - loopStartTimeMs[i]) > 150) {
+                        if (i != index && this.loopPlaying[i]) {
                             try { engine.stopPad(i); } catch (Exception ignored2) {}
                             this.loopPlaying[i] = false;
                             loopStartTimeMs[i] = 0;
