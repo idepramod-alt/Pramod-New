@@ -617,7 +617,7 @@ public class MainActivity extends Activity {
                                   "🔊➖ Volume −1",        "🔊➕ Volume +1",
                                   "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
                                   "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
-                                  "⏹ Stop All",            "⏮ Kit Prev",            "⏭ Kit Next",
+                                  "⏹ Stop All",            "⏮ Kit −1 (Prev)",       "⏭ Kit +1 (Next)",
                                   "🔌 MIDI Connect"};
         final String[] keys   = {"midi_cc_volume",          "midi_cc_tempo",           "midi_cc_pitch",
                                   "midi_cc_volume_minus",    "midi_cc_volume_plus",
@@ -690,8 +690,9 @@ public class MainActivity extends Activity {
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Absolute: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26\n"
-                + "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85");
+        hint.setText("Absolute: Vol=7  Tempo=20  Pitch=21  Stop=123  Connect=26\n"
+                + "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85\n"
+                + "Kit: Prev(−1)=24  Next(+1)=25 — har ek press = 1 kit change");
         hint.setTextColor(0xFF666666);
         hint.setTextSize(9f);
         hint.setPadding(0, 12, 0, 0);

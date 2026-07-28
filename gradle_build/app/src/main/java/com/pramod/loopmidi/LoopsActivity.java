@@ -3362,7 +3362,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                   "🔊➖ Volume −1",        "🔊➕ Volume +1",
                                   "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
                                   "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
-                                  "⏹ Stop All",            "⏮ Loop Prev",           "⏭ Loop Next",
+                                  "⏹ Stop All",            "⏮ Kit −1 (Loop Prev)",  "⏭ Kit +1 (Loop Next)",
                                   "🔌 MIDI Connect"};
         final String[] keys   = {"midi_cc_volume",          "midi_cc_tempo",           "midi_cc_pitch",
                                   "midi_cc_volume_minus",    "midi_cc_volume_plus",
@@ -3851,7 +3851,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                            "Volume − (1 step)", "Volume + (1 step)",
                            "Tempo − (1 step)",  "Tempo + (1 step)",
                            "Pitch − (1 step)",  "Pitch + (1 step)",
-                           "Stop All", "Kit Prev", "Kit Next",
+                           "Stop All", "Kit −1 (Prev)", "Kit +1 (Next)",
                            "🔌 Connect Toggle (SPD btn)"};
         String[] keys   = {"midi_cc_volume",       "midi_cc_tempo",      "midi_cc_pitch",
                            "midi_cc_volume_minus",  "midi_cc_volume_plus",
