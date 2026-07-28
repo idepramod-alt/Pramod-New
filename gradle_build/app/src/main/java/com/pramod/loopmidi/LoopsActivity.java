@@ -3358,13 +3358,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         sub.setPadding(0, 4, 0, 14);
         root.addView(sub);
 
-        final String[] labels = {"🔊 Volume",      "⏱ Tempo / Speed", "🎵 Pitch",
-                                  "⏹ Stop All",    "⏮ Loop Prev",     "⏭ Loop Next",
+        final String[] labels = {"🔊 Volume (absolute)",  "⏱ Tempo / Speed (abs)", "🎵 Pitch (absolute)",
+                                  "🔊➖ Volume −1",        "🔊➕ Volume +1",
+                                  "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
+                                  "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
+                                  "⏹ Stop All",            "⏮ Loop Prev",           "⏭ Loop Next",
                                   "🔌 MIDI Connect"};
-        final String[] keys   = {"midi_cc_volume", "midi_cc_tempo",    "midi_cc_pitch",
-                                  "midi_cc_stop",   "midi_cc_kit_prev", "midi_cc_kit_next",
+        final String[] keys   = {"midi_cc_volume",          "midi_cc_tempo",           "midi_cc_pitch",
+                                  "midi_cc_volume_minus",    "midi_cc_volume_plus",
+                                  "midi_cc_tempo_minus",     "midi_cc_tempo_plus",
+                                  "midi_cc_pitch_minus",     "midi_cc_pitch_plus",
+                                  "midi_cc_stop",            "midi_cc_kit_prev",        "midi_cc_kit_next",
                                   "midi_cc_connect_toggle"};
-        final int[]    defs   = {7, 20, 21, 123, 24, 25, 26};
+        final int[]    defs   = {7, 20, 21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
 
         final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
         final Button[]                  learnBtns = new Button[labels.length];
@@ -3429,7 +3435,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Default: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26");
+        hint.setText("Absolute: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26\n" +
+                     "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85");
         hint.setTextColor(0xFF666666);
         hint.setTextSize(9f);
         hint.setPadding(0, 12, 0, 0);
@@ -3724,6 +3731,60 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (seekPitch != null) seekPitch.setProgress(prog);
             });
 
+        } else if (cc == prefs.getInt("midi_cc_volume_minus", 80) && value >= 64) {
+            // Volume − : ek baar CC milne par 1 count ghata
+            runOnUiThread(() -> {
+                if (seekMasterVolume != null) {
+                    int cur = seekMasterVolume.getProgress();
+                    if (cur > 0) seekMasterVolume.setProgress(cur - 1);
+                }
+            });
+
+        } else if (cc == prefs.getInt("midi_cc_volume_plus", 81) && value >= 64) {
+            // Volume + : ek baar CC milne par 1 count badha
+            runOnUiThread(() -> {
+                if (seekMasterVolume != null) {
+                    int cur = seekMasterVolume.getProgress();
+                    if (cur < seekMasterVolume.getMax()) seekMasterVolume.setProgress(cur + 1);
+                }
+            });
+
+        } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82) && value >= 64) {
+            // Tempo − : ek baar CC milne par 1 count ghata
+            runOnUiThread(() -> {
+                if (seekTempo != null) {
+                    int cur = seekTempo.getProgress();
+                    if (cur > 0) seekTempo.setProgress(cur - 1);
+                }
+            });
+
+        } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83) && value >= 64) {
+            // Tempo + : ek baar CC milne par 1 count badha
+            runOnUiThread(() -> {
+                if (seekTempo != null) {
+                    int cur = seekTempo.getProgress();
+                    if (cur < seekTempo.getMax()) seekTempo.setProgress(cur + 1);
+                }
+            });
+
+        } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84) && value >= 64) {
+            // Pitch − : ek baar CC milne par 1 count ghata
+            runOnUiThread(() -> {
+                if (seekPitch != null) {
+                    int cur = seekPitch.getProgress();
+                    if (cur > 0) seekPitch.setProgress(cur - 1);
+                }
+            });
+
+        } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85) && value >= 64) {
+            // Pitch + : ek baar CC milne par 1 count badha
+            runOnUiThread(() -> {
+                if (seekPitch != null) {
+                    int cur = seekPitch.getProgress();
+                    if (cur < seekPitch.getMax()) seekPitch.setProgress(cur + 1);
+                }
+            });
+
         } else if (cc == ccKitPrev && value >= 64) {
             runOnUiThread(() -> changeLoopBy(-1));
 
@@ -3786,12 +3847,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         root.addView(sub);
 
         // Helper: one row per control
-        String[] labels = {"Volume", "Tempo / Speed", "Pitch", "Stop All", "Kit Prev", "Kit Next",
+        String[] labels = {"Volume (absolute)", "Tempo / Speed (abs)", "Pitch (absolute)",
+                           "Volume − (1 step)", "Volume + (1 step)",
+                           "Tempo − (1 step)",  "Tempo + (1 step)",
+                           "Pitch − (1 step)",  "Pitch + (1 step)",
+                           "Stop All", "Kit Prev", "Kit Next",
                            "🔌 Connect Toggle (SPD btn)"};
-        String[] keys   = {"midi_cc_volume", "midi_cc_tempo", "midi_cc_pitch",
+        String[] keys   = {"midi_cc_volume",       "midi_cc_tempo",      "midi_cc_pitch",
+                           "midi_cc_volume_minus",  "midi_cc_volume_plus",
+                           "midi_cc_tempo_minus",   "midi_cc_tempo_plus",
+                           "midi_cc_pitch_minus",   "midi_cc_pitch_plus",
                            "midi_cc_stop", "midi_cc_kit_prev", "midi_cc_kit_next",
                            "midi_cc_connect_toggle"};
-        int[]    defs   = {7, 20, 21, 123, 24, 25, 26};
+        int[]    defs   = {7, 20, 21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
         android.widget.EditText[] edits = new android.widget.EditText[labels.length];
 
         for (int i = 0; i < labels.length; i++) {
@@ -3827,7 +3895,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("• CC 0-127. Default: Vol=7, Tempo=20, Pitch=21, Stop=123, Prev=24, Next=25, Connect=26\n" +
+        hint.setText("• Absolute CC 0-127: Vol=7, Tempo=20, Pitch=21, Stop=123, Prev=24, Next=25, Connect=26\n" +
+                     "• +/- (1 step each press): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85\n" +
                      "• Connect Toggle: SPD-20 Pro ke kisi button pe ye CC assign karo — live connect/disconnect hoga.\n" +
                      "• Program Change (Kit/Loop channel change) is always active, no CC needed.");
         hint.setTextColor(0xFF888888);

@@ -613,13 +613,19 @@ public class MainActivity extends Activity {
         sub.setPadding(0, 4, 0, 14);
         root.addView(sub);
 
-        final String[] labels = {"🔊 Volume",      "⏱ Tempo / Speed", "🎵 Pitch",
-                                  "⏹ Stop All",    "⏮ Kit Prev",      "⏭ Kit Next",
+        final String[] labels = {"🔊 Volume (absolute)",  "⏱ Tempo / Speed (abs)", "🎵 Pitch (absolute)",
+                                  "🔊➖ Volume −1",        "🔊➕ Volume +1",
+                                  "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
+                                  "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
+                                  "⏹ Stop All",            "⏮ Kit Prev",            "⏭ Kit Next",
                                   "🔌 MIDI Connect"};
-        final String[] keys   = {"midi_cc_volume", "midi_cc_tempo",    "midi_cc_pitch",
-                                  "midi_cc_stop",   "midi_cc_kit_prev", "midi_cc_kit_next",
+        final String[] keys   = {"midi_cc_volume",          "midi_cc_tempo",           "midi_cc_pitch",
+                                  "midi_cc_volume_minus",    "midi_cc_volume_plus",
+                                  "midi_cc_tempo_minus",     "midi_cc_tempo_plus",
+                                  "midi_cc_pitch_minus",     "midi_cc_pitch_plus",
+                                  "midi_cc_stop",            "midi_cc_kit_prev",        "midi_cc_kit_next",
                                   "midi_cc_connect_toggle"};
-        final int[]    defs   = {7, 20, 21, 123, 24, 25, 26};
+        final int[]    defs   = {7, 20, 21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
 
         final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
         final Button[]                  learnBtns = new Button[labels.length];
@@ -684,7 +690,8 @@ public class MainActivity extends Activity {
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Default: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26");
+        hint.setText("Absolute: Vol=7  Tempo=20  Pitch=21  Stop=123  Prev=24  Next=25  Connect=26\n"
+                + "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85");
         hint.setTextColor(0xFF666666);
         hint.setTextSize(9f);
         hint.setPadding(0, 12, 0, 0);
