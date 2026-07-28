@@ -508,7 +508,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < 8; i++) {
                 if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
             }
-            if (padIndex == -1) padIndex = noteVal % 8;
+            if (padIndex == -1) return; // note map mein match nahi — trigger mat karo
             final int finalPadIndex = padIndex;
             // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
             final float velScale = velocitySensitiveMode
