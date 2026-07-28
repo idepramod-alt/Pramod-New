@@ -503,30 +503,12 @@ public class MainActivity extends Activity {
         if (this.isVisible) {
             int padIndex = -1;
 
-            if (midiKeyMappingEnabled) {
-                // ── Custom mapping: scan midiNoteMap[] for a match ────────────
-                int noteVal = note & 0xFF;
-                for (int i = 0; i < 8; i++) {
-                    if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
-                }
-                if (padIndex == -1) padIndex = noteVal % 8;
-            } else {
-                // ── Original hardcoded mapping (unchanged / always safe) ──────
-                switch (note) {
-                    case 36: padIndex = 4; break;
-                    case 37: padIndex = 2; break;
-                    case 38: case 40: padIndex = 5; break;
-                    case 39: padIndex = 3; break;
-                    case 42: case 44: padIndex = 7; break;
-                    case 45:
-                    case 47:
-                    case 48:
-                    case 50: padIndex = 1; break;
-                    case 46: padIndex = 6; break;
-                    case 49: padIndex = 0; break;
-                }
-                if (padIndex == -1) padIndex = (note & 0xFF) % 8;
+            // ── Key Map: scan midiNoteMap[] for a match ────────────────────
+            int noteVal = note & 0xFF;
+            for (int i = 0; i < 8; i++) {
+                if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
             }
+            if (padIndex == -1) padIndex = noteVal % 8;
             final int finalPadIndex = padIndex;
             // ── Velocity scale: 30% min (soft) → 100% (hard) musical curve ──
             final float velScale = velocitySensitiveMode
@@ -613,19 +595,19 @@ public class MainActivity extends Activity {
         sub.setPadding(0, 4, 0, 14);
         root.addView(sub);
 
-        final String[] labels = {"🔊 Volume (absolute)",  "⏱ Tempo / Speed (abs)", "🎵 Pitch (absolute)",
+        final String[] labels = {"🎵 Pitch (absolute)",
                                   "🔊➖ Volume −1",        "🔊➕ Volume +1",
                                   "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
                                   "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
                                   "⏹ Stop All",            "⏮ Kit −1 (Prev)",       "⏭ Kit +1 (Next)",
                                   "🔌 MIDI Connect"};
-        final String[] keys   = {"midi_cc_volume",          "midi_cc_tempo",           "midi_cc_pitch",
+        final String[] keys   = {"midi_cc_pitch",
                                   "midi_cc_volume_minus",    "midi_cc_volume_plus",
                                   "midi_cc_tempo_minus",     "midi_cc_tempo_plus",
                                   "midi_cc_pitch_minus",     "midi_cc_pitch_plus",
                                   "midi_cc_stop",            "midi_cc_kit_prev",        "midi_cc_kit_next",
                                   "midi_cc_connect_toggle"};
-        final int[]    defs   = {7, 20, 21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
+        final int[]    defs   = {21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
 
         final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
         final Button[]                  learnBtns = new Button[labels.length];
@@ -690,7 +672,7 @@ public class MainActivity extends Activity {
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Absolute: Vol=7  Tempo=20  Pitch=21  Stop=123  Connect=26\n"
+        hint.setText("Pitch (absolute) CC 0-127: Pitch=21  Stop=123  Connect=26\n"
                 + "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85\n"
                 + "Kit: Prev(−1)=24  Next(+1)=25 — har ek press = 1 kit change");
         hint.setTextColor(0xFF666666);
@@ -935,8 +917,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        int ccVolume     = prefs.getInt("midi_cc_volume",          7);
-        int ccTempo      = prefs.getInt("midi_cc_tempo",          20);
         int ccPitch      = prefs.getInt("midi_cc_pitch",          21);
         int ccStop       = prefs.getInt("midi_cc_stop",          123);
         int ccKitPrev    = prefs.getInt("midi_cc_kit_prev",       24);
@@ -954,8 +934,8 @@ public class MainActivity extends Activity {
             // ── SPD-20 Pro button → connect / disconnect MIDI live ─────────────
             runOnUiThread(this::toggleMidiConnection);
 
-        } else if (cc == ccVolume || cc == ccTempo || cc == ccPitch) {
-            // Delegate volume/tempo/pitch controls to LoopsActivity (shared audio engine)
+        } else if (cc == ccPitch) {
+            // Delegate pitch control to LoopsActivity (shared audio engine)
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
