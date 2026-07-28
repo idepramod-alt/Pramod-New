@@ -55,7 +55,8 @@ public class AudioEngine {
     // Oboe with the device's exact hardware parameters (zero-resampling path).
     private native long nativeCreateAudioEngine(int nativeSR, int nativeBurst);
     private native void nativeDestroyAudioEngine();
-    private native void nativeLoadSample(int padIndex, short[] pcm, int length);
+    // frames = number of audio frames (samples per channel); channels = 1 or 2
+    private native void nativeLoadSample(int padIndex, short[] pcm, int frames, int channels);
     private native void nativePlaySample(int padIndex, float volume, float pitch,
                                          boolean delayOn, float delayMs, float delayLevel,
                                          float eqLow, float eqMid, float eqHigh,
@@ -224,7 +225,7 @@ public class AudioEngine {
                 Log.e(TAG, "loadWavFromUri: decode failed " + uri);
                 return null;
             }
-            nativeLoadSample(padIndex, pcm, pcm.length);
+            nativeLoadSample(padIndex, pcm, pcm.length / 2, 2);
             Log.i(TAG, "loadWavFromUri pad=" + padIndex + " frames=" + pcm.length);
             SampleData sd = new SampleData();
             sd.uri = uri; sd.soundId = padIndex; sd.loaded = true;
@@ -249,7 +250,7 @@ public class AudioEngine {
                 Log.e(TAG, "loadRawSound: decode failed resId=" + resId);
                 return null;
             }
-            nativeLoadSample(padIndex, pcm, pcm.length);
+            nativeLoadSample(padIndex, pcm, pcm.length / 2, 2);
             Log.i(TAG, "loadRawSound pad=" + padIndex + " frames=" + pcm.length);
             SampleData sd = new SampleData();
             sd.soundId = resId; sd.loaded = true;
@@ -273,7 +274,7 @@ public class AudioEngine {
                 Log.e(TAG, "loadWavFromAsset: decode failed path=" + assetPath);
                 return null;
             }
-            nativeLoadSample(padIndex, pcm, pcm.length);
+            nativeLoadSample(padIndex, pcm, pcm.length / 2, 2);
             Log.i(TAG, "loadWavFromAsset pad=" + padIndex + " frames=" + pcm.length);
             SampleData sd = new SampleData();
             sd.soundId = padIndex; sd.loaded = true;
@@ -609,24 +610,49 @@ public class AudioEngine {
             int frameCount     = pcmBytes.length / (bytesPerSample * ch);
             if (frameCount == 0) return null;
 
-            float[] mono = new float[frameCount];
+            // ── Decode to separate L/R float arrays (always stereo output) ────
+            // mono   (ch==1): L = R = sample
+            // stereo (ch==2): L = ch0, R = ch1
+            // >2ch          : L = ch0, R = ch1, extra channels discarded
+            float[] sterL = new float[frameCount];
+            float[] sterR = new float[frameCount];
             ByteBuffer pb = ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN);
             for (int i = 0; i < frameCount; i++) {
-                double sum = 0;
-                for (int c = 0; c < ch; c++) {
-                    if (pb.remaining() < bytesPerSample) break;
-                    sum += sampleToFloat(pb, bitsPerSample, audioFormat);
+                if (pb.remaining() < bytesPerSample) break;
+                float l = sampleToFloat(pb, bitsPerSample, audioFormat);
+                float r;
+                if (ch == 1) {
+                    r = l;
+                } else {
+                    r = (pb.remaining() >= bytesPerSample)
+                            ? sampleToFloat(pb, bitsPerSample, audioFormat) : l;
+                    // discard extra channels beyond L and R
+                    for (int c = 2; c < ch; c++) {
+                        if (pb.remaining() >= bytesPerSample)
+                            sampleToFloat(pb, bitsPerSample, audioFormat);
+                    }
                 }
-                mono[i] = (float)(sum / ch);
+                sterL[i] = l;
+                sterR[i] = r;
             }
 
-            // Resample to device native SR if needed
-            float[] resampled = (sampleRate == targetSampleRate)
-                    ? mono : linearResample(mono, sampleRate, targetSampleRate);
+            // Resample each channel to device native SR if needed
+            if (sampleRate != targetSampleRate) {
+                sterL = linearResample(sterL, sampleRate, targetSampleRate);
+                sterR = linearResample(sterR, sampleRate, targetSampleRate);
+            }
 
-            short[] out = floatToShort(resampled);
+            // Interleave: [L0,R0,L1,R1,...]
+            int outFrames = sterL.length;
+            float[] interleaved = new float[outFrames * 2];
+            for (int i = 0; i < outFrames; i++) {
+                interleaved[i * 2]     = sterL[i];
+                interleaved[i * 2 + 1] = sterR[i];
+            }
+
+            short[] out = floatToShort(interleaved);
             Log.i(TAG, "WAV decoded: " + channels + "ch " + sampleRate + "Hz "
-                    + bitsPerSample + "bit → " + out.length + " frames @ " + targetSampleRate);
+                    + bitsPerSample + "bit → " + outFrames + " stereo frames @ " + targetSampleRate);
             return out;
 
         } catch (Exception e) {
@@ -691,9 +717,10 @@ public class AudioEngine {
             codec.configure(trackFormat, null, null, 0);
             codec.start();
 
-            int   cap     = targetSampleRate * 30;
-            float[] accum = new float[cap];
-            int   count   = 0;
+            // accum: stereo interleaved [L0,R0,L1,R1,...]; count = frames decoded
+            int   capFrames = targetSampleRate * 30;
+            float[] accum   = new float[capFrames * 2];
+            int   count     = 0;
 
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             boolean sawInputEOS  = false;
@@ -728,9 +755,10 @@ public class AudioEngine {
                         ob.position(info.offset);
                         ob.limit(info.offset + info.size);
                         count = appendFrames(ob, meta[0], meta[2], accum, count);
-                        if (count >= accum.length - targetSampleRate) {
-                            float[] grown = new float[accum.length * 2];
-                            System.arraycopy(accum, 0, grown, 0, count);
+                        if (count >= capFrames - targetSampleRate) {
+                            capFrames *= 2;
+                            float[] grown = new float[capFrames * 2];
+                            System.arraycopy(accum, 0, grown, 0, count * 2);
                             accum = grown;
                         }
                     }
@@ -741,15 +769,17 @@ public class AudioEngine {
 
             if (count == 0) { Log.e(TAG, "MediaCodec: decoded 0 frames"); return null; }
 
-            float[] frames = (count == accum.length) ? accum : java.util.Arrays.copyOf(accum, count);
+            // Trim to exactly count stereo frames
+            float[] frames = (count * 2 == accum.length) ? accum
+                    : java.util.Arrays.copyOf(accum, count * 2);
             // Resample to device native SR (meta[1] is decoded SR)
             if (meta[1] != targetSampleRate) {
-                frames = linearResample(frames, meta[1], targetSampleRate);
+                frames = linearResampleStereo(frames, meta[1], targetSampleRate);
             }
 
             short[] out = floatToShort(frames);
             Log.i(TAG, "MediaCodec decoded: " + meta[0] + "ch " + meta[1] + "Hz "
-                    + mime + " → " + out.length + " frames @ " + targetSampleRate);
+                    + mime + " → " + (out.length / 2) + " stereo frames @ " + targetSampleRate);
             return out;
 
         } catch (Exception e) {
@@ -774,31 +804,46 @@ public class AudioEngine {
         return new int[]{ Math.max(1, ch), Math.max(1, sr), enc };
     }
 
+    /**
+     * Append decoded PCM frames into {@code accum} as stereo interleaved [L0,R0,L1,R1,...].
+     * {@code count} tracks the number of complete frames already written (not samples).
+     * Mono sources are expanded to stereo (L = R); >2-ch sources use ch0/ch1 and discard the rest.
+     */
     private int appendFrames(ByteBuffer ob, int ch, int encoding, float[] accum, int count) {
+        // accum layout: [L0, R0, L1, R1, ...]  — count * 2 samples used so far
         ob.order(ByteOrder.LITTLE_ENDIAN);
         switch (encoding) {
             case AudioFormat.ENCODING_PCM_FLOAT: {
-                while (ob.remaining() >= 4 * ch && count < accum.length) {
-                    float sum = 0;
-                    for (int c = 0; c < ch; c++) sum += ob.getFloat();
-                    accum[count++] = sum / ch;
+                while (ob.remaining() >= 4 * ch && count * 2 + 1 < accum.length) {
+                    float l = ob.getFloat();
+                    float r = (ch > 1) ? ob.getFloat() : l;
+                    for (int c = 2; c < ch; c++) { if (ob.remaining() >= 4) ob.getFloat(); }
+                    accum[count * 2]     = l;
+                    accum[count * 2 + 1] = r;
+                    count++;
                 }
                 break;
             }
             case AudioFormat.ENCODING_PCM_8BIT: {
-                while (ob.remaining() >= ch && count < accum.length) {
-                    float sum = 0;
-                    for (int c = 0; c < ch; c++) sum += ((ob.get() & 0xFF) - 128) / 128f;
-                    accum[count++] = sum / ch;
+                while (ob.remaining() >= ch && count * 2 + 1 < accum.length) {
+                    float l = ((ob.get() & 0xFF) - 128) / 128f;
+                    float r = (ch > 1) ? ((ob.get() & 0xFF) - 128) / 128f : l;
+                    for (int c = 2; c < ch; c++) { if (ob.remaining() >= 1) ob.get(); }
+                    accum[count * 2]     = l;
+                    accum[count * 2 + 1] = r;
+                    count++;
                 }
                 break;
             }
-            default: {
+            default: { // PCM_16BIT
                 ShortBuffer sb = ob.asShortBuffer();
-                while (sb.remaining() >= ch && count < accum.length) {
-                    float sum = 0;
-                    for (int c = 0; c < ch; c++) sum += sb.get() / 32768f;
-                    accum[count++] = sum / ch;
+                while (sb.remaining() >= ch && count * 2 + 1 < accum.length) {
+                    float l = sb.get() / 32768f;
+                    float r = (ch > 1) ? sb.get() / 32768f : l;
+                    for (int c = 2; c < ch; c++) { if (sb.remaining() >= 1) sb.get(); }
+                    accum[count * 2]     = l;
+                    accum[count * 2 + 1] = r;
+                    count++;
                 }
                 break;
             }
@@ -807,6 +852,27 @@ public class AudioEngine {
     }
 
     // ─── Shared utilities ────────────────────────────────────────────────────
+
+    /** Resample stereo interleaved float[] [L0,R0,L1,R1,...] from srcRate to dstRate. */
+    private float[] linearResampleStereo(float[] src, int srcRate, int dstRate) {
+        if (srcRate == dstRate || src.length == 0) return src;
+        int srcFrames  = src.length / 2;
+        double ratio   = (double) srcRate / dstRate;
+        int    outFrames = Math.max(1, (int)(srcFrames / ratio));
+        float[] out    = new float[outFrames * 2];
+        for (int i = 0; i < outFrames; i++) {
+            double pos = i * ratio;
+            int    idx = (int) pos;
+            float  frc = (float)(pos - idx);
+            float  aL  = (idx     < srcFrames) ? src[idx * 2]             : 0f;
+            float  aR  = (idx     < srcFrames) ? src[idx * 2 + 1]         : 0f;
+            float  bL  = (idx + 1 < srcFrames) ? src[(idx + 1) * 2]       : 0f;
+            float  bR  = (idx + 1 < srcFrames) ? src[(idx + 1) * 2 + 1]   : 0f;
+            out[i * 2]     = aL + frc * (bL - aL);
+            out[i * 2 + 1] = aR + frc * (bR - aR);
+        }
+        return out;
+    }
 
     private float[] linearResample(float[] src, int srcRate, int dstRate) {
         if (srcRate == dstRate || src.length == 0) return src;

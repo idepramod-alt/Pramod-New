@@ -128,9 +128,10 @@ static inline float biquadProcess(const BiquadCoeffs& c, BiquadState& s, float x
 
 // ─── Pad buffer (loaded samples) ─────────────────────────────────────────────
 struct PadBuffer {
-    std::vector<float> pcm;
+    std::vector<float> pcm;      // interleaved [L0,R0,L1,R1,...] when channels==2
     std::atomic<bool>  loaded{false};
     int                chokeGroup = 0;
+    int                channels   = 1;  // 1=mono, 2=stereo
 };
 
 // ─── Voice (audio-thread only after activation) ───────────────────────────────
@@ -155,9 +156,11 @@ struct Voice {
     int     delayOffset= 0;
     // 3-band tone EQ (low-shelf/mid-peak/high-shelf) — shapes the dry hit AND,
     // since the delay buffer stores the post-EQ output, the echoes too.
+    // Separate filter state per channel so L and R retain their stereo image.
     bool         eqOn = false;
     BiquadCoeffs eqLowC, eqMidC, eqHighC;
-    BiquadState  eqLowS, eqMidS, eqHighS;
+    BiquadState  eqLowSL, eqMidSL, eqHighSL;   // Left channel EQ state
+    BiquadState  eqLowSR, eqMidSR, eqHighSR;   // Right channel EQ state
     // OLA granular synthesis state
     int   grainStartA = 0;
     int   grainStartB = 0;
@@ -254,10 +257,16 @@ public:
     float loopSonicLastSpeed[LOOP_VOICES];
     float loopSonicLastPitch[LOOP_VOICES];
 
+    // Per-loop-voice channel count (1=mono, 2=stereo); matches the Sonic stream
+    // channel count and the loaded pad's channel count. Updated at CMD_PLAY.
+    int loopSonicChannels[LOOP_VOICES];
+
     // scratch buffers (audio thread only — no malloc in callback)
+    // ×2: stereo Sonic read/write uses loopCh samples per frame, so up to
+    // SCRATCH_SIZE frames × 2 ch = SCRATCH_SIZE*2 floats needed.
     static const int SCRATCH_SIZE = 4096;
-    float feedBuf[SCRATCH_SIZE];
-    float readBuf[SCRATCH_SIZE];
+    float feedBuf[SCRATCH_SIZE * 2];
+    float readBuf[SCRATCH_SIZE * 2];
 
     // ── Internal/system-audio recording (post-mix tap) ─────────────────────
     // Captures the engine's own mixed output (everything played through the
@@ -279,8 +288,9 @@ public:
             // play() call doesn't incur sonicCreateStream malloc on the audio
             // thread — eliminates the 2-5ms "first hit" delay for loop pads.
             loopSonic[i] = sonicCreateStream(48000, 1); // 48kHz default; reinit() updates SR
-            loopSonicLastSpeed[i] = 1.f;
-            loopSonicLastPitch[i] = 1.f;
+            loopSonicLastSpeed[i]  = 1.f;
+            loopSonicLastPitch[i]  = 1.f;
+            loopSonicChannels[i]   = 1;   // default mono; updated on CMD_PLAY
         }
     }
 
@@ -345,15 +355,18 @@ public:
                     }
                 }
 
-                float spd = loopSonicLastSpeed[vi];   // current (ramped) speed for feed calc
+                float spd    = loopSonicLastSpeed[vi];   // current (ramped) speed for feed calc
+                int   loopCh = loopSonicChannels[vi];    // 1=mono pad, 2=stereo pad
+                // Total frames in the pad buffer (pcm.size() / ch gives frame count)
+                size_t numFrm = pb.pcm.size() / (size_t)loopCh;
 
                 // ── Sonic feeding: top-up to feedTarget level ───────────────────
-                // feedTarget = numFrames*spd*3+512 (same as confirmed-working #103).
+                // feedTarget = numFrames*spd*3+512 (same as confirmed-working design).
                 // Only feed the DIFFERENCE (feedTarget - avail) to maintain this
                 // level. Unconditional feeding would overfill Sonic's output ring
                 // every callback → unbounded realloc growth on RT thread.
-                // Crossfade the last XFADE input samples at the loop boundary
-                // so the wrap-point click is inaudible (blends tail into head).
+                // Crossfade the last XFADE frames at the loop boundary so the
+                // wrap-point click is inaudible (blends tail frames into head frames).
                 static const int XFADE = 256;
                 int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
                 if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
@@ -363,24 +376,33 @@ public:
                     if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
 
                     int fed = 0;
-                    size_t pcmSize = pb.pcm.size();
                     while (fed < toFeed) {
-                        if (v.position >= pcmSize) v.position = 0;
+                        if (v.position >= numFrm) v.position = 0;
                         size_t pos = v.position;
-                        float s = pb.pcm[pos];
+                        // Read one stereo (or mono) frame from interleaved pad buffer
+                        float fL = pb.pcm[pos * (size_t)loopCh];
+                        float fR = (loopCh > 1) ? pb.pcm[pos * (size_t)loopCh + 1] : fL;
                         // Crossfade tail → head at loop boundary to eliminate wrap click
-                        if (pcmSize > (size_t)(XFADE * 2) && pos >= pcmSize - (size_t)XFADE) {
-                            size_t tailOff = pos - (pcmSize - XFADE); // 0 … XFADE-1
-                            float t = (float)tailOff / (float)XFADE;  // 0.0 → 1.0
-                            s = s * (1.0f - t) + pb.pcm[tailOff] * t; // blend tail→head
+                        if (numFrm > (size_t)(XFADE * 2) && pos >= numFrm - (size_t)XFADE) {
+                            size_t tailOff = pos - (numFrm - XFADE);
+                            float  t       = (float)tailOff / (float)XFADE;
+                            float  headL   = pb.pcm[tailOff * (size_t)loopCh];
+                            float  headR   = (loopCh > 1) ? pb.pcm[tailOff * (size_t)loopCh + 1] : headL;
+                            fL = fL * (1.f - t) + headL * t;
+                            fR = fR * (1.f - t) + headR * t;
                         }
-                        feedBuf[fed++] = s;
+                        feedBuf[fed * loopCh]     = fL;
+                        if (loopCh > 1) feedBuf[fed * loopCh + 1] = fR;
+                        fed++;
                         v.position++;
                     }
+                    // sonicWriteFloatToStream: 3rd arg = frames; Sonic multiplies
+                    // by numChannels internally to determine actual sample count.
                     sonicWriteFloatToStream(sonic, feedBuf, fed);
                 }
 
-                // Read smooth-ramped output from Sonic
+                // Read smooth-ramped output from Sonic.
+                // got = frames read; readBuf contains got * loopCh interleaved samples.
                 int got = sonicReadFloatFromStream(sonic, readBuf,
                                                    numFrames < SCRATCH_SIZE ? numFrames : SCRATCH_SIZE);
 
@@ -395,7 +417,15 @@ public:
                             break;
                         }
                     }
-                    out[i] += (i < got ? readBuf[i] : 0.f) * vol * v.envGain;
+                    float ev = vol * v.envGain;
+                    float L  = (i < got) ? readBuf[i * loopCh]                         : 0.f;
+                    float R  = (i < got) ? (loopCh > 1 ? readBuf[i * loopCh + 1] : L) : 0.f;
+                    if (nCh == 2) {
+                        out[2 * i]     += L * ev;
+                        out[2 * i + 1] += R * ev;
+                    } else {
+                        out[i] += (loopCh > 1 ? (L + R) * 0.5f : L) * ev;
+                    }
                 }
 
             } else {
@@ -411,19 +441,27 @@ public:
                 if (rate < 0.1f) rate = 0.1f;
                 if (rate > 4.0f) rate = 4.0f;
 
+                int    ch        = pb.channels;                         // 1 or 2
+                size_t numFrmPb  = pb.pcm.size() / (size_t)ch;         // total frames in pad
+
                 for (int i = 0; i < numFrames; i++) {
                     float fpos = (float)v.position + v.pitchAcc;
                     int   ipos = (int)fpos;
                     float frac = fpos - ipos;
 
-                    if ((size_t)ipos >= pb.pcm.size()) {
+                    if ((size_t)ipos >= numFrmPb) {
                         v.active.store(false, std::memory_order_relaxed);
                         break;
                     }
 
-                    float s0   = pb.pcm[ipos];
-                    float s1   = ((size_t)(ipos+1) < pb.pcm.size()) ? pb.pcm[ipos+1] : 0.f;
-                    float samp = s0 + frac * (s1 - s0);
+                    // Read interleaved stereo (or mono) sample pair at frame ipos
+                    float s0L = pb.pcm[(size_t)ipos * ch];
+                    float s0R = (ch > 1) ? pb.pcm[(size_t)ipos * ch + 1] : s0L;
+                    float s1L = ((size_t)(ipos + 1) < numFrmPb) ? pb.pcm[(size_t)(ipos + 1) * ch]     : 0.f;
+                    float s1R = (ch > 1 && (size_t)(ipos + 1) < numFrmPb)
+                                    ? pb.pcm[(size_t)(ipos + 1) * ch + 1] : s1L;
+                    float sampL = s0L + frac * (s1L - s0L);
+                    float sampR = s0R + frac * (s1R - s0R);
 
                     // Envelope
                     if (!v.releasing) {
@@ -435,45 +473,50 @@ public:
                             break;
                         }
                     }
-                    samp *= vol * v.envGain;
+                    float ev = vol * v.envGain;
+                    sampL *= ev;
+                    sampR *= ev;
 
-                    // 3-band tone EQ, applied before the delay tap so echoes
-                    // (which read back from this voice's own delay line,
-                    // written post-EQ below) carry the same tonal shaping as
-                    // the dry hit.
+                    // 3-band tone EQ — separate biquad state per channel so L/R
+                    // retain their independent filter history (preserves stereo image).
                     if (v.eqOn) {
-                        samp = biquadProcess(v.eqLowC,  v.eqLowS,  samp);
-                        samp = biquadProcess(v.eqMidC,  v.eqMidS,  samp);
-                        samp = biquadProcess(v.eqHighC, v.eqHighS, samp);
+                        sampL = biquadProcess(v.eqLowC,  v.eqLowSL,  sampL);
+                        sampL = biquadProcess(v.eqMidC,  v.eqMidSL,  sampL);
+                        sampL = biquadProcess(v.eqHighC, v.eqHighSL, sampL);
+                        sampR = biquadProcess(v.eqLowC,  v.eqLowSR,  sampR);
+                        sampR = biquadProcess(v.eqMidC,  v.eqMidSR,  sampR);
+                        sampR = biquadProcess(v.eqHighC, v.eqHighSR, sampR);
                     }
 
-                    // Delay tap — single repeat echo (no feedback chain): only one
-                    // echo at delayOffset is added, at delayLevel amplitude. No
-                    // further decaying repeats are generated. Uses THIS voice's
-                    // own private delay line (delayBuf[vi]) — never a buffer
-                    // shared with other pads/voices, so a pad with delay OFF
-                    // can never pick up an echo of a different pad's hit, and
-                    // one pad's delay tail can't be mistaken for another pad's
-                    // sound being cut off / choked.
-                    int dw = delayWrite[vi];
-                    delayBuf[vi][(dw + i) % DELAY_BUF_SIZE] = samp;
+                    // Delay: write mono mix (L+R)/2 to delay line so the delay
+                    // buffer size stays at its current single-channel allocation.
+                    // Echo is added equally to both output channels — musically correct.
+                    int   dw        = delayWrite[vi];
+                    float sampMono  = (sampL + sampR) * 0.5f;
+                    delayBuf[vi][(dw + i) % DELAY_BUF_SIZE] = sampMono;
 
-                    if (v.delayOn && v.delayOffset > 0) {
-                        int offset = v.delayOffset;
-                        if (offset < DELAY_BUF_SIZE) {
-                            int ri = ((dw + i - offset) % DELAY_BUF_SIZE + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
-                            samp += delayBuf[vi][ri] * v.delayLevel;
-                        }
+                    float echoMono = 0.f;
+                    if (v.delayOn && v.delayOffset > 0 && v.delayOffset < DELAY_BUF_SIZE) {
+                        int ri = ((dw + i - v.delayOffset) % DELAY_BUF_SIZE
+                                  + DELAY_BUF_SIZE) % DELAY_BUF_SIZE;
+                        echoMono = delayBuf[vi][ri] * v.delayLevel;
                     }
 
-                    out[i] += samp;
+                    // Mix to output — voices write directly to their L/R positions;
+                    // no post-loop mono→stereo copy needed.
+                    if (nCh == 2) {
+                        out[2 * i]     += sampL + echoMono;
+                        out[2 * i + 1] += sampR + echoMono;
+                    } else {
+                        out[i] += sampMono + echoMono;
+                    }
 
-                    // Advance position by combined speed×pitch rate
+                    // Advance position (in frames) by combined speed×pitch rate
                     v.pitchAcc += rate - 1.f;
                     int extra = (int)v.pitchAcc;
                     v.pitchAcc -= extra;
                     v.position += 1 + extra;
-                    if (v.position >= pb.pcm.size()) {
+                    if (v.position >= numFrmPb) {
                         v.active.store(false, std::memory_order_relaxed);
                         break;
                     }
@@ -487,35 +530,36 @@ public:
             }
         }
 
-        // Soft saturation (tanh) on mono mix before stereo expansion.
-        for (int i = 0; i < numFrames; i++) {
-            out[i] = tanhf(out[i]);
+        // Soft saturation (tanh) applied to the full output buffer.
+        // Voices now write directly into stereo positions (out[2*i]/out[2*i+1]),
+        // so saturate all nCh samples per frame together.
+        {
+            int outSamples = numFrames * nCh;
+            for (int i = 0; i < outSamples; i++) {
+                out[i] = tanhf(out[i]);
+            }
         }
 
         // ── Internal/system-audio recording tap ─────────────────────────────
-        // Runs AFTER saturation but BEFORE stereo expansion so the mono mix
-        // is captured cleanly. recordBuffer is preallocated (startRecording),
-        // so this only ever writes into already-owned memory — no malloc,
-        // no lock, safe for the realtime thread.
+        // Captures a mono downmix (L+R)/2 so the existing mono WAV writer
+        // and track-length accounting remain correct regardless of stream channels.
         if (recordActive.load(std::memory_order_relaxed)) {
             size_t pos = recordWritePos.load(std::memory_order_relaxed);
             size_t cap = recordCapacity;
             float* dst = recordBuffer.data();
             int n = numFrames;
             if (pos + (size_t)n > cap) n = (int)(cap > pos ? cap - pos : 0);
-            for (int i = 0; i < n; i++) dst[pos + i] = out[i];
+            if (nCh == 2) {
+                for (int i = 0; i < n; i++)
+                    dst[pos + i] = (out[2 * i] + out[2 * i + 1]) * 0.5f;
+            } else {
+                for (int i = 0; i < n; i++) dst[pos + i] = out[i];
+            }
             recordWritePos.store(pos + (size_t)n, std::memory_order_relaxed);
         }
-
-        // ── Mono → Stereo expansion (only when stream opened as 2ch) ─────────
-        // All voices mix into out[0..numFrames-1]. Expand in-place (backwards
-        // so no source sample is clobbered before it is copied).
-        if (nCh == 2) {
-            for (int i = numFrames - 1; i >= 0; i--) {
-                out[2 * i]     = out[i];
-                out[2 * i + 1] = out[i];
-            }
-        }
+        // NOTE: The old "Mono → Stereo expansion" block has been removed.
+        // Voices now write directly to out[2*i]/out[2*i+1] during mixing,
+        // preserving each pad's true stereo image from the decoded source.
 
         return oboe::DataCallbackResult::Continue;
     }
@@ -565,12 +609,14 @@ public:
             int vi;
             if (c.isLoop) {
                 vi = c.padIdx % LOOP_VOICES;
-                // Destroy + create gives a completely fresh Sonic stream with
-                // clean WSOLA/PSOLA internal state at each loop start.
-                // sonicCreateStream is a small malloc (~1-2 KB) that happens
-                // once at loop start — not in the speed/pitch update hot path.
+                // Match Sonic's channel count to the loaded pad so stereo pads
+                // get interleaved L/R output from Sonic (not mono dup).
+                int loopCh = (c.padIdx >= 0 && c.padIdx < MAX_PADS)
+                             ? pads[c.padIdx].channels : 1;
+                if (loopCh < 1 || loopCh > 2) loopCh = 1;
                 if (loopSonic[vi]) sonicDestroyStream(loopSonic[vi]);
-                loopSonic[vi] = sonicCreateStream(sampleRate, 1);
+                loopSonic[vi]          = sonicCreateStream(sampleRate, loopCh);
+                loopSonicChannels[vi]  = loopCh;
                 if (loopSonic[vi]) {
                     sonicSetSpeed(loopSonic[vi], c.speed);
                     sonicSetPitch(loopSonic[vi], c.pitch);
@@ -610,7 +656,9 @@ public:
                 v.eqMidC  = makePeaking  (sr2, 1000.f, c.eqMid, 0.9f);
                 v.eqHighC = makeHighShelf(sr2, 6000.f, c.eqHigh);
             }
-            v.eqLowS = BiquadState{}; v.eqMidS = BiquadState{}; v.eqHighS = BiquadState{};
+            v.eqLowSL = v.eqLowSR = BiquadState{};
+            v.eqMidSL = v.eqMidSR = BiquadState{};
+            v.eqHighSL = v.eqHighSR = BiquadState{};
 
             // Use actual sampleRate for envelope ramp calculation
             const float sr = (float)sampleRate;
@@ -797,8 +845,9 @@ public:
             loopSonic[i] = sonicCreateStream(sampleRate, 1);
             // Reset last-applied values so the smooth ramp in the render loop
             // fires correctly after an Oboe error/restart cycle.
-            loopSonicLastSpeed[i] = 1.0f;
-            loopSonicLastPitch[i] = 1.0f;
+            loopSonicLastSpeed[i]  = 1.0f;
+            loopSonicLastPitch[i]  = 1.0f;
+            loopSonicChannels[i]   = 1; // reset; updated at next CMD_PLAY
         }
 
         oboe::AudioStreamBuilder b;
@@ -869,15 +918,20 @@ public:
         initLocked(restoreSR, restoreBurst);
     }
 
-    void loadSample(int padIdx, const short* data, int len) {
-        if (padIdx < 0 || padIdx >= MAX_PADS || !data || len <= 0) return;
-        std::vector<float> buf(len);
-        for (int i = 0; i < len; i++)
+    // numFrames = number of audio frames (samples per channel).
+    // channels  = 1 (mono) or 2 (stereo); data is interleaved [L0,R0,L1,R1,...].
+    void loadSample(int padIdx, const short* data, int numFrames, int channels) {
+        if (padIdx < 0 || padIdx >= MAX_PADS || !data || numFrames <= 0) return;
+        channels = (channels < 1) ? 1 : (channels > 2 ? 2 : channels);
+        int totalSamples = numFrames * channels;
+        std::vector<float> buf(totalSamples);
+        for (int i = 0; i < totalSamples; i++)
             buf[i] = data[i] / 32768.0f;
+        pads[padIdx].channels = channels;
         pads[padIdx].loaded.store(false, std::memory_order_release);
         pads[padIdx].pcm = std::move(buf);
         pads[padIdx].loaded.store(true,  std::memory_order_release);
-        LOGI("Loaded pad %d: %d samples", padIdx, len);
+        LOGI("Loaded pad %d: %d frames %dch", padIdx, numFrames, channels);
     }
 
     // speed: time-stretch factor (1.0 = normal speed, independent of pitch)
@@ -989,11 +1043,11 @@ Java_com_pramod_loopmidi_AudioEngine_nativeDestroyAudioEngine(JNIEnv* env, jobje
 
 JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeLoadSample(
-        JNIEnv* env, jobject obj, jint padIdx, jshortArray arr, jint len) {
+        JNIEnv* env, jobject obj, jint padIdx, jshortArray arr, jint numFrames, jint channels) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (!e) return;
     jshort* data = env->GetShortArrayElements(arr, nullptr);
-    e->loadSample((int)padIdx, (const short*)data, (int)len);
+    e->loadSample((int)padIdx, (const short*)data, (int)numFrames, (int)channels);
     env->ReleaseShortArrayElements(arr, data, JNI_ABORT);
 }
 
