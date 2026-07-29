@@ -3687,64 +3687,102 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             runOnUiThread(this::toggleMidiConnection);
 
         } else if (cc == ccPitch) {
-            // CC 0-127 → seekPitch 0-200 (100 = 1.0x = normal pitch)
-            final int prog = Math.round(value * 200f / 127f);
+            // CC 0-127 → pitch 0.1x-2.0x (center 63-64 = ~1.0x)
+            final float newPitch = Math.max(0.1f, value * 2.0f / 127f);
             runOnUiThread(() -> {
+                // Directly update field + UI — do NOT rely on seekbar listener chain
+                currentPitch = newPitch;
+                int prog = Math.round(newPitch * 100f); // seekPitch max=200, 100=1.0x
                 if (seekPitch != null) seekPitch.setProgress(prog);
+                if (txtPitchVal != null)
+                    txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", currentPitch));
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_volume_minus", 80) && value > 0) {
-            // Volume − : ek baar CC milne par 1 count ghata
+            // Volume − : directly decrement masterVolume/padVolume + apply to engine
             runOnUiThread(() -> {
-                if (seekMasterVolume != null) {
-                    int cur = seekMasterVolume.getProgress();
-                    if (cur > 0) seekMasterVolume.setProgress(cur - 1);
+                if (isMasterVolumeMode) {
+                    masterVolume = Math.max(0f, masterVolume - 0.01f);
+                    prefs.edit().putFloat("loop_master_volume", masterVolume).apply();
+                    if (seekMasterVolume != null)
+                        seekMasterVolume.setProgress((int)(masterVolume * 100f));
+                    if (txtMasterVolVal != null)
+                        txtMasterVolVal.setText((int)(masterVolume * 100f) + "%");
+                } else {
+                    int pad = selectedPad;
+                    padVolume[pad] = Math.max(0f, padVolume[pad] - 0.01f);
+                    prefs.edit().putFloat("pad_volume_" + pad, padVolume[pad]).apply();
+                    if (seekMasterVolume != null)
+                        seekMasterVolume.setProgress((int)(padVolume[pad] * 100f));
+                    if (txtMasterVolVal != null)
+                        txtMasterVolVal.setText((int)(padVolume[pad] * 100f) + "%");
                 }
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_volume_plus", 81) && value > 0) {
-            // Volume + : ek baar CC milne par 1 count badha
+            // Volume + : directly increment masterVolume/padVolume + apply to engine
             runOnUiThread(() -> {
-                if (seekMasterVolume != null) {
-                    int cur = seekMasterVolume.getProgress();
-                    if (cur < seekMasterVolume.getMax()) seekMasterVolume.setProgress(cur + 1);
+                if (isMasterVolumeMode) {
+                    masterVolume = Math.min(1f, masterVolume + 0.01f);
+                    prefs.edit().putFloat("loop_master_volume", masterVolume).apply();
+                    if (seekMasterVolume != null)
+                        seekMasterVolume.setProgress((int)(masterVolume * 100f));
+                    if (txtMasterVolVal != null)
+                        txtMasterVolVal.setText((int)(masterVolume * 100f) + "%");
+                } else {
+                    int pad = selectedPad;
+                    padVolume[pad] = Math.min(1f, padVolume[pad] + 0.01f);
+                    prefs.edit().putFloat("pad_volume_" + pad, padVolume[pad]).apply();
+                    if (seekMasterVolume != null)
+                        seekMasterVolume.setProgress((int)(padVolume[pad] * 100f));
+                    if (txtMasterVolVal != null)
+                        txtMasterVolVal.setText((int)(padVolume[pad] * 100f) + "%");
                 }
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82) && value > 0) {
-            // Tempo − : ek baar CC milne par 1 count ghata
+            // Tempo − : directly decrement currentSpeed + apply to engine
             runOnUiThread(() -> {
-                if (seekTempo != null) {
-                    int cur = seekTempo.getProgress();
-                    if (cur > 0) seekTempo.setProgress(cur - 1);
-                }
+                currentSpeed = Math.max(0.1f, currentSpeed - 0.01f);
+                if (seekTempo != null) seekTempo.setProgress((int)(currentSpeed * 100f));
+                if (txtTempoVal != null)
+                    txtTempoVal.setText(String.format(java.util.Locale.US,
+                        "%.0f BPM (%.1fx)", currentSpeed * 120f, currentSpeed));
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83) && value > 0) {
-            // Tempo + : ek baar CC milne par 1 count badha
+            // Tempo + : directly increment currentSpeed + apply to engine
             runOnUiThread(() -> {
-                if (seekTempo != null) {
-                    int cur = seekTempo.getProgress();
-                    if (cur < seekTempo.getMax()) seekTempo.setProgress(cur + 1);
-                }
+                currentSpeed = Math.min(2f, currentSpeed + 0.01f);
+                if (seekTempo != null) seekTempo.setProgress((int)(currentSpeed * 100f));
+                if (txtTempoVal != null)
+                    txtTempoVal.setText(String.format(java.util.Locale.US,
+                        "%.0f BPM (%.1fx)", currentSpeed * 120f, currentSpeed));
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84) && value > 0) {
-            // Pitch − : ek baar CC milne par 1 count ghata
+            // Pitch − : directly decrement currentPitch + apply to engine
             runOnUiThread(() -> {
-                if (seekPitch != null) {
-                    int cur = seekPitch.getProgress();
-                    if (cur > 0) seekPitch.setProgress(cur - 1);
-                }
+                currentPitch = Math.max(0.1f, currentPitch - 0.01f);
+                if (seekPitch != null) seekPitch.setProgress((int)(currentPitch * 100f));
+                if (txtPitchVal != null)
+                    txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", currentPitch));
+                updateAllActiveLoops();
             });
 
         } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85) && value > 0) {
-            // Pitch + : ek baar CC milne par 1 count badha
+            // Pitch + : directly increment currentPitch + apply to engine
             runOnUiThread(() -> {
-                if (seekPitch != null) {
-                    int cur = seekPitch.getProgress();
-                    if (cur < seekPitch.getMax()) seekPitch.setProgress(cur + 1);
-                }
+                currentPitch = Math.min(2f, currentPitch + 0.01f);
+                if (seekPitch != null) seekPitch.setProgress((int)(currentPitch * 100f));
+                if (txtPitchVal != null)
+                    txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", currentPitch));
+                updateAllActiveLoops();
             });
 
         } else if (cc == ccKitPrev && value > 0) {
