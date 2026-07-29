@@ -934,12 +934,18 @@ public class MainActivity extends Activity {
             // ── SPD-20 Pro button → connect / disconnect MIDI live ─────────────
             runOnUiThread(this::toggleMidiConnection);
 
-        } else if (cc == ccPitch) {
-            // Delegate pitch control to LoopsActivity (shared audio engine)
+        } else if (cc == ccPitch
+                || cc == prefs.getInt("midi_cc_pitch_minus",   84)
+                || cc == prefs.getInt("midi_cc_pitch_plus",    85)
+                || cc == prefs.getInt("midi_cc_volume_minus",  80)
+                || cc == prefs.getInt("midi_cc_volume_plus",   81)
+                || cc == prefs.getInt("midi_cc_tempo_minus",   82)
+                || cc == prefs.getInt("midi_cc_tempo_plus",    83)) {
+            // Delegate pitch abs + all +/- controls to LoopsActivity
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
-        } else if (cc == ccKitPrev && value >= 64) {
+        } else if (cc == ccKitPrev && value > 0) {
             // Kit Prev — Bank A
             runOnUiThread(() -> {
                 if (kitIndex > 1) {
@@ -951,7 +957,7 @@ public class MainActivity extends Activity {
                 }
             });
 
-        } else if (cc == ccKitNext && value >= 64) {
+        } else if (cc == ccKitNext && value > 0) {
             // Kit Next — Bank A
             runOnUiThread(() -> {
                 saveKitToMemory(kitIndex);
@@ -1012,13 +1018,7 @@ public class MainActivity extends Activity {
         // Sirf wahi activity apna kit badle jo abhi screen pe dikh rahi ho.
         // Agar MainActivity background me hai to kit change ignore karo;
         // LoopsActivity apna khud ka kit apni visibility ke hisaab se sambhalegi.
-        if (!isVisible) return;
-
-        // ── Same-kit guard ────────────────────────────────────────────────────
-        if (newKit == this.kitIndex) return;
-
-        // Agar lock ON hai → app ka internal kit mat badlo, sirf SPD track karo.
-        // Lock button ka color update karo (locked kit pe green, baki pe orange).
+        // Kit Lock UI update: lock button ka color batata hai SPD ka current kit
         if (midiKitLockNumber != -1) {
             final boolean onLockedKit = (newKit == midiKitLockNumber);
             runOnUiThread(() -> {
@@ -1032,21 +1032,8 @@ public class MainActivity extends Activity {
                     }
                 }
             });
-            return; // App ka kit mat badlo jab lock ON ho
         }
-
-        runOnUiThread(() -> {
-            saveKitToMemory(kitIndex);
-            kitIndex = Math.max(1, newKit);
-            loadKitFromMemory(kitIndex);
-            // loadKitFromMemory already sets currentKitName (using preset-name fallback
-            // for kits 1–25 so "Intro Patch" etc. show correctly) and updates txtKitName.
-        });
-
-        // NOTE: Cross-forward to LoopsActivity REMOVED.
-        // Har activity apna kit independently manage karti hai jis screen pe
-        // woh visible ho. Isse ek activity ka MIDI kit dono activities ko
-        // simultaneously change nahi karta — Bug 2 (cross-contamination) fix.
+        // Program Change se kit change nahi hoga — sirf CC map se kit badlega.
     }
 
     private void playPadSoundImmediate(int index) {

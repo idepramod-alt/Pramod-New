@@ -707,10 +707,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Sirf wahi activity apna kit badle jo abhi screen pe dikh rahi ho.
         // Agar LoopsActivity background me hai to kit change ignore karo;
         // MainActivity apna khud ka kit apni visibility ke hisaab se sambhalegi.
-        if (!isVisible) return;
-
-        // Agar lock ON hai → loop channel mat badlo, sirf SPD track karo.
-        // Lock button ka color update karo (locked kit pe green, baki pe orange).
+        // Kit Lock UI update: lock button ka color batata hai SPD ka current kit
         if (midiKitLockNumber != -1) {
             final boolean onLockedKit = (newKit == midiKitLockNumber);
             runOnUiThread(() -> {
@@ -724,22 +721,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             });
-            return; // Loop channel mat badlo jab lock ON ho
         }
-
-        // ── Same-kit guard: agar kit nahi badla to playing loops mat roko ────
-        if (newKit == this.loopChannelIndex) return;
-
-        // ── UI thread pe run karo — MIDI thread se direct UI touch unsafe hai ─
-        runOnUiThread(() -> {
-            saveLoopsToMemory();   // Save current kit's BPM+Pitch before MIDI kit switch
-            this.loopChannelIndex = newKit;
-            loadCurrentKit();
-            // NOTE: Cross-forward to MainActivity REMOVED.
-            // Har activity apna kit independently manage karti hai jis screen pe
-            // woh visible ho. Isse ek activity ka MIDI kit dono activities ko
-            // simultaneously change nahi karta — Bug 2 (cross-contamination) fix.
-        });
+        // Program Change se loop channel change nahi hoga — sirf CC map se kit badlega.
     }
 
     public void loadCurrentKit() {
@@ -3710,7 +3693,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (seekPitch != null) seekPitch.setProgress(prog);
             });
 
-        } else if (cc == prefs.getInt("midi_cc_volume_minus", 80) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_volume_minus", 80) && value > 0) {
             // Volume − : ek baar CC milne par 1 count ghata
             runOnUiThread(() -> {
                 if (seekMasterVolume != null) {
@@ -3719,7 +3702,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == prefs.getInt("midi_cc_volume_plus", 81) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_volume_plus", 81) && value > 0) {
             // Volume + : ek baar CC milne par 1 count badha
             runOnUiThread(() -> {
                 if (seekMasterVolume != null) {
@@ -3728,7 +3711,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82) && value > 0) {
             // Tempo − : ek baar CC milne par 1 count ghata
             runOnUiThread(() -> {
                 if (seekTempo != null) {
@@ -3737,7 +3720,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83) && value > 0) {
             // Tempo + : ek baar CC milne par 1 count badha
             runOnUiThread(() -> {
                 if (seekTempo != null) {
@@ -3746,7 +3729,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84) && value > 0) {
             // Pitch − : ek baar CC milne par 1 count ghata
             runOnUiThread(() -> {
                 if (seekPitch != null) {
@@ -3755,7 +3738,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85) && value >= 64) {
+        } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85) && value > 0) {
             // Pitch + : ek baar CC milne par 1 count badha
             runOnUiThread(() -> {
                 if (seekPitch != null) {
@@ -3764,10 +3747,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
 
-        } else if (cc == ccKitPrev && value >= 64) {
+        } else if (cc == ccKitPrev && value > 0) {
             runOnUiThread(() -> changeLoopBy(-1));
 
-        } else if (cc == ccKitNext && value >= 64) {
+        } else if (cc == ccKitNext && value > 0) {
             runOnUiThread(() -> changeLoopBy(1));
 
         } else {
