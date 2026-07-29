@@ -1076,11 +1076,11 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySample(
         jfloat eqLow, jfloat eqMid, jfloat eqHigh,
         jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
     AudioEngineImpl* e = getEngine(env, obj);
-    // Legacy path: speed=1.0 (kept for backward compat). New code uses nativePlaySampleSP.
+    // Legacy path: speed=1.0, pan=0.0 (kept for backward compat). New code uses nativePlaySampleSP.
     if (e) e->playSample((int)padIdx, (float)volume, 1.f, (float)pitch,
                          (bool)delayOn, (float)delayMs, (float)delayLevel,
                          (float)eqLow, (float)eqMid, (float)eqHigh,
-                         (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
+                         (int)chokeGroup, (float)attackMs, (float)releaseMs, 0.f, false);
 }
 
 // New JNI: play one-shot/drum sample with BOTH speed + pitch applied.
@@ -1111,7 +1111,7 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlayLoop(
         jint padIdx, jfloat volume, jfloat speed, jfloat pitch) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
-                         false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, true);
+                         false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, 0.f, true);
 }
 
 // nativePlayLoopSP: start loop with independent speed + pitch
