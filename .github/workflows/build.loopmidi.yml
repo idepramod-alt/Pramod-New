@@ -30,14 +30,15 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK platform and build tools
+      - name: Install Android SDK platform, build tools, NDK, CMake
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;25.2.9519653"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;25.2.9519653" "cmake;3.22.1"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
+      - name: Install Gradle 8.11.1
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-8.11.1/bin" >> $GITHUB_PATH
 
       - name: Create Gradle wrapper in app project
         working-directory: gradle_build
