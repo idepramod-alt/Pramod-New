@@ -521,7 +521,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.isOneShotMode) {
                 // OneShot ON + LOOP pad = RETRIGGER: restart loop from beginning on each tap
                 this.audioEngine.stopPad(index);
-                this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index));
+                this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index), padLoopPan[index]);
                 this.txtLoopStatus.setText("LOOP " + (index + 1) + " ↺ RETRIGGER");
                 // loopPlaying stays true — pad is still actively looping
                 return;
@@ -539,7 +539,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // so the second call immediately tore down and recreated the Sonic
         // stream the first call had just set up, causing an audible restart
         // click at the moment playback began.
-        this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index));
+        this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index), padLoopPan[index]);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
@@ -1858,7 +1858,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // playLoopSP ensures the loop is definitely running post-reinit.)
         for (int i = 0; i < 8; i++) {
             if (wasPlaying[i] && this.loopSamples[i] != null && this.loopSamples[i].loaded) {
-                engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i));
+                engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i), padLoopPan[i]);
             }
         }
     }
@@ -2092,7 +2092,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 for (int i : playing) audioEngine.stopPad(i);
                 // Restart all at the exact same moment → perfect sync
                 for (int i : playing) {
-                    audioEngine.playLoopSP(i, effectiveVolume(i), currentSpeed, effectivePitch(i));
+                    audioEngine.playLoopSP(i, effectiveVolume(i), currentSpeed, effectivePitch(i), padLoopPan[i]);
                 }
                 Toast.makeText(this, "✅ " + playing.size() + " loops sync ho gaye!", Toast.LENGTH_SHORT).show();
             });
@@ -2190,7 +2190,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     audioEngine.stopPad(padIdx);
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
                         if (loopPlaying[padIdx] && audioEngine != null)
-                            audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
+                            audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), padLoopPan[padIdx]);
                     }, delayMs);
                 });
                 padSyncRow.addView(btnNudgeBack);
@@ -2212,7 +2212,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         return;
                     }
                     audioEngine.stopPad(padIdx);
-                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), padLoopPan[padIdx]);
                 });
                 padSyncRow.addView(btnNudgeFwd);
 
@@ -2233,7 +2233,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         return;
                     }
                     audioEngine.stopPad(padIdx);
-                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx));
+                    audioEngine.playLoopSP(padIdx, effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), padLoopPan[padIdx]);
                     Toast.makeText(this, "PAD " + (padIdx+1) + " restarted", Toast.LENGTH_SHORT).show();
                 });
                 padSyncRow.addView(btnRestart);
@@ -2364,7 +2364,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // the audible "cut" every time speed/pitch was dragged.
         for (int i = 0; i < 8; i++) {
             if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
-                this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i));
+                this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i), padLoopPan[i]);
             }
         }
     }
@@ -2490,7 +2490,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             audioEngine.playSample(padIdx, sd,
                                 effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), 0,
                                 false, 0f, 0f,
-                                wEqL[padIdx], wEqM[padIdx], wEqH[padIdx], 0, 0f, 0f);
+                                wEqL[padIdx], wEqM[padIdx], wEqH[padIdx], 0, 0f, 0f, wPan[padIdx]);
                         }
                     } catch (Exception ignored) {}
                 });
@@ -2568,7 +2568,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             float eqH    = wEqH[pad];
                             float vol    = effectiveVolume(pad) * gain;
                             audioEngine.playSample(pad, sd, vol, currentSpeed, pitch, 0,
-                                false, 0f, 0f, eqL, eqM, eqH, 0, 0f, wPan[pad]);
+                                false, 0f, 0f, eqL, eqM, eqH, 0, 0f, 0f, wPan[pad]);
                         }
                     } catch (Exception ignored) {}
                 }
@@ -2627,7 +2627,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // Live-update any running loops with new settings
                 for (int i = 0; i < 8; i++) {
                     if (loopPlaying[i] && audioEngine != null)
-                        audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), currentSpeed, effectivePitch(i));
+                        audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), currentSpeed, effectivePitch(i), padLoopPan[i]);
                 }
                 Toast.makeText(LoopsActivity.this, "✅ Pad Edit saved to kit!", Toast.LENGTH_SHORT).show();
             })
@@ -4371,7 +4371,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (this.isOneShotMode) {
                     // OneShot ON + LOOP pad via MIDI = retrigger (restart from beginning)
                     try { engine.stopPad(index); } catch (Exception ignored) {}
-                    try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index)); }
+                    try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index), padLoopPan[index]); }
                     catch (Exception ignored) {}
                     loopStartTimeMs[index] = System.currentTimeMillis();
                     // loopPlaying stays true
@@ -4385,7 +4385,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     try { engine.stopPad(index); } catch (Exception ignored) {}
                     if (elapsed < 400) {
                         // Retrigger: restart loop without stopping it perceptibly
-                        try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index)); }
+                        try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index), padLoopPan[index]); }
                         catch (Exception ignored) {}
                         loopStartTimeMs[index] = System.currentTimeMillis();
                         // loopPlaying stays true

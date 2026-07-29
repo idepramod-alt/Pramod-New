@@ -150,6 +150,7 @@ struct Voice {
     float   attackRate = 0.f;
     float   releaseRate= 0.f;
     bool    releasing  = false;
+    std::atomic<float> pan{0.f};  // stereo pan: -1.0=full L, 0.0=center, +1.0=full R
     // Delay
     bool    delayOn    = false;
     float   delayLevel = 0.f;
@@ -185,6 +186,7 @@ struct Cmd {
     int     chokeGroup;
     float   attackMs;
     float   releaseMs;
+    float   pan;       // stereo pan: -1.0=full L, 0.0=center, +1.0=full R
     bool    isLoop;
 };
 
@@ -406,6 +408,11 @@ public:
                 int got = sonicReadFloatFromStream(sonic, readBuf,
                                                    numFrames < SCRATCH_SIZE ? numFrames : SCRATCH_SIZE);
 
+                // Pan law: linear balance (center=1/1, full-L=1/0, full-R=0/1)
+                float panV  = v.pan.load(std::memory_order_relaxed);
+                float lGain = (panV <= 0.f) ? 1.f : (1.f - panV);
+                float rGain = (panV >= 0.f) ? 1.f : (1.f + panV);
+
                 for (int i = 0; i < numFrames; i++) {
                     // Envelope
                     if (!v.releasing) {
@@ -421,8 +428,8 @@ public:
                     float L  = (i < got) ? readBuf[i * loopCh]                         : 0.f;
                     float R  = (i < got) ? (loopCh > 1 ? readBuf[i * loopCh + 1] : L) : 0.f;
                     if (nCh == 2) {
-                        out[2 * i]     += L * ev;
-                        out[2 * i + 1] += R * ev;
+                        out[2 * i]     += L * ev * lGain;
+                        out[2 * i + 1] += R * ev * rGain;
                     } else {
                         out[i] += (loopCh > 1 ? (L + R) * 0.5f : L) * ev;
                     }
@@ -443,6 +450,11 @@ public:
 
                 int    ch        = pb.channels;                         // 1 or 2
                 size_t numFrmPb  = pb.pcm.size() / (size_t)ch;         // total frames in pad
+
+                // Pan law: linear balance (center=1/1, full-L=1/0, full-R=0/1)
+                float panV  = v.pan.load(std::memory_order_relaxed);
+                float lGain = (panV <= 0.f) ? 1.f : (1.f - panV);
+                float rGain = (panV >= 0.f) ? 1.f : (1.f + panV);
 
                 for (int i = 0; i < numFrames; i++) {
                     float fpos = (float)v.position + v.pitchAcc;
@@ -502,11 +514,10 @@ public:
                         echoMono = delayBuf[vi][ri] * v.delayLevel;
                     }
 
-                    // Mix to output — voices write directly to their L/R positions;
-                    // no post-loop mono→stereo copy needed.
+                    // Mix to output — apply pan law to L/R (mono output: pan ignored).
                     if (nCh == 2) {
-                        out[2 * i]     += sampL + echoMono;
-                        out[2 * i + 1] += sampR + echoMono;
+                        out[2 * i]     += (sampL + echoMono) * lGain;
+                        out[2 * i + 1] += (sampR + echoMono) * rGain;
                     } else {
                         out[i] += sampMono + echoMono;
                     }
@@ -636,6 +647,7 @@ public:
             v.volume.store(c.volume, std::memory_order_relaxed);
             v.speed .store(c.speed,  std::memory_order_relaxed);
             v.pitch .store(c.pitch,  std::memory_order_relaxed);
+            v.pan   .store(c.pan,    std::memory_order_relaxed);
             v.chokeGroup  = c.chokeGroup;
             v.isLoop      = c.isLoop;
             v.delayOn     = c.delayOn;
@@ -700,6 +712,7 @@ public:
                     v.speed .store(c.speed,  std::memory_order_relaxed);
                     v.pitch .store(c.pitch,  std::memory_order_relaxed);
                     v.volume.store(c.volume, std::memory_order_relaxed);
+                    v.pan   .store(c.pan,    std::memory_order_relaxed);
                 }
             }
             // ── Update active drum/one-shot voice with this pad index ──
@@ -711,6 +724,7 @@ public:
                     dv.speed .store(c.speed,  std::memory_order_relaxed);
                     dv.pitch .store(c.pitch,  std::memory_order_relaxed);
                     dv.volume.store(c.volume, std::memory_order_relaxed);
+                    dv.pan   .store(c.pan,    std::memory_order_relaxed);
                     break;  // at most one active one-shot per pad
                 }
             }
@@ -939,7 +953,8 @@ public:
     void playSample(int padIdx, float volume, float speed, float pitch,
                     bool delayOn, float delayMs, float delayLevel,
                     float eqLow, float eqMid, float eqHigh,
-                    int chokeGroup, float attackMs, float releaseMs, bool isLoop) {
+                    int chokeGroup, float attackMs, float releaseMs,
+                    float pan, bool isLoop) {
         if (padIdx < 0 || padIdx >= MAX_PADS) return;
         if (!pads[padIdx].loaded.load(std::memory_order_acquire)) {
             LOGI("Pad %d not loaded", padIdx); return;
@@ -961,17 +976,18 @@ public:
         c.chokeGroup = chokeGroup;
         c.attackMs   = attackMs;
         c.releaseMs  = releaseMs;
+        c.pan        = std::max(-1.f, std::min(1.f, pan));
         c.isLoop     = isLoop;
         cmdQ.push(c);
     }
 
-    void playLoopSP(int padIdx, float volume, float speed, float pitchShift) {
+    void playLoopSP(int padIdx, float volume, float speed, float pitchShift, float pan = 0.f) {
         if (padIdx >= 0 && padIdx < LOOP_VOICES) {
-            playSample(padIdx, volume, speed, pitchShift, false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, true);
+            playSample(padIdx, volume, speed, pitchShift, false, 0.f, 0.f, 0.f, 0.f, 0.f, 0, 0.f, 0.f, pan, true);
         }
     }
 
-    void updateLoopSpeedPitch(int padIdx, float volume, float speed, float pitch) {
+    void updateLoopSpeedPitch(int padIdx, float volume, float speed, float pitch, float pan = 0.f) {
         if (padIdx < 0 || padIdx >= LOOP_VOICES) return;
         Cmd c{};
         c.type   = CMD_UPDATE_SPEED_PITCH;
@@ -979,6 +995,7 @@ public:
         c.volume = std::max(0.f, std::min(1.f, volume));
         c.speed  = std::max(0.1f, std::min(4.f, speed));
         c.pitch  = std::max(0.1f, std::min(8.f, pitch));
+        c.pan    = std::max(-1.f, std::min(1.f, pan));
         cmdQ.push(c);
     }
 
@@ -1076,12 +1093,13 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlaySampleSP(
         jint padIdx, jfloat volume, jfloat speed, jfloat pitch,
         jboolean delayOn, jfloat delayMs, jfloat delayLevel,
         jfloat eqLow, jfloat eqMid, jfloat eqHigh,
-        jint chokeGroup, jfloat attackMs, jfloat releaseMs) {
+        jint chokeGroup, jfloat attackMs, jfloat releaseMs, jfloat pan) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->playSample((int)padIdx, (float)volume, (float)speed, (float)pitch,
                          (bool)delayOn, (float)delayMs, (float)delayLevel,
                          (float)eqLow, (float)eqMid, (float)eqHigh,
-                         (int)chokeGroup, (float)attackMs, (float)releaseMs, false);
+                         (int)chokeGroup, (float)attackMs, (float)releaseMs,
+                         (float)pan, false);
 }
 
 // nativePlayLoop: speed and pitch are independent parameters
@@ -1100,18 +1118,18 @@ Java_com_pramod_loopmidi_AudioEngine_nativePlayLoop(
 JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativePlayLoopSP(
         JNIEnv* env, jobject obj,
-        jint padIdx, jfloat volume, jfloat speed, jfloat pitchShift) {
+        jint padIdx, jfloat volume, jfloat speed, jfloat pitchShift, jfloat pan) {
     AudioEngineImpl* e = getEngine(env, obj);
-    if (e) e->playLoopSP((int)padIdx, (float)volume, (float)speed, (float)pitchShift);
+    if (e) e->playLoopSP((int)padIdx, (float)volume, (float)speed, (float)pitchShift, (float)pan);
 }
 
 // nativeUpdateLoopSpeedPitch: live update speed + pitch without restarting loop
 JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeUpdateLoopSpeedPitch(
         JNIEnv* env, jobject obj,
-        jint padIdx, jfloat volume, jfloat speed, jfloat pitch) {
+        jint padIdx, jfloat volume, jfloat speed, jfloat pitch, jfloat pan) {
     AudioEngineImpl* e = getEngine(env, obj);
-    if (e) e->updateLoopSpeedPitch((int)padIdx, (float)volume, (float)speed, (float)pitch);
+    if (e) e->updateLoopSpeedPitch((int)padIdx, (float)volume, (float)speed, (float)pitch, (float)pan);
 }
 
 // Keep old nativeUpdateLoopPitch for backward compatibility

@@ -65,12 +65,12 @@ public class AudioEngine {
     private native void nativePlaySampleSP(int padIndex, float volume, float speed, float pitch,
                                            boolean delayOn, float delayMs, float delayLevel,
                                            float eqLow, float eqMid, float eqHigh,
-                                           int chokeGroup, float attackMs, float releaseMs);
+                                           int chokeGroup, float attackMs, float releaseMs, float pan);
     // speed = time-stretch factor (1.0=normal, 2.0=2x faster, pitch unchanged)
     // pitch = pitch-shift factor  (1.0=normal, 2.0=octave up, speed unchanged)
     private native void nativePlayLoop(int padIndex, float volume, float speed, float pitch);
-    private native void nativeUpdateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch);
-    private native void nativePlayLoopSP(int padIndex, float volume, float speed, float pitch);
+    private native void nativeUpdateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch, float pan);
+    private native void nativePlayLoopSP(int padIndex, float volume, float speed, float pitch, float pan);
     private native void nativeStopAll();
     private native void nativeStopPad(int padIndex);
     // Restart the Oboe stream with new device-native parameters (called when
@@ -155,11 +155,11 @@ public class AudioEngine {
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativePlayLoop not in .so"); }
             catch (Exception ignored)      { hasNativePlayLoop = true; }
 
-            try { nativeUpdateLoopSpeedPitch(0, 0f, 1f, 1f); hasNativeUpdateLoopSpeedPitch = true; }
+            try { nativeUpdateLoopSpeedPitch(0, 0f, 1f, 1f, 0f); hasNativeUpdateLoopSpeedPitch = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativeUpdateLoopSpeedPitch not in .so"); }
             catch (Exception ignored)      { hasNativeUpdateLoopSpeedPitch = true; }
 
-            try { nativePlaySampleSP(0, 0f, 1f, 1f, false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f); hasNativePlaySampleSP = true; }
+            try { nativePlaySampleSP(0, 0f, 1f, 1f, false, 0f, 0f, 0f, 0f, 0f, 0, 0f, 0f, 0f); hasNativePlaySampleSP = true; }
             catch (UnsatisfiedLinkError e) { Log.w(TAG, "nativePlaySampleSP not in .so"); }
             catch (Exception ignored)      { hasNativePlaySampleSP = true; }
         }
@@ -170,30 +170,42 @@ public class AudioEngine {
 
     public void start() {}
 
-    /** Live-update speed+pitch for a playing loop without restarting it. */
-      public void updateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch) {
+    /** Live-update speed+pitch+pan for a playing loop without restarting it. */
+      public void updateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch, float pan) {
           try {
               if (!nativeAvailable) return;
               nativeUpdateLoopSpeedPitch(padIndex,
                   Math.max(0f, Math.min(1f, volume)),
                   Math.max(0.1f, Math.min(4f, speed)),
-                  Math.max(0.1f, Math.min(8f, pitch)));
+                  Math.max(0.1f, Math.min(8f, pitch)),
+                  Math.max(-1f, Math.min(1f, pan)));
           } catch (UnsatisfiedLinkError e) {
               Log.e(TAG, "nativeUpdateLoopSpeedPitch unavailable", e);
           }
       }
 
-      /** Start a loop with independent speed and pitch. */
-      public void playLoopSP(int padIndex, float volume, float speed, float pitch) {
+      /** Overload without pan (defaults to center = 0). */
+      public void updateLoopSpeedPitch(int padIndex, float volume, float speed, float pitch) {
+          updateLoopSpeedPitch(padIndex, volume, speed, pitch, 0f);
+      }
+
+      /** Start a loop with independent speed, pitch and pan. */
+      public void playLoopSP(int padIndex, float volume, float speed, float pitch, float pan) {
           try {
               if (!nativeAvailable) return;
               nativePlayLoopSP(padIndex,
                   Math.max(0f, Math.min(1f, volume)),
                   Math.max(0.1f, Math.min(4f, speed)),
-                  Math.max(0.1f, Math.min(8f, pitch)));
+                  Math.max(0.1f, Math.min(8f, pitch)),
+                  Math.max(-1f, Math.min(1f, pan)));
           } catch (UnsatisfiedLinkError e) {
               Log.e(TAG, "nativePlayLoopSP unavailable", e);
           }
+      }
+
+      /** Overload without pan (defaults to center = 0). */
+      public void playLoopSP(int padIndex, float volume, float speed, float pitch) {
+          playLoopSP(padIndex, volume, speed, pitch, 0f);
       }
 
           public void stop() {
@@ -304,7 +316,7 @@ public class AudioEngine {
                            float volume, float speed, float pitch, int loopMode,
                            boolean delayOn, float delayMs, float delayLevel,
                            float eqLow, float eqMid, float eqHigh,
-                           int chokeGroup, float attackMs, float releaseMs) {
+                           int chokeGroup, float attackMs, float releaseMs, float pan) {
         try {
             if (!nativeAvailable || sample == null || !sample.loaded) return;
             float vol  = Math.max(0f, Math.min(1f, volume));
@@ -319,9 +331,10 @@ public class AudioEngine {
                 nativePlaySampleSP(padIndex, vol, spd, rate,
                         delayOn, delayMs, delayLevel,
                         eqLow, eqMid, eqHigh,
-                        chokeGroup, attackMs, releaseMs);
+                        chokeGroup, attackMs, releaseMs,
+                        Math.max(-1f, Math.min(1f, pan)));
             } else {
-                // Fallback: old path (speed ignored, pitch only)
+                // Fallback: old path (speed ignored, pitch only; pan not supported)
                 nativePlaySample(padIndex, vol, rate,
                         delayOn, delayMs, delayLevel,
                         eqLow, eqMid, eqHigh,
@@ -332,6 +345,18 @@ public class AudioEngine {
         } catch (Exception e) {
             Log.e(TAG, "Error playing sample", e);
         }
+    }
+
+    /** Overload without pan (defaults to center = 0). */
+    public void playSample(int padIndex, SampleData sample,
+                           float volume, float speed, float pitch, int loopMode,
+                           boolean delayOn, float delayMs, float delayLevel,
+                           float eqLow, float eqMid, float eqHigh,
+                           int chokeGroup, float attackMs, float releaseMs) {
+        playSample(padIndex, sample, volume, speed, pitch, loopMode,
+                delayOn, delayMs, delayLevel,
+                eqLow, eqMid, eqHigh,
+                chokeGroup, attackMs, releaseMs, 0f);
     }
 
     /** Convenience overload: speed + pitch, no delay/EQ params. */
