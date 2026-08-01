@@ -498,9 +498,6 @@ public:
                 }
                 loopPitchPos[vi] = pos;
             } else {
-
-
-            } else {
                 // ── Drum/one-shot voice: linear-interpolation resampling ─────────
                 // rate = speed × pitch: speed changes how fast the sample plays
                 // (and therefore its duration), pitch shifts the frequency on top.
