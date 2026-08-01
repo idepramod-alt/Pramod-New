@@ -164,6 +164,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // Per-pad volumes — active when isMasterVolumeMode == false
     private float[] padVolume = new float[]{1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f};
 
+    // ── Global Mute ───────────────────────────────────────────────────────────
+    // true = entire audio system silent. Loops keep running (transport alive) so
+    //        unmute instantly restores them. effectiveVolume() returns 0 while on.
+    private volatile boolean isMuted  = false;
+    private Button          btnMute   = null;
+
     // ── Per-pad Loop / Drum mode ──────────────────────────────────────────────
     // false = LOOP mode  (continuous loop, tap again to stop)
     // true  = DRUM mode  (one-shot hit on every tap, like a real drum pad)
@@ -212,6 +218,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // or vice-versa. Step controls must fire on ANY value (not just > 0), but we
     // debounce per-CC so a single physical press does not double-step. Index = CC no.
     private volatile long[]    ccStepDebounceMs     = new long[128];
+
+    // ── Pad Edit dialog preview tracking ──────────────────────────────────────
+    // Tracks the pad currently previewing in the Pad Edit dialog so the next
+    // preview stops it first (no overlapping previews, low latency). -1 = none.
+    private int                lastPreviewPadIdx    = -1;
 
     // ── MIDI CC → Global Controls learn mode ─────────────────────────────────
     private volatile boolean          midiCCControlLearnMode = false;
@@ -578,7 +589,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private float effectiveVolume(int padIndex) {
         float base = isMasterVolumeMode ? masterVolume : padVolume[padIndex];
         // Per-pad gain multiplier (default 1.0 — no change to existing behaviour)
-        return base * padLoopGain[padIndex];
+        float vol = base * padLoopGain[padIndex];
+        // Global mute: zero out everything while muted (transport stays alive)
+        if (isMuted) return 0f;
+        return vol;
     }
 
     /** Per-pad pitch = global pitch × per-pad pitch multiplier (default 1.0). */
@@ -1237,6 +1251,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnRenameLoop = (Button) findViewById(R.id.btnRenameLoop);
         this.btnSaveLoop = (Button) findViewById(R.id.btnSaveLoop);
         this.btnLoadLoop = (Button) findViewById(R.id.btnLoadLoop);
+        this.btnMute     = (Button) findViewById(R.id.btnMute);
         this.btnTempoMinus = (Button) findViewById(R.id.btnTempoMinus);
         this.btnTempoPlus = (Button) findViewById(R.id.btnTempoPlus);
         this.seekTempo = (SeekBar) findViewById(R.id.seekTempo);
@@ -1535,25 +1550,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         });
         Button button6 = this.btnSetBpm;
-        if (button6 != null && this.editCustomBpm != null) {
-            button6.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.12
-                @Override // android.view.View.OnClickListener
-                public void onClick(View v) throws NumberFormatException {
-                    String bpmText = LoopsActivity.this.editCustomBpm.getText().toString();
-                    if (!bpmText.isEmpty()) {
-                        try {
-                            float bpm = Float.parseFloat(bpmText);
-                            float speed = bpm / 120.0f;
-                            float speed2 = Math.max(0.1f, Math.min(2.0f, speed));
-                            if (LoopsActivity.this.seekTempo != null) {
-                                LoopsActivity.this.seekTempo.setProgress((int) (100.0f * speed2));
-                            }
-                        } catch (NumberFormatException e) {
-                            Toast.makeText(LoopsActivity.this, "Invalid BPM", 0).show();
-                        }
-                    }
-                }
-            });
+        if (button6 != null) {
+            // BPM SET button now opens a dialog: empty input, keyboard auto-shows,
+            // and BPM is applied ONLY when the user presses OK.
+            button6.setOnClickListener(v -> LoopsActivity.this.showBpmDialog());
         }
         Button button7 = this.btnResetSpeedPitch;
         if (button7 != null) {
@@ -1674,6 +1674,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     LoopsActivity.this.setGlobalDrumMode(true);
                 }
             });
+        }
+        // ── Global Mute toggle ─────────────────────────────────────────────────
+        if (this.btnMute != null) {
+            this.btnMute.setOnClickListener(v -> LoopsActivity.this.toggleMute());
+            updateMuteButton(); // reflect persisted state if any
         }
         // ── ADD button: pick a pad, then assign LOOP MODE or DRUM MODE to it ───
         if (this.btnAddLoop != null) {
@@ -1936,6 +1941,57 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         updateScaleUI();
         updateAllActiveLoops();
+    }
+
+    /**
+     * BPM entry dialog. Input starts EMPTY (default 120 shown as a hint), the
+     * keyboard auto-opens, and BPM is applied to the engine ONLY when OK is
+     * pressed. Range is clamped to the seekbar's 12–240 BPM span.
+     */
+    public void showBpmDialog() {
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        et.setHint("120");                         // default BPM shown as hint
+        et.setText("");                            // input starts empty
+        et.setTextColor(0xFFFFFFFF);
+        et.setTextSize(18f);
+        et.setBackgroundColor(0xFF333333);
+        et.setPadding(24, 16, 24, 16);
+        et.setGravity(android.view.Gravity.CENTER);
+
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle("🎵 Set BPM")
+            .setMessage("Enter BPM (12–240), default 120:")
+            .setView(et)
+            .setPositiveButton("OK", (d, w) -> {
+                String txt = et.getText().toString().trim();
+                if (txt.isEmpty()) return;         // empty → no change
+                try {
+                    float bpm = Float.parseFloat(txt);
+                    float speed = Math.max(0.1f, Math.min(2.0f, bpm / 120.0f));
+                    if (seekTempo != null) {
+                        seekTempo.setProgress((int)(speed * 100f));
+                    }
+                } catch (NumberFormatException e) {
+                    android.widget.Toast.makeText(this, "Invalid BPM — enter a number (12–240)",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .create();
+        dlg.show();
+        // Auto-show the keyboard and widen the dialog for easy typing.
+        // Set the soft-input mode on the DIALOG's window (not the activity's)
+        // so the keyboard reliably appears with the dialog.
+        et.requestFocus();
+        android.view.Window wnd = dlg.getWindow();
+        if (wnd != null) {
+            wnd.setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            wnd.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.5f),
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void setupReverb() {
@@ -2362,6 +2418,34 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
+    /**
+     * Toggle global mute. While muted the whole audio system is silent but loops
+     * keep running in the background, so unmute restores them instantly.
+     */
+    public void toggleMute() {
+        isMuted = !isMuted;
+        if (isMuted) {
+            // Silence everything: kill one-shot/DRUM hits, drop playing loops to 0.
+            if (audioEngine != null) {
+                for (int i = 0; i < 8; i++) {
+                    if (!loopPlaying[i]) {
+                        try { audioEngine.stopPad(i); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+        // Re-apply volume to running loops (0 while muted, normal after unmute).
+        updateAllActiveLoops();
+        updateMuteButton();
+    }
+
+    /** Reflect the current mute state on the MUTE button (icon + colour). */
+    private void updateMuteButton() {
+        if (btnMute == null) return;
+        btnMute.setText(isMuted ? "🔇MUTE" : "🔊 SOUND");
+        btnMute.setBackgroundResource(isMuted ? R.drawable.btn_3d_darkred : R.drawable.btn_3d_green);
+    }
+
     public void updateAllActiveLoops() {
         // Live-update speed/pitch on already-playing loops WITHOUT stopping or
         // restarting them — stopPad()+playSample() here used to kill the voice
@@ -2461,7 +2545,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnStop.setLayoutParams(stopLP);
         btnStop.setOnClickListener(vv -> {
             try {
-                if (audioEngine != null) audioEngine.stopPad(selPad[0]);
+                if (audioEngine != null) {
+                    audioEngine.stopPad(selPad[0]);
+                    // No preview active anymore — keep in sync
+                    if (lastPreviewPadIdx == selPad[0]) lastPreviewPadIdx = -1;
+                }
             } catch (Exception ignored) {}
         });
         headerRow.addView(btnStop);
@@ -2488,6 +2576,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     if (highlightRef[0] != null) highlightRef[0].run();
                     // Refresh seekbars for this pad
                     if (refreshRef[0] != null) refreshRef[0].run();
+                    // Stop previous preview before playing new one — single active preview
+                    try {
+                        if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                            audioEngine.stopPad(lastPreviewPadIdx);
+                        }
+                    } catch (Exception ignored) {}
                     // Real-time preview: play pad sound if sample loaded
                     try {
                         AudioEngine.SampleData sd = loopSamples[padIdx];
@@ -2496,6 +2590,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                 effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), 0,
                                 false, 0f, 0f,
                                 wEqL[padIdx], wEqM[padIdx], wEqH[padIdx], 0, 0f, 0f, wPan[padIdx]);
+                            lastPreviewPadIdx = padIdx;
                         }
                     } catch (Exception ignored) {}
                 });
@@ -2561,9 +2656,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
                 @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
                 @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {
-                    // Real-time apply: re-play pad preview with updated EQ/Gain/Pitch/Pan
+                    // Real-time apply: re-play pad preview with updated EQ/Gain/Pitch/Pan.
+                    // Stop any previous preview first so only one preview rings at a time.
                     try {
                         int pad = selPad[0];
+                        if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                            audioEngine.stopPad(lastPreviewPadIdx);
+                        }
                         AudioEngine.SampleData sd = loopSamples[pad];
                         if (sd != null && sd.loaded && audioEngine != null) {
                             float gain   = wGain[pad];
@@ -2574,6 +2673,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                             float vol    = effectiveVolume(pad) * gain;
                             audioEngine.playSample(pad, sd, vol, currentSpeed, pitch, 0,
                                 false, 0f, 0f, eqL, eqM, eqH, 0, 0f, 0f, wPan[pad]);
+                            lastPreviewPadIdx = pad;
                         }
                     } catch (Exception ignored) {}
                 }
@@ -2638,6 +2738,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             })
             .setNegativeButton("Cancel", null)
             .create();
+        dlg.setOnDismissListener(d -> {
+            // Stop any preview still ringing when the dialog closes
+            try {
+                if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                    audioEngine.stopPad(lastPreviewPadIdx);
+                }
+            } catch (Exception ignored) {}
+            lastPreviewPadIdx = -1;
+        });
         dlg.show();
         android.view.Window wnd = dlg.getWindow();
         if (wnd != null) {
@@ -4524,6 +4633,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.isGlobalDrumMode = isDrum;
         // Keep isDrumOctapadMode in sync so ADV panel reflects state correctly
         this.isDrumOctapadMode = isDrum;
+        // ── Uniform theme on mode change ─────────────────────────────────────
+        // Clear every per-pad explicit override so all 8 pads adopt the new
+        // global LOOP/DRUM mode together — never a mixed UI. Long-press (or
+        // ADD dialog) can still set a fresh override afterwards.
+        for (int i = 0; i < 8; i++) {
+            this.padModeOverride[i] = false;
+            this.padDrumMode[i]     = false;   // follow global mode
+        }
         // Sync checkboxes
         if (this.chkMultiMode   != null) this.chkMultiMode.setChecked(this.isMultiMode);
         if (this.chkOneShotMode != null) this.chkOneShotMode.setChecked(this.isOneShotMode);
@@ -4540,6 +4657,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .putBoolean("loop_multi_mode",    this.isMultiMode)
             .putBoolean("loop_one_shot_mode", this.isOneShotMode)
             .apply();
+        // Persist the cleared per-pad overrides so a later kit reload does not
+        // bring stale override flags back and re-create a mixed UI.
+        SharedPreferences.Editor ovrEd = this.prefs.edit();
+        for (int i = 0; i < 8; i++) {
+            ovrEd.putBoolean("pad_drum_mode_ch_"     + this.loopChannelIndex + "_" + i, false);
+            ovrEd.putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
+        }
+        ovrEd.apply();
         updateModeButtonsUI();
         if (this.txtLoopStatus != null) {
             this.txtLoopStatus.setText(isDrum
