@@ -79,6 +79,7 @@ public class MainActivity extends Activity {
     private com.google.firebase.database.DatabaseReference  deactivateRef;
     private boolean isForceLogoutInProgress = false;
     private Button btnEq;
+    private Button btnPadEdit;
     private Button btnLoadKit;
     private Button btnLoops;
     private Button btnNextKit;
@@ -119,6 +120,11 @@ public class MainActivity extends Activity {
     // debounce per-CC so a single physical press does not double-step. Index = CC no.
     private volatile long[]           ccStepDebounceMs       = new long[128];
 
+    // ── Pad Edit dialog preview tracking ──────────────────────────────────────
+    // Tracks the pad currently previewing in the Pad Edit dialog so the next
+    // preview stops it first (no overlapping previews, low latency). -1 = none.
+    private int                       lastPreviewPadIdx      = -1;
+
     // ── MIDI Kit Lock — SPD-20 Pro kit filter ─────────────────────────────────
     // midiKitLockNumber: SPD-20 Pro kit no. jis pe app ka sound bajega (-1 = off)
     // currentSpdKitNum : SPD-20 Pro ka abhi active kit (Program Change se track hota hai)
@@ -157,6 +163,8 @@ public class MainActivity extends Activity {
     private float[] padEqMid = new float[8];
     private float[] padEqLow = new float[8];
     private int[] padChokeGroup = new int[8];
+    private float[] padGain = new float[8];   // per-pad gain multiplier (default 1.0)
+    private float[] padPan  = new float[8];   // per-pad pan (default 0.0 center)
     private int selectedPad = 0;
     private boolean editMode = false;
     private int kitIndex  = 1;   // Bank A's active kit number
@@ -164,6 +172,18 @@ public class MainActivity extends Activity {
     private String currentKitName  = "KIT 1";
     private String currentKitNameB = "KIT B:1";
     private String pendingSaveKitName = null;
+
+    // ── Favorite Kit Bank (MainActivity — 10 quick slots) ─────────────────────
+    // Each slot stores Bank A kit + Bank B kit + bankMode so switching a favorite
+    // restores the exact kit setup. Persisted under favorite_drum_* keys.
+    private static final String PREF_FAV_KIT_A      = "favorite_drum_kit_A_";
+    private static final String PREF_FAV_KIT_B      = "favorite_drum_kit_B_";
+    private static final String PREF_FAV_BANK_MODE  = "favorite_drum_bank_mode_";
+    private int[] favKitA   = new int[10];
+    private int[] favKitB   = new int[10];
+    private int[] favBank   = new int[10];
+    private Button[] favDrumButtons = new Button[10];
+
     private int copySourcePad = -1;
     private int swapSourcePad = -1;
     private AudioEngine.SampleData[] samples = new AudioEngine.SampleData[8];
@@ -187,6 +207,8 @@ public class MainActivity extends Activity {
     private float[] padEqMidB          = new float[8];
     private float[] padEqLowB          = new float[8];
     private int[]   padChokeGroupB     = new int[8];
+    private float[] padGainB           = new float[8];   // Bank B per-pad gain (default 1.0)
+    private float[] padPanB            = new float[8];   // Bank B per-pad pan (center)
     private AudioEngine.SampleData[] samplesB = new AudioEngine.SampleData[8];
 
     private int[] activePointerId = new int[8];
@@ -954,10 +976,10 @@ public class MainActivity extends Activity {
                 || cc == prefs.getInt("midi_cc_pitch_minus",   84)
                 || cc == prefs.getInt("midi_cc_pitch_plus",    85)
                 || cc == prefs.getInt("midi_cc_volume_minus",  80)
-                || cc == prefs.getInt("midi_cc_volume_plus",   81)
-                || cc == prefs.getInt("midi_cc_tempo_minus",   82)
-                || cc == prefs.getInt("midi_cc_tempo_plus",    83)) {
-            // Delegate pitch abs + all +/- controls to LoopsActivity
+                || cc == prefs.getInt("midi_cc_volume_plus",   81)) {
+            // Delegate pitch abs + Volume±/Pitch± to LoopsActivity.
+            // NOTE: Tempo CC is intentionally NOT handled here — MainActivity
+            // controls Volume/Pitch/Kit only (per user requirement).
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
@@ -1070,25 +1092,26 @@ public class MainActivity extends Activity {
             if (bankMode != BANK_B) {
                 AudioEngine.SampleData sampleData = this.samples[index];
                 if (sampleData != null && sampleData.loaded) {
-                    float vol = this.padVolume[index] * velocityScale;
+                    float vol = this.padVolume[index] * this.padGain[index] * velocityScale;
                     // Keep MIDI drum playback polyphonic: each hit should trigger its own
                     // voice immediately, without getting collapsed by the pad's global choke
                     // settings in a way that suppresses simultaneous hits from the SPD-20 Pro.
-                    this.audioEngine.playSample(index, sampleData, vol, this.padPitch[index], 0,
+                    // NOTE: 16-arg overload — speed=1.0 (fixed), pitch=padPitch, pan=padPan.
+                    this.audioEngine.playSample(index, sampleData, vol, 1.0f, this.padPitch[index], 0,
                         this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index],
                         this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index],
-                        0, 0.0f, 0.0f);
+                        0, 0.0f, 0.0f, this.padPan[index]);
                 }
             }
             // Bank B: plays when bankMode is BANK_B or LAYER_AB — uses voice slots 8-15
             if (bankMode != BANK_A) {
                 AudioEngine.SampleData sampleDataB = this.samplesB[index];
                 if (sampleDataB != null && sampleDataB.loaded) {
-                    float volB = this.padVolumeB[index] * velocityScale;
-                    this.audioEngine.playSample(index + 8, sampleDataB, volB, this.padPitchB[index], 0,
+                    float volB = this.padVolumeB[index] * this.padGainB[index] * velocityScale;
+                    this.audioEngine.playSample(index + 8, sampleDataB, volB, 1.0f, this.padPitchB[index], 0,
                         this.padDelayOnB[index], this.padDelayTimeB[index], this.padDelayLevelB[index],
                         this.padEqLowB[index], this.padEqMidB[index], this.padEqHighB[index],
-                        0, 0.0f, 0.0f);
+                        0, 0.0f, 0.0f, this.padPanB[index]);
                 }
             }
         } catch (Exception e) {
@@ -1414,6 +1437,7 @@ public class MainActivity extends Activity {
         this.btnPrevKit = (Button) findViewById(R.id.btnPrevKit);
         this.btnNextKit = (Button) findViewById(R.id.btnNextKit);
         this.btnEq = (Button) findViewById(R.id.btnEq);
+        this.btnPadEdit = (Button) findViewById(R.id.btnPadEdit);
         // Velocity Sensitivity toggle button
         this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         // MIDI Key Mapping button
@@ -1560,6 +1584,7 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
         initPads();
         initSeekBars();
+        setupFavorites();
         // Restore velocity sensitivity mode from prefs
         this.velocitySensitiveMode = this.prefs.getBoolean("velocity_sensitive_mode", false);
         updateVelocityButton();
@@ -1679,6 +1704,11 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        // ── PAD EDIT button — full EQ/Gain/Volume/Pitch/Pan dialog ──────────
+        if (this.btnPadEdit != null) {
+            this.btnPadEdit.setOnClickListener(v ->
+                MainActivity.this.showPadEditDialog());
+        }
     }
 
     private void initPads() {
@@ -1693,6 +1723,8 @@ public class MainActivity extends Activity {
             this.padEqHigh[i] = 0.0f;
             this.padEqMid[i] = 0.0f;
             this.padEqLow[i] = 0.0f;
+            this.padGain[i] = 1.0f;
+            this.padPan[i]  = 0.0f;
             this.activePointerId[i] = -1;
             this.lastHitTime[i] = 0;
             this.pads[i].setSoundEffectsEnabled(false);
@@ -1958,7 +1990,7 @@ public class MainActivity extends Activity {
         if (sampleData == null) {
             Toast.makeText(this, "No WAV Selected!", 0).show();
         } else {
-            this.audioEngine.playSample(index, sampleData, this.padVolume[index], this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f);
+            this.audioEngine.playSample(index, sampleData, this.padVolume[index] * this.padGain[index], 1.0f, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f, this.padPan[index]);
         }
     }
 
@@ -2114,6 +2146,316 @@ public class MainActivity extends Activity {
                 MainActivity.this.startActivityForResult(intent, MainActivity.REQ_PICK_SINGLE_WAV);
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
+    }
+
+    /**
+     * Full Pad Edit dialog (same as LoopsActivity) — High/Mid/Low EQ, Gain,
+     * Volume, Pitch, Pan + real-time preview + Stop + Reset.
+     * Bank-aware: BANK_B active → edits Bank B arrays (saved under kitIndexB).
+     */
+    public void showPadEditDialog() {
+        final boolean editB = (bankMode == BANK_B);
+
+        // Source (live) arrays for the active bank
+        final float[] srcEqH   = editB ? padEqHighB  : padEqHigh;
+        final float[] srcEqM   = editB ? padEqMidB   : padEqMid;
+        final float[] srcEqL   = editB ? padEqLowB   : padEqLow;
+        final float[] srcGain  = editB ? padGainB    : padGain;
+        final float[] srcVol   = editB ? padVolumeB  : padVolume;
+        final float[] srcPitch = editB ? padPitchB   : padPitch;
+        final float[] srcPan   = editB ? padPanB     : padPan;
+
+        // Working copies (edited live in the dialog, committed on Save)
+        final float[] wEqH    = new float[8];
+        final float[] wEqM    = new float[8];
+        final float[] wEqL    = new float[8];
+        final float[] wGain   = new float[8];
+        final float[] wVol    = new float[8];
+        final float[] wPitch  = new float[8];
+        final float[] wPan    = new float[8];
+        System.arraycopy(srcEqH,   0, wEqH,   0, 8);
+        System.arraycopy(srcEqM,   0, wEqM,   0, 8);
+        System.arraycopy(srcEqL,   0, wEqL,   0, 8);
+        System.arraycopy(srcGain,  0, wGain,  0, 8);
+        System.arraycopy(srcVol,   0, wVol,   0, 8);
+        System.arraycopy(srcPitch, 0, wPitch, 0, 8);
+        System.arraycopy(srcPan,   0, wPan,   0, 8);
+        final float[][] wArrays = {wEqH, wEqM, wEqL, wGain, wVol, wPitch, wPan};
+
+        final int[] selPad = { (selectedPad >= 0 && selectedPad < 8) ? selectedPad : 0 };
+        final String[] paramLabels =
+            {"EQ HIGH (dB)", "EQ MID (dB)", "EQ LOW (dB)", "GAIN", "VOLUME", "PITCH", "PAN"};
+        final float[]  paramMin     = {-15f, -15f, -15f, 0.1f, 0.0f, 0.5f, -1.0f};
+        final float[]  paramMax     = {+15f, +15f, +15f, 2.0f, 1.0f, 2.0f,  1.0f};
+        final float[]  paramDefault = {  0f,   0f,   0f, 1.0f, 0.8f, 1.0f,  0.0f};
+
+        final Runnable[] refreshRef    = new Runnable[1];
+        final Runnable[] highlightRef  = new Runnable[1];
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(18, 12, 18, 8);
+
+        // ── Header: label + ⏹ Stop button ──────────────────────────────────
+        android.widget.LinearLayout headerRow = new android.widget.LinearLayout(this);
+        headerRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        headerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        headerRow.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-1, -2));
+        android.widget.TextView tvPadLabel = new android.widget.TextView(this);
+        tvPadLabel.setText("▼ Tap a pad to select & preview:");
+        tvPadLabel.setTextColor(0xFFCCCCCC);
+        tvPadLabel.setTextSize(12f);
+        tvPadLabel.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        headerRow.addView(tvPadLabel);
+        android.widget.Button btnStop = new android.widget.Button(this);
+        btnStop.setText("⏹ Stop");
+        btnStop.setTextSize(11f);
+        btnStop.setTextColor(0xFFFFFFFF);
+        btnStop.setBackgroundColor(0xFF880000);
+        android.widget.LinearLayout.LayoutParams stopLP =
+            new android.widget.LinearLayout.LayoutParams(-2, -2);
+        stopLP.setMargins(8, 0, 0, 0);
+        btnStop.setLayoutParams(stopLP);
+        btnStop.setOnClickListener(vv -> {
+            try {
+                if (audioEngine != null) {
+                    int slot = editB ? selPad[0] + 8 : selPad[0];
+                    audioEngine.stopPad(slot);
+                    if (lastPreviewPadIdx == slot) lastPreviewPadIdx = -1;
+                }
+            } catch (Exception ignored) {}
+        });
+        headerRow.addView(btnStop);
+        root.addView(headerRow);
+
+        // ── 8 pad buttons (2 rows × 4 columns) ─────────────────────────────
+        final android.widget.Button[] padBtns = new android.widget.Button[8];
+        android.widget.LinearLayout.LayoutParams rowsLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        rowsLP.setMargins(0, 0, 0, 12);
+        for (int row = 0; row < 2; row++) {
+            android.widget.LinearLayout padRowLL = new android.widget.LinearLayout(this);
+            padRowLL.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            padRowLL.setLayoutParams(rowsLP);
+            for (int col = 0; col < 4; col++) {
+                final int padIdx = row * 4 + col;
+                android.widget.Button pb = new android.widget.Button(this);
+                pb.setText("P" + (padIdx + 1));
+                pb.setTextSize(13f);
+                pb.setTextColor(0xFFFFFFFF);
+                pb.setBackgroundColor(padIdx == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+                android.widget.LinearLayout.LayoutParams pbLP =
+                    new android.widget.LinearLayout.LayoutParams(0, 110, 1f);
+                pbLP.setMargins(4, 4, 4, 4);
+                pb.setLayoutParams(pbLP);
+                pb.setOnClickListener(vv -> {
+                    selPad[0] = padIdx;
+                    if (highlightRef[0] != null) highlightRef[0].run();
+                    if (refreshRef[0] != null) refreshRef[0].run();
+                    // Stop previous preview before playing new one — single active preview
+                    try {
+                        if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                            audioEngine.stopPad(lastPreviewPadIdx);
+                        }
+                    } catch (Exception ignored) {}
+                    // Real-time preview with current working params
+                    try {
+                        AudioEngine.SampleData sd = (editB ? samplesB : samples)[padIdx];
+                        if (sd != null && sd.loaded && audioEngine != null) {
+                            int slot = editB ? padIdx + 8 : padIdx;
+                            audioEngine.playSample(slot, sd,
+                                wVol[padIdx] * wGain[padIdx], 1.0f, wPitch[padIdx], 0,
+                                (editB ? padDelayOnB : padDelayOn)[padIdx],
+                                (editB ? padDelayTimeB : padDelayTime)[padIdx],
+                                (editB ? padDelayLevelB : padDelayLevel)[padIdx],
+                                wEqL[padIdx], wEqM[padIdx], wEqH[padIdx],
+                                0, 0f, 0f, wPan[padIdx]);
+                            lastPreviewPadIdx = slot;
+                        }
+                    } catch (Exception ignored) {}
+                });
+                padBtns[padIdx] = pb;
+                padRowLL.addView(pb);
+            }
+            root.addView(padRowLL);
+        }
+
+        // ── 7 parameter seekbars ───────────────────────────────────────────
+        final android.widget.SeekBar[] seeks  = new android.widget.SeekBar[7];
+        final android.widget.TextView[] vTxts = new android.widget.TextView[7];
+        for (int p = 0; p < 7; p++) {
+            android.widget.LinearLayout paramRow = new android.widget.LinearLayout(this);
+            paramRow.setOrientation(android.widget.LinearLayout.VERTICAL);
+            android.widget.LinearLayout.LayoutParams rowLP =
+                new android.widget.LinearLayout.LayoutParams(-1, -2);
+            rowLP.setMargins(0, 4, 0, 4);
+            paramRow.setLayoutParams(rowLP);
+
+            android.widget.LinearLayout labelRow = new android.widget.LinearLayout(this);
+            labelRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            android.widget.TextView tvLabel = new android.widget.TextView(this);
+            tvLabel.setText(paramLabels[p]);
+            tvLabel.setTextColor(0xFFAAAA88);
+            tvLabel.setTextSize(11f);
+            tvLabel.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+            labelRow.addView(tvLabel);
+            android.widget.TextView tvVal = new android.widget.TextView(this);
+            float initVal = wArrays[p][selPad[0]];
+            tvVal.setText(String.format(java.util.Locale.US, "%.2f", initVal));
+            tvVal.setTextColor(0xFFFFFF88);
+            tvVal.setTextSize(11f);
+            tvVal.setGravity(android.view.Gravity.END);
+            tvVal.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
+            labelRow.addView(tvVal);
+            vTxts[p] = tvVal;
+            paramRow.addView(labelRow);
+
+            final int pi = p;
+            android.widget.SeekBar seek = new android.widget.SeekBar(this);
+            seek.setMax(200);
+            float range = paramMax[pi] - paramMin[pi];
+            seek.setProgress(Math.round((initVal - paramMin[pi]) / range * 200f));
+            seek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(android.widget.SeekBar s, int progress, boolean fromUser) {
+                    if (!fromUser) return;
+                    int pad = selPad[0];
+                    float val = paramMin[pi] + (progress / 200f) * (paramMax[pi] - paramMin[pi]);
+                    wArrays[pi][pad] = val;
+                    vTxts[pi].setText(String.format(java.util.Locale.US, "%.2f", val));
+                }
+                @Override public void onStartTrackingTouch(android.widget.SeekBar s) {}
+                @Override public void onStopTrackingTouch(android.widget.SeekBar s) {
+                    // Live preview on release — stop previous preview first
+                    int pad = selPad[0];
+                    try {
+                        if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                            audioEngine.stopPad(lastPreviewPadIdx);
+                        }
+                    } catch (Exception ignored) {}
+                    try {
+                        AudioEngine.SampleData sd = (editB ? samplesB : samples)[pad];
+                        if (sd != null && sd.loaded && audioEngine != null) {
+                            int slot = editB ? pad + 8 : pad;
+                            audioEngine.playSample(slot, sd,
+                                wVol[pad] * wGain[pad], 1.0f, wPitch[pad], 0,
+                                (editB ? padDelayOnB : padDelayOn)[pad],
+                                (editB ? padDelayTimeB : padDelayTime)[pad],
+                                (editB ? padDelayLevelB : padDelayLevel)[pad],
+                                wEqL[pad], wEqM[pad], wEqH[pad],
+                                0, 0f, 0f, wPan[pad]);
+                            lastPreviewPadIdx = slot;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
+            seeks[pi] = seek;
+            paramRow.addView(seek);
+            root.addView(paramRow);
+        }
+
+        // Wire refresh/highlight runnables now that seeks[]/padBtns[] are built
+        refreshRef[0] = () -> {
+            int pad = selPad[0];
+            for (int pi2 = 0; pi2 < 7; pi2++) {
+                float val = wArrays[pi2][pad];
+                float range = paramMax[pi2] - paramMin[pi2];
+                seeks[pi2].setProgress(Math.round((val - paramMin[pi2]) / range * 200f));
+                vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", val));
+            }
+        };
+        highlightRef[0] = () -> {
+            for (int i = 0; i < 8; i++) {
+                padBtns[i].setBackgroundColor(i == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+            }
+        };
+
+        // ── Reset this pad ─────────────────────────────────────────────────
+        android.widget.Button btnRst = new android.widget.Button(this);
+        btnRst.setText("↩ Reset This Pad to Default");
+        btnRst.setBackgroundColor(0xFF440000);
+        btnRst.setTextColor(0xFFFFFFFF);
+        btnRst.setTextSize(11f);
+        android.widget.LinearLayout.LayoutParams rstLP =
+            new android.widget.LinearLayout.LayoutParams(-1, -2);
+        rstLP.setMargins(0, 10, 0, 4);
+        btnRst.setLayoutParams(rstLP);
+        btnRst.setOnClickListener(vv -> {
+            int pad = selPad[0];
+            for (int pi2 = 0; pi2 < 7; pi2++) {
+                wArrays[pi2][pad] = paramDefault[pi2];
+                float range = paramMax[pi2] - paramMin[pi2];
+                seeks[pi2].setProgress(Math.round((paramDefault[pi2] - paramMin[pi2]) / range * 200f));
+                vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", paramDefault[pi2]));
+            }
+            // Reset re-applies defaults to live audio immediately — replay a
+            // preview with default params so the user hears them right away.
+            try {
+                AudioEngine.SampleData sd = (editB ? samplesB : samples)[pad];
+                if (sd != null && sd.loaded && audioEngine != null) {
+                    int slot = editB ? pad + 8 : pad;
+                    if (lastPreviewPadIdx >= 0) audioEngine.stopPad(lastPreviewPadIdx);
+                    audioEngine.playSample(slot, sd,
+                        paramDefault[3] * paramDefault[4], 1.0f, paramDefault[5], 0,
+                        false, 0f, 0f,
+                        paramDefault[0], paramDefault[1], paramDefault[2],
+                        0, 0f, 0f, paramDefault[6]);
+                    lastPreviewPadIdx = slot;
+                }
+            } catch (Exception ignored) {}
+        });
+        root.addView(btnRst);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+            .setTitle(editB ? "🎛️ Pad Edit (BANK B) — EQ / Gain / Pitch / Pan"
+                            : "🎛️ Pad Edit — EQ / Gain / Pitch / Pan")
+            .setView(sv)
+            .setPositiveButton("💾 Save to Kit", (d, w) -> {
+                if (editB) {
+                    System.arraycopy(wEqH,   0, padEqHighB, 0, 8);
+                    System.arraycopy(wEqM,   0, padEqMidB,  0, 8);
+                    System.arraycopy(wEqL,   0, padEqLowB,  0, 8);
+                    System.arraycopy(wGain,  0, padGainB,   0, 8);
+                    System.arraycopy(wVol,   0, padVolumeB, 0, 8);
+                    System.arraycopy(wPitch, 0, padPitchB,  0, 8);
+                    System.arraycopy(wPan,   0, padPanB,    0, 8);
+                } else {
+                    System.arraycopy(wEqH,   0, padEqHigh,  0, 8);
+                    System.arraycopy(wEqM,   0, padEqMid,   0, 8);
+                    System.arraycopy(wEqL,   0, padEqLow,   0, 8);
+                    System.arraycopy(wGain,  0, padGain,    0, 8);
+                    System.arraycopy(wVol,   0, padVolume,  0, 8);
+                    System.arraycopy(wPitch, 0, padPitch,   0, 8);
+                    System.arraycopy(wPan,   0, padPan,     0, 8);
+                }
+                // saveKitToMemory persists BOTH banks under their own indices
+                saveKitToMemory(kitIndex);
+                // Refresh the bank-aware top-bar seekbars to the saved values
+                if (seekVolume != null) {
+                    seekVolume.setProgress((int)((editB ? padVolumeB[selectedPad]
+                                                        : padVolume[selectedPad]) * 100.0f));
+                }
+                Toast.makeText(this, "✅ Pad Edit saved to kit!", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .create();
+        dlg.setOnDismissListener(d -> {
+            // Stop any preview still ringing when the dialog closes
+            try {
+                if (audioEngine != null && lastPreviewPadIdx >= 0) {
+                    audioEngine.stopPad(lastPreviewPadIdx);
+                }
+            } catch (Exception ignored) {}
+            lastPreviewPadIdx = -1;
+        });
+        dlg.show();
+        android.view.Window wnd = dlg.getWindow();
+        if (wnd != null) {
+            wnd.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.62f),
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     public void copyPadSound(int fromPad, int toPad) {
@@ -2419,6 +2761,8 @@ public class MainActivity extends Activity {
             editor.putFloat("kit_" + kitNo + "_eqh_" + i, this.padEqHigh[i]);
             editor.putFloat("kit_" + kitNo + "_eqm_" + i, this.padEqMid[i]);
             editor.putFloat("kit_" + kitNo + "_eql_" + i, this.padEqLow[i]);
+            editor.putFloat("kit_" + kitNo + "_gain_" + i, this.padGain[i]);
+            editor.putFloat("kit_" + kitNo + "_pan_" + i,  this.padPan[i]);
             editor.putInt("kit_" + kitNo + "_choke_" + i, this.padChokeGroup[i]);
             if (this.selectedWavUris[i] != null) {
                 editor.putString("kit_" + kitNo + "_uri_" + i, this.selectedWavUris[i].toString());
@@ -2440,6 +2784,8 @@ public class MainActivity extends Activity {
             editor.putFloat("kit_" + kB + "_B_eqh_" + i, this.padEqHighB[i]);
             editor.putFloat("kit_" + kB + "_B_eqm_" + i, this.padEqMidB[i]);
             editor.putFloat("kit_" + kB + "_B_eql_" + i, this.padEqLowB[i]);
+            editor.putFloat("kit_" + kB + "_B_gain_" + i, this.padGainB[i]);
+            editor.putFloat("kit_" + kB + "_B_pan_" + i,  this.padPanB[i]);
             editor.putInt("kit_" + kB + "_B_choke_" + i, this.padChokeGroupB[i]);
             if (this.selectedWavUrisB[i] != null) {
                 editor.putString("kit_" + kB + "_B_uri_" + i, this.selectedWavUrisB[i].toString());
@@ -2492,6 +2838,8 @@ public class MainActivity extends Activity {
             this.padEqHigh[i] = this.prefs.getFloat("kit_" + kitNo + "_eqh_" + i, 0.0f);
             this.padEqMid[i] = this.prefs.getFloat("kit_" + kitNo + "_eqm_" + i, 0.0f);
             this.padEqLow[i] = this.prefs.getFloat("kit_" + kitNo + "_eql_" + i, 0.0f);
+            this.padGain[i] = this.prefs.getFloat("kit_" + kitNo + "_gain_" + i, 1.0f);
+            this.padPan[i]  = this.prefs.getFloat("kit_" + kitNo + "_pan_" + i, 0.0f);
             this.padChokeGroup[i] = this.prefs.getInt("kit_" + kitNo + "_choke_" + i, 0);
             String uriStr = this.prefs.getString("kit_" + kitNo + "_uri_" + i, null);
             int rawResId = this.prefs.getInt("kit_" + kitNo + "_raw_" + i, 0);
@@ -2567,6 +2915,8 @@ public class MainActivity extends Activity {
             this.padEqHighB[i]     = this.prefs.getFloat("kit_" + kB + "_B_eqh_" + i, 0.0f);
             this.padEqMidB[i]      = this.prefs.getFloat("kit_" + kB + "_B_eqm_" + i, 0.0f);
             this.padEqLowB[i]      = this.prefs.getFloat("kit_" + kB + "_B_eql_" + i, 0.0f);
+            this.padGainB[i]       = this.prefs.getFloat("kit_" + kB + "_B_gain_" + i, 1.0f);
+            this.padPanB[i]        = this.prefs.getFloat("kit_" + kB + "_B_pan_" + i, 0.0f);
             this.padChokeGroupB[i] = this.prefs.getInt("kit_" + kB + "_B_choke_" + i, 0);
             String uriBStr  = this.prefs.getString("kit_" + kB + "_B_uri_" + i, null);
             int    rawBResId = this.prefs.getInt("kit_" + kB + "_B_raw_" + i, 0);
@@ -3042,6 +3392,87 @@ public class MainActivity extends Activity {
                     loadKitFromMemory(kitIndex);
                 }
             }
+        }
+    }
+
+    // ── Favorite Kit Bank (MainActivity) ──────────────────────────────────────
+    /** Load all 10 favorite slots from prefs. Called once from onCreate. */
+    public void loadFavorites() {
+        for (int i = 0; i < 10; i++) {
+            favKitA[i] = prefs.getInt(PREF_FAV_KIT_A     + i, 0);
+            favKitB[i] = prefs.getInt(PREF_FAV_KIT_B     + i, 0);
+            favBank[i] = prefs.getInt(PREF_FAV_BANK_MODE + i, 0);
+        }
+    }
+
+    /** Find + wire the 10 favorite buttons. Tap = load, long-press = save. */
+    private void setupFavorites() {
+        int[] ids = {R.id.favDrum1, R.id.favDrum2, R.id.favDrum3, R.id.favDrum4,
+                     R.id.favDrum5, R.id.favDrum6, R.id.favDrum7, R.id.favDrum8,
+                     R.id.favDrum9, R.id.favDrum10};
+        for (int i = 0; i < 10; i++) {
+            final int slot = i;
+            Button b = (Button) findViewById(ids[i]);
+            favDrumButtons[i] = b;
+            if (b == null) continue;
+            b.setOnClickListener(v -> loadFavorite(slot));
+            b.setOnLongClickListener(v -> {
+                saveFavorite(slot);
+                return true;
+            });
+        }
+        loadFavorites();
+        for (int i = 0; i < 10; i++) updateFavoriteButton(i);
+    }
+
+    /** Save the CURRENT kit setup (Bank A + B + mode) into favorite slot. */
+    public void saveFavorite(int slot) {
+        if (slot < 0 || slot >= 10) return;
+        // Flush current edits into the kit's persistent storage first
+        saveKitToMemory(kitIndex);
+        favKitA[slot] = kitIndex;
+        favKitB[slot] = kitIndexB;
+        favBank[slot] = bankMode;
+        prefs.edit()
+            .putInt(PREF_FAV_KIT_A     + slot, kitIndex)
+            .putInt(PREF_FAV_KIT_B     + slot, kitIndexB)
+            .putInt(PREF_FAV_BANK_MODE + slot, bankMode)
+            .apply();
+        updateFavoriteButton(slot);
+        Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " saved: " + currentKitName,
+            Toast.LENGTH_SHORT).show();
+    }
+
+    /** Switch to a saved favorite — save current, then load the favorite's kit. */
+    public void loadFavorite(int slot) {
+        if (slot < 0 || slot >= 10) return;
+        if (favKitA[slot] < 1 || favKitA[slot] > MAX_KITS) {
+            Toast.makeText(this, "Favorite " + (slot + 1) + " khali hai (long-press se save karo)",
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveKitToMemory(kitIndex);   // don't lose current setup
+        kitIndex = favKitA[slot];
+        kitIndexB = favKitB[slot] >= 1 ? favKitB[slot] : kitIndex;
+        bankMode = favBank[slot];
+        prefs.edit()
+            .putInt(KEY_KIT_INDEX, kitIndex)
+            .putInt("kit_index_B", kitIndexB)
+            .putInt("bank_mode",   bankMode)
+            .apply();
+        loadKitFromMemory(kitIndex);
+        updateBankToggleButton();
+        Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " loaded: " + currentKitName,
+            Toast.LENGTH_SHORT).show();
+    }
+
+    /** Reflect a slot's fill-state on its button (filled = orange, empty = dark). */
+    public void updateFavoriteButton(int slot) {
+        Button b = (slot >= 0 && slot < favDrumButtons.length) ? favDrumButtons[slot] : null;
+        if (b != null) {
+            boolean filled = favKitA[slot] >= 1;
+            b.setText(filled ? "⭐" + (slot + 1) : "·" + (slot + 1));
+            b.setBackgroundResource(filled ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
         }
     }
 

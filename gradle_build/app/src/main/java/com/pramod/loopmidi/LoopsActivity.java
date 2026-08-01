@@ -142,6 +142,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private String currentLoopName = "LOOP 1";
     private String pendingSaveLoopName = null;
     private int loopChannelIndex = 1;
+
+    // ── Favorite Loop Bank (LoopsActivity — 10 quick slots) ───────────────────
+    // Each slot stores a loop channel (1..MAX_LOOPS). Persisted under
+    // favorite_loop_* keys so the list survives app restarts, separate from
+    // MainActivity's drum-kit favorites.
+    private static final String PREF_FAV_LOOP_KIT = "favorite_loop_kit_";
+    private int[]    favLoopKits    = new int[10];
+    private Button[] favLoopButtons = new Button[10];
+
     private float currentSpeed = 1.0f;
     private float currentPitch = 1.0f;
     private float masterVolume = 1.0f;
@@ -988,6 +997,77 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
     }
 
+    // ── Favorite Loop Bank (LoopsActivity) ────────────────────────────────────
+    /** Load all 10 favorite slots from prefs. Called once from onCreate. */
+    public void loadFavorites() {
+        for (int i = 0; i < 10; i++) {
+            favLoopKits[i] = prefs.getInt(PREF_FAV_LOOP_KIT + i, 0);
+        }
+    }
+
+    /** Save the CURRENT loop channel into favorite slot. */
+    public void saveFavorite(int slot) {
+        if (slot < 0 || slot >= 10) return;
+        saveLoopsToMemory();
+        favLoopKits[slot] = loopChannelIndex;
+        prefs.edit().putInt(PREF_FAV_LOOP_KIT + slot, loopChannelIndex).apply();
+        updateFavoriteButton(slot);
+        Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " saved: " + currentLoopName,
+            Toast.LENGTH_SHORT).show();
+    }
+
+    /** Switch to a saved favorite loop channel. */
+    public void loadFavorite(int slot) {
+        if (slot < 0 || slot >= 10) return;
+        int target = favLoopKits[slot];
+        if (target < 1 || target > MAX_LOOPS) {
+            Toast.makeText(this, "Favorite " + (slot + 1) + " khali hai (long-press se save karo)",
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (target != loopChannelIndex) {
+            saveLoopsToMemory();
+            loopChannelIndex = target;
+            prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+            currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex,
+                "LOOP " + loopChannelIndex);
+            if (txtLoopChannel != null) txtLoopChannel.setText(currentLoopName);
+            loadCurrentKit();
+        }
+        Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " loaded: " + currentLoopName,
+            Toast.LENGTH_SHORT).show();
+    }
+
+    /** Reflect a slot's fill-state on its button (filled = orange, empty = dark). */
+    public void updateFavoriteButton(int slot) {
+        Button b = (slot >= 0 && slot < favLoopButtons.length) ? favLoopButtons[slot] : null;
+        if (b != null) {
+            boolean filled = favLoopKits[slot] >= 1;
+            b.setText(filled ? "⭐" + (slot + 1) : "·" + (slot + 1));
+            b.setBackgroundResource(filled ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        }
+    }
+
+    /** Find + wire the 10 favorite buttons. Tap = load, long-press = save. */
+    private void setupFavorites() {
+        int[] ids = {R.id.favLoop1, R.id.favLoop2, R.id.favLoop3, R.id.favLoop4,
+                     R.id.favLoop5, R.id.favLoop6, R.id.favLoop7, R.id.favLoop8,
+                     R.id.favLoop9, R.id.favLoop10};
+        for (int i = 0; i < 10; i++) {
+            final int slot = i;
+            Button b = (Button) findViewById(ids[i]);
+            favLoopButtons[i] = b;
+            if (b == null) continue;
+            b.setOnClickListener(v -> loadFavorite(slot));
+            b.setOnLongClickListener(v -> {
+                saveFavorite(slot);
+                return true;
+            });
+        }
+        loadFavorites();
+        for (int i = 0; i < 10; i++) updateFavoriteButton(i);
+    }
+
     /**
      * Attaches a hold-to-repeat touch listener to a loop nav button.
      * Tap = 1 step; hold 500 ms → repeats at 300 → 120 → 60 → 30 ms.
@@ -1437,6 +1517,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         setupReverb();
         setupControls();
         initPads();
+        setupFavorites();
         this.audioEngine = new AudioEngine(this);
         this.audioEngine.start();
         setupAudioRouting();
@@ -2711,6 +2792,32 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 float range = paramMax[pi2] - paramMin[pi2];
                 seeks[pi2].setProgress(Math.round((paramDefault[pi2] - paramMin[pi2]) / range * 200f));
                 vTxts[pi2].setText(String.format(java.util.Locale.US, "%.2f", paramDefault[pi2]));
+            }
+            // ── Reset re-applies defaults to live audio immediately ─────────
+            // If the pad is currently looping, push the default per-pad params to
+            // the running loop (updateLoopSpeedPitch — no stop/restart, no gap).
+            // If not looping, replay a short preview so the user instantly hears
+            // the new default settings without pressing play again.
+            AudioEngine.SampleData sd = loopSamples[pad];
+            if (sd != null && sd.loaded && audioEngine != null) {
+                float baseVol = isMasterVolumeMode ? masterVolume : padVolume[pad];
+                // paramDefault[3]=gain 1.0, [4]=pitch 1.0, [5]=pan 0.0; EQ defaults = 0
+                if (loopPlaying[pad]) {
+                    audioEngine.updateLoopSpeedPitch(pad,
+                        baseVol * paramDefault[3],
+                        currentSpeed,
+                        currentPitch * paramDefault[4],
+                        paramDefault[5]);
+                    lastPreviewPadIdx = pad;
+                } else {
+                    audioEngine.playSample(pad, sd,
+                        baseVol * paramDefault[3], currentSpeed,
+                        currentPitch * paramDefault[4], 0,
+                        false, 0f, 0f,
+                        paramDefault[0], paramDefault[1], paramDefault[2],
+                        0, 0f, 0f, paramDefault[5]);
+                    lastPreviewPadIdx = pad;
+                }
             }
         });
         root.addView(btnRst);

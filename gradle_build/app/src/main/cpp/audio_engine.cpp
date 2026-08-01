@@ -258,6 +258,8 @@ public:
     sonicStream loopSonic[LOOP_VOICES];
     float loopSonicLastSpeed[LOOP_VOICES];
     float loopSonicLastPitch[LOOP_VOICES];
+    float loopSonicLastVol[LOOP_VOICES];   // smooth volume ramp (avoids zipper noise)
+    float loopSonicLastPan[LOOP_VOICES];   // smooth pan ramp
 
     // Per-loop-voice channel count (1=mono, 2=stereo); matches the Sonic stream
     // channel count and the loaded pad's channel count. Updated at CMD_PLAY.
@@ -292,6 +294,8 @@ public:
             loopSonic[i] = sonicCreateStream(48000, 1); // 48kHz default; reinit() updates SR
             loopSonicLastSpeed[i]  = 1.f;
             loopSonicLastPitch[i]  = 1.f;
+            loopSonicLastVol[i]    = 1.f;
+            loopSonicLastPan[i]    = 0.f;
             loopSonicChannels[i]   = 1;   // default mono; updated on CMD_PLAY
         }
     }
@@ -341,7 +345,15 @@ public:
                 {
                     float targetSpd  = v.speed.load(std::memory_order_relaxed);
                     float targetPtch = v.pitch.load(std::memory_order_relaxed);
-                    const float SMOOTH = 0.15f;
+                    // ── Adaptive smoothing ─────────────────────────────────────
+                    // Large jumps (preset restore, MIDI CC step) need a gentler
+                    // ramp than small slider ticks. 6% per callback (~4ms) reaches
+                    // 50% of a small delta in ~40ms; for very large deltas (>0.5)
+                    // drop to 3% so the first step is a tiny WSOLA re-sync that
+                    // Sonic handles with no audible crack.
+                    const float spdDelta  = fabsf(targetSpd  - loopSonicLastSpeed[vi]);
+                    const float ptchDelta = fabsf(targetPtch - loopSonicLastPitch[vi]);
+                    float SMOOTH = (spdDelta > 0.5f || ptchDelta > 0.5f) ? 0.03f : 0.06f;
                     float newSpd  = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd  - loopSonicLastSpeed[vi]);
                     float newPtch = loopSonicLastPitch[vi] + SMOOTH * (targetPtch - loopSonicLastPitch[vi]);
                     // Snap to target when very close — stops infinite micro-updates
@@ -355,6 +367,22 @@ public:
                         sonicSetPitch(sonic, newPtch);
                         loopSonicLastPitch[vi] = newPtch;
                     }
+                }
+
+                // ── Smooth volume/pan ramping ───────────────────────────────────
+                // v.volume/v.pan are written directly by CMD_UPDATE (no ramp), so
+                // reading them raw causes an instant gain/balance step = zipper
+                // noise/click. Apply the same exponential ramp here, then use the
+                // ramped values for the final output below.
+                {
+                    float targetVol = v.volume.load(std::memory_order_relaxed);
+                    float targetPan = v.pan.load(std::memory_order_relaxed);
+                    float newVol = loopSonicLastVol[vi] + 0.06f * (targetVol - loopSonicLastVol[vi]);
+                    float newPan = loopSonicLastPan[vi] + 0.06f * (targetPan - loopSonicLastPan[vi]);
+                    if (fabsf(newVol - targetVol) < 0.002f) newVol = targetVol;
+                    if (fabsf(newPan - targetPan) < 0.002f) newPan = targetPan;
+                    loopSonicLastVol[vi] = newVol;
+                    loopSonicLastPan[vi] = newPan;
                 }
 
                 float spd    = loopSonicLastSpeed[vi];   // current (ramped) speed for feed calc
@@ -409,7 +437,9 @@ public:
                                                    numFrames < SCRATCH_SIZE ? numFrames : SCRATCH_SIZE);
 
                 // Pan law: linear balance (center=1/1, full-L=1/0, full-R=0/1)
-                float panV  = v.pan.load(std::memory_order_relaxed);
+                // Uses the smoothly-ramped pan value (loopSonicLastPan) so balance
+                // changes don't click.
+                float panV  = loopSonicLastPan[vi];
                 float lGain = (panV <= 0.f) ? 1.f : (1.f - panV);
                 float rGain = (panV >= 0.f) ? 1.f : (1.f + panV);
 
@@ -424,7 +454,8 @@ public:
                             break;
                         }
                     }
-                    float ev = vol * v.envGain;
+                    // Ramped loop volume — prevents zipper noise on volume changes
+                    float ev = loopSonicLastVol[vi] * v.envGain;
                     float L  = (i < got) ? readBuf[i * loopCh]                         : 0.f;
                     float R  = (i < got) ? (loopCh > 1 ? readBuf[i * loopCh + 1] : L) : 0.f;
                     if (nCh == 2) {
@@ -633,6 +664,8 @@ public:
                     sonicSetPitch(loopSonic[vi], c.pitch);
                     loopSonicLastSpeed[vi] = c.speed;
                     loopSonicLastPitch[vi] = c.pitch;
+                    loopSonicLastVol[vi]   = c.volume;
+                    loopSonicLastPan[vi]   = c.pan;
                 }
             } else {
                 vi = nextDrumVoice;
@@ -861,6 +894,8 @@ public:
             // fires correctly after an Oboe error/restart cycle.
             loopSonicLastSpeed[i]  = 1.0f;
             loopSonicLastPitch[i]  = 1.0f;
+            loopSonicLastVol[i]    = 1.0f;
+            loopSonicLastPan[i]    = 0.0f;
             loopSonicChannels[i]   = 1; // reset; updated at next CMD_PLAY
         }
 
