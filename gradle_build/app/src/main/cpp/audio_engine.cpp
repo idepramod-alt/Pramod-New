@@ -391,14 +391,23 @@ public:
                 size_t numFrm = pb.pcm.size() / (size_t)loopCh;
 
                 // ── Sonic feeding: top-up to feedTarget level ───────────────────
-                // feedTarget = numFrames*spd*3+512 (same as confirmed-working design).
+                // feedTarget accounts for BOTH speed AND pitch so the feed rate
+                // matches Sonic's actual input consumption. Without pitch in the
+                // feed target, pitch>1 causes Sonic output underflow (crackle)
+                // and pitch<1 causes excess (latency creep) during dragging.
+                //
                 // Only feed the DIFFERENCE (feedTarget - avail) to maintain this
                 // level. Unconditional feeding would overfill Sonic's output ring
                 // every callback → unbounded realloc growth on RT thread.
                 // Crossfade the last XFADE frames at the loop boundary so the
                 // wrap-point click is inaudible (blends tail frames into head frames).
                 static const int XFADE = 256;
-                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
+                float totalRate = spd * fabsf(loopSonicLastPitch[vi]);
+                // Floor at 1.0: for pitch<1 Sonic produces MORE output per input
+                // but we still need enough input to maintain the feed buffer. The
+                // floor matches the original speed-only design (numFrames*3+512).
+                float effectiveRate = fmaxf(totalRate, 1.0f);
+                int feedTarget = (int)(numFrames * effectiveRate * 3.0f) + 512;
                 if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
                 int avail = sonicSamplesAvailable(sonic);
                 if (avail < feedTarget) {

@@ -3917,7 +3917,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (seekPitch != null) seekPitch.setProgress(prog);
                 if (txtPitchVal != null)
                     txtPitchVal.setText(String.format(java.util.Locale.US, "%.1fx", currentPitch));
-                updateAllActiveLoops();
+                // Debounce: rapid CC flooding can overflow the 128-entry cmdQ.
+                // Apply with a short delay identical to the seekbar path.
+                if (speedPitchRunnable != null) speedPitchHandler.removeCallbacks(speedPitchRunnable);
+                speedPitchRunnable = () -> {
+                    updateAllActiveLoops();
+                    speedPitchRunnable = null;
+                };
+                speedPitchHandler.postDelayed(speedPitchRunnable, 40L);
             });
 
         } else if (cc == prefs.getInt("midi_cc_volume_minus", 80)
