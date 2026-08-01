@@ -207,6 +207,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private int[]              midiCCPadMap         = MIDI_CC_PAD_DEFAULT.clone();
     private volatile boolean   midiCCLearnMode      = false;
     private volatile int       midiCCLearnTargetPad = -1;
+    // ── MIDI CC step-control debounce ─────────────────────────────────────────
+    // SPD-20 Pro pad-triggered CC can arrive with value 0 (press) then 127 (release)
+    // or vice-versa. Step controls must fire on ANY value (not just > 0), but we
+    // debounce per-CC so a single physical press does not double-step. Index = CC no.
+    private volatile long[]    ccStepDebounceMs     = new long[128];
 
     // ── MIDI CC → Global Controls learn mode ─────────────────────────────────
     private volatile boolean          midiCCControlLearnMode = false;
@@ -3219,7 +3224,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         byte note     = (byte) val;
                                         int  velocity = msg[i + 1] & 0xFF;
                                         LoopsActivity inst = LoopsActivity.globalInstance;
-                                        if (inst != null) {
+                                        if (inst != null && inst.isVisible) {
                                             if (velocity > 0) {
                                                 inst.handleMidiNoteOn(note, (byte) velocity);
                                             } else {
@@ -3233,7 +3238,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         if (i + 1 >= end) return;
                                         byte note = (byte) val;
                                         LoopsActivity inst = LoopsActivity.globalInstance;
-                                        if (inst != null) inst.handleMidiNoteOff(note);
+                                        if (inst != null && inst.isVisible) inst.handleMidiNoteOff(note);
                                         i += 2;
                                     } else if (type == 0xB0) {
                                         // ── Control Change (CC) — Roland SPD-20 Pro controls ──
@@ -3242,13 +3247,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                             int ccNum  = val;
                                             int ccVal2 = msg[i + 1] & 0xFF;
                                             LoopsActivity inst = LoopsActivity.globalInstance;
-                                            if (inst != null) inst.handleMidiCC(ccNum, ccVal2);
+                                            if (inst != null && inst.isVisible) inst.handleMidiCC(ccNum, ccVal2);
                                             i += 2;
                                         } else { i++; }
                                     } else if (type == 0xC0) {
                                         // Program Change (0xCn)
                                         LoopsActivity inst = LoopsActivity.globalInstance;
-                                        if (inst != null) inst.handleProgramChange(val);
+                                        if (inst != null && inst.isVisible) inst.handleProgramChange(val);
                                         i++;
                                     } else {
                                         i++;
@@ -3699,7 +3704,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_volume_minus", 80) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_volume_minus", 80)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Volume − : directly decrement masterVolume/padVolume + apply to engine
             runOnUiThread(() -> {
                 if (isMasterVolumeMode) {
@@ -3721,7 +3728,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_volume_plus", 81) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_volume_plus", 81)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Volume + : directly increment masterVolume/padVolume + apply to engine
             runOnUiThread(() -> {
                 if (isMasterVolumeMode) {
@@ -3743,7 +3752,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_tempo_minus", 82)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Tempo − : directly decrement currentSpeed + apply to engine
             runOnUiThread(() -> {
                 currentSpeed = Math.max(0.1f, currentSpeed - 0.01f);
@@ -3754,7 +3765,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_tempo_plus", 83)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Tempo + : directly increment currentSpeed + apply to engine
             runOnUiThread(() -> {
                 currentSpeed = Math.min(2f, currentSpeed + 0.01f);
@@ -3765,7 +3778,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_pitch_minus", 84)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Pitch − : directly decrement currentPitch + apply to engine
             runOnUiThread(() -> {
                 currentPitch = Math.max(0.1f, currentPitch - 0.01f);
@@ -3775,7 +3790,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85) && value > 0) {
+        } else if (cc == prefs.getInt("midi_cc_pitch_plus", 85)
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Pitch + : directly increment currentPitch + apply to engine
             runOnUiThread(() -> {
                 currentPitch = Math.min(2f, currentPitch + 0.01f);
@@ -3785,10 +3802,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updateAllActiveLoops();
             });
 
-        } else if (cc == ccKitPrev && value > 0) {
+        } else if (cc == ccKitPrev
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             runOnUiThread(() -> changeLoopBy(-1));
 
-        } else if (cc == ccKitNext && value > 0) {
+        } else if (cc == ccKitNext
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             runOnUiThread(() -> changeLoopBy(1));
 
         } else {

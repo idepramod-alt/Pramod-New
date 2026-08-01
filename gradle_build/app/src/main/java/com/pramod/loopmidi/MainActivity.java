@@ -113,6 +113,11 @@ public class MainActivity extends Activity {
     private String[]                  midiCCCtrlKeys         = null;
     private android.app.AlertDialog   midiCCCtrlDialog       = null;
     private Button                    btnCCCtrl              = null;
+    // ── MIDI CC step-control debounce ─────────────────────────────────────────
+    // SPD-20 Pro pad-triggered CC can arrive with value 0 (press) then 127 (release)
+    // or vice-versa. Step controls must fire on ANY value (not just > 0), but we
+    // debounce per-CC so a single physical press does not double-step. Index = CC no.
+    private volatile long[]           ccStepDebounceMs       = new long[128];
 
     // ── MIDI Kit Lock — SPD-20 Pro kit filter ─────────────────────────────────
     // midiKitLockNumber: SPD-20 Pro kit no. jis pe app ka sound bajega (-1 = off)
@@ -873,6 +878,19 @@ public class MainActivity extends Activity {
      * (drum pad runs on top of LoopsActivity). Stop All works locally.
      */
     public void handleMidiCC(int cc, int value) {
+        // Read stop/connect CC numbers up-front — the dual-receiver guard below
+        // needs them before the main dispatch block.
+        int ccStop       = prefs.getInt("midi_cc_stop",          123);
+        int ccMidiToggle = prefs.getInt("midi_cc_connect_toggle", 26);
+
+        // ── Dual-receiver guard ───────────────────────────────────────────────
+        // Both activities hold open MIDI ports on the same device, so EVERY CC
+        // reaches this receiver even when MainActivity is in the background
+        // (LoopsActivity on top). Skip non-essential handling here when hidden —
+        // the visible activity's own receiver already processed this CC.
+        // Stop All + MIDI Connect stay global so hardware buttons work everywhere.
+        if (!this.isVisible && cc != ccStop && cc != ccMidiToggle) return;
+
         // ── CC Control Learn (Vol/Tempo/Pitch/Stop/KitPrev/KitNext/Connect) ───
         if (midiCCControlLearnMode && midiCCControlLearnKey != null) {
             final String lKey = midiCCControlLearnKey;
@@ -918,10 +936,8 @@ public class MainActivity extends Activity {
         }
 
         int ccPitch      = prefs.getInt("midi_cc_pitch",          21);
-        int ccStop       = prefs.getInt("midi_cc_stop",          123);
         int ccKitPrev    = prefs.getInt("midi_cc_kit_prev",       24);
         int ccKitNext    = prefs.getInt("midi_cc_kit_next",       25);
-        int ccMidiToggle = prefs.getInt("midi_cc_connect_toggle", 26);
 
         if (cc == ccStop) {
             // Stop all drum sounds immediately on MIDI thread
@@ -945,7 +961,9 @@ public class MainActivity extends Activity {
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
-        } else if (cc == ccKitPrev && value > 0) {
+        } else if (cc == ccKitPrev
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Kit Prev — Bank A
             runOnUiThread(() -> {
                 if (kitIndex > 1) {
@@ -957,7 +975,9 @@ public class MainActivity extends Activity {
                 }
             });
 
-        } else if (cc == ccKitNext && value > 0) {
+        } else if (cc == ccKitNext
+                && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
+            ccStepDebounceMs[cc] = System.currentTimeMillis();
             // Kit Next — Bank A
             runOnUiThread(() -> {
                 saveKitToMemory(kitIndex);
