@@ -254,14 +254,32 @@ public:
     float delayBuf[NUM_VOICES][DELAY_BUF_SIZE];
     int   delayWrite[NUM_VOICES] = {0};
 
-    // Loop voices use the SAME direct source-PCM linear resampler as the drum
-    // voices (rate = speed × pitch). NO Sonic: linear fractional interpolation
-    // has continuous phase for ANY rate change → mathematically click-free,
-    // exactly like the drum pads that never crackle. Sonic's sinc pitch
-    // resampler re-synced on every rate change (inherent click) and its
-    // feed/ring machinery caused underflow + crashes — both now eliminated.
-    float loopSonicLastVol[LOOP_VOICES];   // smooth volume ramp (avoids zipper noise)
-    float loopSonicLastPan[LOOP_VOICES];   // smooth pan ramp
+    // ── Loop voices: Sonic (speed/WSOLA) + engine ring resampler (pitch) ────
+    // ARCHITECTURE (gives INDEPENDENT speed and pitch, both click-free):
+    //   • Sonic applies SPEED only (pitch pinned to 1.0). WSOLA time-stretch
+    //     is tempo-only — speed changes never shift pitch.
+    //   • The engine's ring-buffer LINEAR FRACTIONAL resampler applies PITCH
+    //     to Sonic's output. Linear interpolation is value-continuous for any
+    //     rate change, so live pitch drags can never click — and Sonic is never
+    //     re-synced by a pitch change (its sinc re-sync WAS the crack source).
+    //   • Ring occupancy is kept constant (drift-free): pos advances by exactly
+    //     `got` frames per callback, so the ring never wraps onto the reader.
+    sonicStream loopSonic[LOOP_VOICES];
+    float loopSonicLastSpeed[LOOP_VOICES];  // ramped speed fed to Sonic (WSOLA)
+    float loopSonicLastVol[LOOP_VOICES];    // smooth volume ramp (zipper-free)
+    float loopSonicLastPan[LOOP_VOICES];    // smooth pan ramp
+    float loopPitchRamp[LOOP_VOICES];       // ramped pitch target for the resampler
+    float loopPitchPos[LOOP_VOICES];        // absolute resampler read pos (frames)
+    long  loopRingTotal[LOOP_VOICES];       // total frames Sonic wrote into ring
+    int   loopSonicChannels[LOOP_VOICES];   // 1=mono, 2=stereo
+    static const int RING_CAP   = 4096;     // per-voice ring capacity (frames)
+    static const int RING_HEAD  = 64;       // priming headroom so reader never starves
+    float loopRing[LOOP_VOICES * RING_CAP * 2];  // interleaved stereo ring
+
+    // scratch buffers (audio thread only — no malloc in callback)
+    static const int SCRATCH_SIZE = 4096;
+    float feedBuf[SCRATCH_SIZE * 2];
+    float readBuf[SCRATCH_SIZE * 2];
 
     // ── Internal/system-audio recording (post-mix tap) ─────────────────────
     // Captures the engine's own mixed output (everything played through the
@@ -277,9 +295,19 @@ public:
     size_t               recordCapacity = 0;
 
     AudioEngineImpl() {
+        memset(loopSonic, 0, sizeof(loopSonic));
         for (int i = 0; i < LOOP_VOICES; i++) {
-            loopSonicLastVol[i] = 1.f;
-            loopSonicLastPan[i] = 0.f;
+            // Pre-warm Sonic streams at construction time so the first loop
+            // play() call doesn't incur sonicCreateStream malloc on the audio
+            // thread — eliminates the 2-5ms "first hit" delay for loop pads.
+            loopSonic[i] = sonicCreateStream(48000, 1); // 48kHz default; reinit() updates SR
+            loopSonicLastSpeed[i] = 1.f;
+            loopSonicLastVol[i]   = 1.f;
+            loopSonicLastPan[i]   = 0.f;
+            loopPitchRamp[i]      = 1.f;
+            loopPitchPos[i]       = 0.f;
+            loopRingTotal[i]      = 0;
+            loopSonicChannels[i]  = 1;   // default mono; updated on CMD_PLAY
         }
     }
 
@@ -306,22 +334,46 @@ public:
 
             float vol = v.volume.load(std::memory_order_relaxed);
 
-            if (v.isLoop && vi < LOOP_VOICES) {
-                // ── Loop voice: direct source-PCM linear resampling (NO Sonic) ──
-                // Same proven click-free engine as the drum pads. rate = speed×pitch
-                // combines both controls; linear fractional interpolation is
-                // continuous for ANY rate change, so dragging pitch/speed can never
-                // click (no Sonic sinc re-sync, no feed underflow, no ring wrap).
-                float rate = v.speed.load(std::memory_order_relaxed)
-                           * v.pitch.load(std::memory_order_relaxed);
-                if (rate < 0.1f) rate = 0.1f;
-                if (rate > 4.0f) rate = 4.0f;
+            if (v.isLoop && vi < LOOP_VOICES && loopSonic[vi] != nullptr) {
+                sonicStream sonic = loopSonic[vi];
 
-                // ── Smooth volume/pan ramping ───────────────────────────────────
-                // v.volume/v.pan are written directly by CMD_UPDATE (no ramp), so
-                // reading them raw causes an instant gain/balance step = zipper
-                // noise/click. Apply the same exponential ramp here, then use the
-                // ramped values for the final output below.
+                // ── Speed (WSOLA) + pitch (ring resampler) — INDEPENDENT ──────
+                // Sonic applies SPEED only (pitch pinned 1.0): tempo changes
+                // don't shift pitch. Pitch is applied by the engine's drift-free
+                // linear ring resampler on Sonic's output, so pitch drags never
+                // re-sync Sonic (no sinc re-sync click) and never starve (ring
+                // occupancy is constant). Both controls stay independent.
+                float targetSpd  = v.speed.load(std::memory_order_relaxed);
+                float targetPtch = v.pitch.load(std::memory_order_relaxed);
+
+                // Ramp speed (Sonic WSOLA re-syncs on a change; keep steps gentle).
+                {
+                    const float spdDelta = fabsf(targetSpd - loopSonicLastSpeed[vi]);
+                    float SMOOTH = (spdDelta > 0.5f) ? 0.03f : 0.06f;
+                    float newSpd = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd - loopSonicLastSpeed[vi]);
+                    if (fabsf(newSpd - targetSpd) < 0.002f) newSpd = targetSpd;
+                    if (newSpd != loopSonicLastSpeed[vi]) {
+                        sonicSetSpeed(sonic, newSpd);
+                        loopSonicLastSpeed[vi] = newSpd;
+                    }
+                }
+                // Ramp pitch target (the resampler rate follows smoothly).
+                {
+                    float ptchDelta = targetPtch - loopPitchRamp[vi];
+                    if (fabsf(ptchDelta) > 0.002f) {
+                        float pSMOOTH = (fabsf(ptchDelta) > 0.5f) ? 0.03f : 0.06f;
+                        loopPitchRamp[vi] += pSMOOTH * ptchDelta;
+                        if (fabsf(targetPtch - loopPitchRamp[vi]) < 0.002f)
+                            loopPitchRamp[vi] = targetPtch;
+                    } else {
+                        loopPitchRamp[vi] = targetPtch;
+                    }
+                }
+                float pitchNow = loopPitchRamp[vi];
+                if (pitchNow < 0.1f) pitchNow = 0.1f;
+                if (pitchNow > 8.0f) pitchNow = 8.0f;
+
+                // ── Smooth volume/pan ramping (zipper-free) ────────────────────
                 {
                     float targetVol = v.volume.load(std::memory_order_relaxed);
                     float targetPan = v.pan.load(std::memory_order_relaxed);
@@ -333,21 +385,85 @@ public:
                     loopSonicLastPan[vi] = newPan;
                 }
 
-                int   loopCh = pb.channels;            // 1=mono pad, 2=stereo pad
+                int   loopCh = loopSonicChannels[vi];   // 1=mono pad, 2=stereo pad
                 if (loopCh < 1 || loopCh > 2) loopCh = 1;
                 size_t numFrm = pb.pcm.size() / (size_t)loopCh;
                 if (numFrm < 2) continue;
 
-                // Pan law: linear balance (center=1/1, full-L=1/0, full-R=0/1).
-                // Uses the smoothly-ramped pan value (loopSonicLastPan) so balance
-                // changes don't click.
+                float spd = loopSonicLastSpeed[vi];
+
+                // ── Sonic feed (speed-only rate — stable, pitch-free) ──────────
+                // Sonic (pitch pinned to 1.0) produces input/speed output, so the
+                // feed rate depends ONLY on speed — pitch never enters the feed
+                // (that coupling was the earlier underflow source). 3x + 512
+                // headroom absorbs WSOLA latency so the reads below never starve.
+                static const int XFADE = 256;
+                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
+                if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
+                int avail = sonicSamplesAvailable(sonic);
+                if (avail < feedTarget) {
+                    int toFeed = feedTarget - avail;
+                    if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
+                    int fed = 0;
+                    while (fed < toFeed) {
+                        if (v.position >= (int)numFrm) v.position = 0;
+                        size_t pos = v.position;
+                        float fL = pb.pcm[pos * (size_t)loopCh];
+                        float fR = (loopCh > 1) ? pb.pcm[pos * (size_t)loopCh + 1] : fL;
+                        // Crossfade tail → head at the loop boundary (wrap click).
+                        if (numFrm > (size_t)(XFADE * 2) && pos >= numFrm - (size_t)XFADE) {
+                            size_t tailOff = pos - (numFrm - XFADE);
+                            float  t       = (float)tailOff / (float)XFADE;
+                            float  headL   = pb.pcm[tailOff * (size_t)loopCh];
+                            float  headR   = (loopCh > 1) ? pb.pcm[tailOff * (size_t)loopCh + 1] : headL;
+                            fL = fL * (1.f - t) + headL * t;
+                            fR = fR * (1.f - t) + headR * t;
+                        }
+                        feedBuf[fed * loopCh]     = fL;
+                        if (loopCh > 1) feedBuf[fed * loopCh + 1] = fR;
+                        fed++;
+                        v.position++;
+                    }
+                    sonicWriteFloatToStream(sonic, feedBuf, fed);
+                }
+
+                // ── Read Sonic output into the pitch ring (drift-free) ─────────
+                // readCount = round(numFrames × pitchNow) = exactly the frames the
+                // resampler consumes this callback, so ring occupancy is constant
+                // (no accumulation, no wrap onto the reader).
+                int readCount = (int)(numFrames * pitchNow + 0.5f);
+                if (readCount > RING_CAP - 8) readCount = RING_CAP - 8;
+                if (readCount < 0) readCount = 0;
+                int got = sonicReadFloatFromStream(sonic, readBuf, readCount);
+
+                long ringBase  = (long)vi * RING_CAP * 2;
+                long ringTotal = loopRingTotal[vi];
+                for (int i = 0; i < got; i++) {
+                    long slot = ringBase + ((ringTotal + i) % RING_CAP) * 2;
+                    float sL  = readBuf[i * loopCh];
+                    float sR  = (loopCh > 1) ? readBuf[i * loopCh + 1] : sL;
+                    loopRing[slot]     = sL;
+                    loopRing[slot + 1] = sR;
+                }
+                loopRingTotal[vi] = ringTotal + got;
+
+                // ── Engine ring resampler (linear fractional at pitchNow) ───────
+                // pos advances exactly got/numFrames per output frame, so total
+                // advance = got = amount written → occupancy constant, no drift.
+                // Linear interp between adjacent ring frames is continuous for any
+                // pitch change → no click. RING_HEAD priming keeps the reader from
+                // touching unwritten ring slots during Sonic's startup latency.
+                float pos = loopPitchPos[vi];
+                if (pos < 0.f) pos = 0.f;
+                if (pos + RING_HEAD > (float)loopRingTotal[vi]) {
+                    pos = (float)(loopRingTotal[vi] - RING_HEAD);
+                    if (pos < 0.f) pos = 0.f;
+                }
+                float adv = (numFrames > 0) ? (float)got / (float)numFrames : 1.f;
+
                 float panV  = loopSonicLastPan[vi];
                 float lGain = (panV <= 0.f) ? 1.f : (1.f - panV);
                 float rGain = (panV >= 0.f) ? 1.f : (1.f + panV);
-
-                // Crossfade the loop wrap: in the last XFADE frames, blend the
-                // tail into the loop head so the wrap-point jump is inaudible.
-                static const int XFADE = 256;
 
                 for (int i = 0; i < numFrames; i++) {
                     // Envelope
@@ -360,33 +476,17 @@ public:
                             break;
                         }
                     }
-                    // Ramped loop volume — prevents zipper noise on volume changes
                     float ev = loopSonicLastVol[vi] * v.envGain;
 
-                    // Fractional read position, wrapped at the loop end.
-                    int   ipos = v.position % (int)numFrm;
-                    float frac = v.pitchAcc;                 // [0,1)
-                    int   inext = (ipos + 1) % (int)numFrm;
-
-                    float s0L = pb.pcm[(size_t)ipos * loopCh];
-                    float s0R = (loopCh > 1) ? pb.pcm[(size_t)ipos * loopCh + 1] : s0L;
-                    float s1L = pb.pcm[(size_t)inext * loopCh];
-                    float s1R = (loopCh > 1) ? pb.pcm[(size_t)inext * loopCh + 1] : s1L;
-
-                    // Linear interpolation between adjacent frames — continuous
-                    // phase for any rate change → click-free pitch/speed control.
-                    float L = s0L + frac * (s1L - s0L);
-                    float R = s0R + frac * (s1R - s0R);
-
-                    // Loop-end crossfade: blend tail frames into the loop head
-                    if (numFrm > (size_t)(XFADE * 2) && (size_t)ipos >= numFrm - (size_t)XFADE) {
-                        size_t tailOff = (size_t)ipos - (numFrm - XFADE);
-                        float  t       = (float)tailOff / (float)XFADE;
-                        float  headL   = pb.pcm[tailOff * (size_t)loopCh];
-                        float  headR   = (loopCh > 1) ? pb.pcm[tailOff * (size_t)loopCh + 1] : headL;
-                        L = L * (1.f - t) + headL * t;
-                        R = R * (1.f - t) + headR * t;
-                    }
+                    long p0 = (long)pos;
+                    if (p0 + 1 >= loopRingTotal[vi]) break;   // starved (safety net)
+                    long s0 = ringBase + (p0 % RING_CAP) * 2;
+                    long s1 = ringBase + ((p0 + 1) % RING_CAP) * 2;
+                    float frac = pos - (float)p0;
+                    float L = loopRing[s0]     * (1.f - frac) + loopRing[s1]     * frac;
+                    float R = (loopCh > 1)
+                        ? loopRing[s0 + 1] * (1.f - frac) + loopRing[s1 + 1] * frac
+                        : L;
 
                     if (nCh == 2) {
                         out[2 * i]     += L * ev * lGain;
@@ -394,15 +494,11 @@ public:
                     } else {
                         out[i] += (loopCh > 1 ? (L + R) * 0.5f : L) * ev;
                     }
-
-                    // Advance position (in frames) by combined speed×pitch rate;
-                    // wrap at the loop end (same accumulator as drum voices).
-                    v.pitchAcc += rate - 1.f;
-                    int extra = (int)v.pitchAcc;
-                    v.pitchAcc -= extra;
-                    v.position += 1 + extra;
-                    if (v.position >= (int)numFrm) v.position %= (int)numFrm;
+                    pos += adv;
                 }
+                loopPitchPos[vi] = pos;
+            } else {
+
 
             } else {
                 // ── Drum/one-shot voice: linear-interpolation resampling ─────────
@@ -589,11 +685,24 @@ public:
             int vi;
             if (c.isLoop) {
                 vi = c.padIdx % LOOP_VOICES;
-                // Loop voices use the engine's direct PCM resampler (no Sonic),
-                // so channel count is read from the pad buffer at render time.
-                // Just seed the smoothed volume/pan state here.
-                loopSonicLastVol[vi]   = c.volume;
-                loopSonicLastPan[vi]   = c.pan;
+                // Match Sonic's channel count to the loaded pad so stereo pads
+                // get interleaved L/R output from Sonic (not mono dup).
+                int loopCh = (c.padIdx >= 0 && c.padIdx < MAX_PADS)
+                             ? pads[c.padIdx].channels : 1;
+                if (loopCh < 1 || loopCh > 2) loopCh = 1;
+                if (loopSonic[vi]) sonicDestroyStream(loopSonic[vi]);
+                loopSonic[vi]          = sonicCreateStream(sampleRate, loopCh);
+                loopSonicChannels[vi]  = loopCh;
+                if (loopSonic[vi]) {
+                    sonicSetSpeed(loopSonic[vi], c.speed);
+                    sonicSetPitch(loopSonic[vi], 1.0f);  // Sonic = speed ONLY; pitch is engine-side
+                    loopSonicLastSpeed[vi] = c.speed;
+                    loopSonicLastVol[vi]   = c.volume;
+                    loopSonicLastPan[vi]   = c.pan;
+                    loopPitchRamp[vi]      = c.pitch;
+                    loopPitchPos[vi]       = 0.f;
+                    loopRingTotal[vi]      = 0;
+                }
             } else {
                 vi = nextDrumVoice;
                 nextDrumVoice = LOOP_VOICES + ((nextDrumVoice - LOOP_VOICES + 1) % DRUM_VOICES);
@@ -654,11 +763,16 @@ public:
             break;
 
         case CMD_UPDATE_SPEED_PITCH:
-            // Live speed/pitch update — update TARGET atomics ONLY. Both loop
-            // and drum voices read v.speed/v.pitch directly in the render loop
-            // (engine-side linear resampling, no Sonic), so the change takes
-            // effect on the very next callback. Linear fractional interpolation
-            // is continuous for any rate change → no crack, no Sonic re-sync.
+            // Live speed/pitch update — update TARGET atomics ONLY.
+            //
+            // For loop voices: DO NOT call sonicSetSpeed/sonicSetPitch here. The
+            // render loop ramps speed (WSOLA) toward the target with gentle steps
+            // and ramps the engine-side pitch target; both take effect on the
+            // next callback via Sonic (speed) and the ring resampler (pitch).
+            //
+            // For drum/one-shot voices: v.speed and v.pitch are read directly
+            // in the render loop (linear resampling only). Updating them here
+            // takes effect on the very next callback.
 
             // ── Update active loop voice at slot c.padIdx ──
             if (c.padIdx >= 0 && c.padIdx < LOOP_VOICES) {
@@ -802,12 +916,22 @@ public:
         memset(delayBuf, 0, sizeof(delayBuf));
         memset(delayWrite, 0, sizeof(delayWrite));
 
-        // Loop voices use the engine's direct PCM resampler (no Sonic streams).
-        // Reset the smoothed volume/pan state so the ramp restarts cleanly after
-        // an Oboe error/restart cycle.
+        // Reinitialize Sonic streams with the new sample rate.
+        // Also reset loopSonicLastSpeed/Pitch to 1.0 so the render loop's
+        // smooth-ramp comparisons match the freshly created streams' default
+        // state (speed=1.0, pitch=1.0). Without this reset, after an Oboe
+        // error/restart the render loop sees "already at target" but the new
+        // stream is at default 1.0 → wrong playback speed.
         for (int i = 0; i < LOOP_VOICES; i++) {
-            loopSonicLastVol[i]    = 1.0f;
-            loopSonicLastPan[i]    = 0.0f;
+            if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);
+            loopSonic[i] = sonicCreateStream(sampleRate, 1);
+            loopSonicLastSpeed[i] = 1.0f;
+            loopSonicLastVol[i]   = 1.0f;
+            loopSonicLastPan[i]   = 0.0f;
+            loopPitchRamp[i]      = 1.0f;
+            loopPitchPos[i]       = 0.0f;
+            loopRingTotal[i]      = 0;
+            loopSonicChannels[i]  = 1; // reset; updated at next CMD_PLAY
         }
 
         oboe::AudioStreamBuilder b;
@@ -972,6 +1096,9 @@ public:
             watchdogCv.wait(lk, [this] { return activeWatchdogs == 0; });
         }
         if (stream) { stream->stop(); stream->close(); }
+        for (int i = 0; i < LOOP_VOICES; i++) {
+            if (loopSonic[i]) sonicDestroyStream(loopSonic[i]);
+        }
     }
 };
 
