@@ -1740,10 +1740,15 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 // ── Bank-aware volume ──────────────────────────────────────
+                // BANK_B → only Bank B; LAYER_AB → BOTH banks (A+B play together);
+                // otherwise → Bank A.
                 if (MainActivity.this.bankMode == BANK_B) {
                     MainActivity.this.padVolumeB[MainActivity.this.selectedPad] = progress / 100.0f;
                 } else {
                     MainActivity.this.padVolume[MainActivity.this.selectedPad] = progress / 100.0f;
+                    if (MainActivity.this.bankMode == LAYER_AB) {
+                        MainActivity.this.padVolumeB[MainActivity.this.selectedPad] = progress / 100.0f;
+                    }
                 }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1761,10 +1766,15 @@ public class MainActivity extends Activity {
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 // ── Bank-aware pitch ───────────────────────────────────────
+                // LAYER_AB → both banks move together so the A+B layer stays in
+                // tune; otherwise the active bank only.
                 if (MainActivity.this.bankMode == BANK_B) {
                     MainActivity.this.padPitchB[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
                 } else {
                     MainActivity.this.padPitch[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
+                    if (MainActivity.this.bankMode == LAYER_AB) {
+                        MainActivity.this.padPitchB[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
+                    }
                 }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1782,10 +1792,14 @@ public class MainActivity extends Activity {
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 // ── Bank-aware delay on/off ────────────────────────────────
+                // LAYER_AB → both banks toggle together.
                 if (MainActivity.this.bankMode == BANK_B) {
                     MainActivity.this.padDelayOnB[MainActivity.this.selectedPad] = isChecked;
                 } else {
                     MainActivity.this.padDelayOn[MainActivity.this.selectedPad] = isChecked;
+                    if (MainActivity.this.bankMode == LAYER_AB) {
+                        MainActivity.this.padDelayOnB[MainActivity.this.selectedPad] = isChecked;
+                    }
                 }
                 MainActivity mainActivity = MainActivity.this;
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1796,10 +1810,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware delay time ──────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padDelayTimeB[MainActivity.this.selectedPad] = progress;
                     } else {
                         MainActivity.this.padDelayTime[MainActivity.this.selectedPad] = progress;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padDelayTimeB[MainActivity.this.selectedPad] = progress;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1819,10 +1837,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware delay level ─────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padDelayLevelB[MainActivity.this.selectedPad] = progress / 100.0f;
                     } else {
                         MainActivity.this.padDelayLevel[MainActivity.this.selectedPad] = progress / 100.0f;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padDelayLevelB[MainActivity.this.selectedPad] = progress / 100.0f;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1842,10 +1864,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware EQ High ─────────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padEqHighB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
                     } else {
                         MainActivity.this.padEqHigh[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padEqHighB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1865,10 +1891,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware EQ Mid ──────────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padEqMidB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
                     } else {
                         MainActivity.this.padEqMid[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padEqMidB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1888,10 +1918,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware EQ Low ──────────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padEqLowB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
                     } else {
                         MainActivity.this.padEqLow[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padEqLowB[MainActivity.this.selectedPad] = (progress - 100) * 0.15f;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
@@ -1911,10 +1945,14 @@ public class MainActivity extends Activity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     // ── Bank-aware choke group ─────────────────────────────
+                    // LAYER_AB → both banks update together.
                     if (MainActivity.this.bankMode == BANK_B) {
                         MainActivity.this.padChokeGroupB[MainActivity.this.selectedPad] = progress;
                     } else {
                         MainActivity.this.padChokeGroup[MainActivity.this.selectedPad] = progress;
+                        if (MainActivity.this.bankMode == LAYER_AB) {
+                            MainActivity.this.padChokeGroupB[MainActivity.this.selectedPad] = progress;
+                        }
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
