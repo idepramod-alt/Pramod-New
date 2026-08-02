@@ -2787,6 +2787,22 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         btnRst.setLayoutParams(rstLP);
         btnRst.setOnClickListener(vv -> {
             int pad = selPad[0];
+            boolean padLooping = loopPlaying[pad];
+
+            // ── Stop the sound that was playing before this reset ───────────────
+            // A preview from a previously-tapped pad (or an old preview of this
+            // same pad) must be silenced first — otherwise it keeps ringing on top
+            // of the reset's new preview. EXCEPTION: if THIS pad's own loop is
+            // running we don't stop it here — it is live-updated to defaults below
+            // (updateLoopSpeedPitch, no stop/restart gap). That keeps the reset
+            // clean: one sound, the one that reflects the reset defaults.
+            try {
+                if (audioEngine != null && lastPreviewPadIdx >= 0
+                        && !(padLooping && lastPreviewPadIdx == pad)) {
+                    audioEngine.stopPad(lastPreviewPadIdx);
+                }
+            } catch (Exception ignored) {}
+
             for (int pi2 = 0; pi2 < 6; pi2++) {
                 wArrays[pi2][pad] = paramDefault[pi2];
                 float range = paramMax[pi2] - paramMin[pi2];
