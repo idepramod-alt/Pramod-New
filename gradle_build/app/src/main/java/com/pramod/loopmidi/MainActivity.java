@@ -3143,6 +3143,17 @@ public class MainActivity extends Activity {
             // Refresh seekbars for the active bank's pad, then persist
             refreshSeekBarsForCurrentBankAndPad();
             saveKitToMemory(this.kitIndex);
+            // ── Restore BOTH banks from the freshly-saved prefs ─────────────────
+            // The folder load above only touched the ACTIVE bank's samples. If the
+            // audio engine was recreated (file picker fired onStop() → engine null),
+            // the OTHER bank's samples were never loaded into the fresh engine — so
+            // after loading a folder kit into Bank B, Bank A's previously-loaded kit
+            // went silent. loadKitFromMemory() (async) reloads BOTH banks from prefs:
+            // the active bank gets the just-saved folder WAVs, the other bank gets its
+            // previously-saved sounds. Safe: the gen++ at the top of this method has
+            // already aborted the stale load from onActivityResult's engine-recreate
+            // path, so there is no competing write.
+            try { loadKitFromMemory(this.kitIndex); } catch (Exception ignored) {}
             Toast.makeText(this, "Kit Loaded Successfully!", 0).show();
         } catch (Exception ignored) {
             ignored.printStackTrace();
