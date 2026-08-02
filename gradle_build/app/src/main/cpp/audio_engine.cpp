@@ -272,8 +272,8 @@ public:
     float loopPitchPos[LOOP_VOICES];        // absolute resampler read pos (frames)
     long  loopRingTotal[LOOP_VOICES];       // total frames Sonic wrote into ring
     int   loopSonicChannels[LOOP_VOICES];   // 1=mono, 2=stereo
-    static const int RING_CAP   = 4096;     // per-voice ring capacity (frames)
-    static const int RING_HEAD  = 64;       // priming headroom so reader never starves
+    static const int RING_CAP   = 8192;     // per-voice ring capacity (frames)
+    static const int RING_HEAD  = 256;      // priming headroom so reader never starves
     float loopRing[LOOP_VOICES * RING_CAP * 2];  // interleaved stereo ring
 
     // scratch buffers (audio thread only — no malloc in callback)
@@ -346,32 +346,51 @@ public:
                 float targetSpd  = v.speed.load(std::memory_order_relaxed);
                 float targetPtch = v.pitch.load(std::memory_order_relaxed);
 
-                // Ramp speed (Sonic WSOLA re-syncs on a change; keep steps gentle).
+                // ── Pitch: slow per-callback ramp + per-sample glide ─────────────
+                // The resampler rate is ramped gently each callback (rateStart →
+                // rateEnd, ~2-3% of remaining) and then glides LINEARLY sample by
+                // sample inside the callback. A per-callback rate STEP is the
+                // audible crack during pitch drags; a per-sample glide is
+                // mathematically continuous → zero click, zero step.
+                if (targetPtch < 0.1f) targetPtch = 0.1f;
+                if (targetPtch > 8.0f) targetPtch = 8.0f;
+                float rateStart = loopPitchRamp[vi];         // rate at callback start
+                float rateEnd   = rateStart;
+                float ptchDelta = targetPtch - rateStart;
+                if (fabsf(ptchDelta) > 0.001f) {
+                    float step = (fabsf(ptchDelta) > 0.5f) ? 0.02f : 0.03f;
+                    rateEnd = rateStart + step * ptchDelta;
+                    if (fabsf(targetPtch - rateEnd) < step) rateEnd = targetPtch;
+                }
+                loopPitchRamp[vi] = rateEnd;                 // persist for next callback
+                if (rateEnd < 0.1f) rateEnd = 0.1f;
+                if (rateEnd > 8.0f) rateEnd = 8.0f;
+                // Average rate over this callback — the ring is balanced against it
+                float rateAvg = 0.5f * (rateStart + rateEnd);
+
+                // ── Speed (Sonic WSOLA) with tempo compensation ─────────────────
+                // Sonic's speed is set to rampedSpeed / rateEnd so that the ring
+                // resampler's pitch effect on tempo (×P) is cancelled out: the
+                // loop then plays at tempo = rampedSpeed REGARDLESS of pitch —
+                // speed and pitch are fully independent (speed = tempo only,
+                // pitch = pitch only), which is what live performance needs.
+                // Sonic's WSOLA speed is ramped gently (3-6%/callback) so its
+                // period detection never jumps.
                 {
                     const float spdDelta = fabsf(targetSpd - loopSonicLastSpeed[vi]);
                     float SMOOTH = (spdDelta > 0.5f) ? 0.03f : 0.06f;
                     float newSpd = loopSonicLastSpeed[vi] + SMOOTH * (targetSpd - loopSonicLastSpeed[vi]);
                     if (fabsf(newSpd - targetSpd) < 0.002f) newSpd = targetSpd;
-                    if (newSpd != loopSonicLastSpeed[vi]) {
-                        sonicSetSpeed(sonic, newSpd);
-                        loopSonicLastSpeed[vi] = newSpd;
+                    // Compensated speed: tempo S is recovered after the ×P ring
+                    // resample. Clamp to Sonic's usable WSOLA range [0.15, 6].
+                    float compSpd = newSpd / rateEnd;
+                    if (compSpd < 0.15f) compSpd = 0.15f;
+                    if (compSpd > 6.0f)  compSpd = 6.0f;
+                    if (fabsf(compSpd - loopSonicLastSpeed[vi]) > 0.002f) {
+                        sonicSetSpeed(sonic, compSpd);
                     }
+                    loopSonicLastSpeed[vi] = newSpd;         // the un-compensated S
                 }
-                // Ramp pitch target (the resampler rate follows smoothly).
-                {
-                    float ptchDelta = targetPtch - loopPitchRamp[vi];
-                    if (fabsf(ptchDelta) > 0.002f) {
-                        float pSMOOTH = (fabsf(ptchDelta) > 0.5f) ? 0.03f : 0.06f;
-                        loopPitchRamp[vi] += pSMOOTH * ptchDelta;
-                        if (fabsf(targetPtch - loopPitchRamp[vi]) < 0.002f)
-                            loopPitchRamp[vi] = targetPtch;
-                    } else {
-                        loopPitchRamp[vi] = targetPtch;
-                    }
-                }
-                float pitchNow = loopPitchRamp[vi];
-                if (pitchNow < 0.1f) pitchNow = 0.1f;
-                if (pitchNow > 8.0f) pitchNow = 8.0f;
 
                 // ── Smooth volume/pan ramping (zipper-free) ────────────────────
                 {
@@ -390,19 +409,29 @@ public:
                 size_t numFrm = pb.pcm.size() / (size_t)loopCh;
                 if (numFrm < 2) continue;
 
-                float spd = loopSonicLastSpeed[vi];
+                float spd = loopSonicLastSpeed[vi];   // un-compensated tempo S
+                // Actual Sonic speed (after ÷rateEnd compensation) drives its input
+                // consumption, so the feed headroom must use THIS value.
+                float sonicSpd = spd / rateEnd;
+                if (sonicSpd < 0.15f) sonicSpd = 0.15f;
+                if (sonicSpd > 6.0f)  sonicSpd = 6.0f;
 
-                // ── Sonic feed (speed-only rate — stable, pitch-free) ──────────
-                // Sonic (pitch pinned to 1.0) produces input/speed output, so the
-                // feed rate depends ONLY on speed — pitch never enters the feed
-                // (that coupling was the earlier underflow source). 3x + 512
-                // headroom absorbs WSOLA latency so the reads below never starve.
+                // ── Sonic feed (speed + pitch-aware — never starves the ring) ───
+                // Sonic (pitch pinned 1.0) produces input/sonicSpd output; the feed
+                // target must cover BOTH the WSOLA 3x headroom AND this callback's
+                // ring read rate (readCount = numFrames×rateAvg), so Sonic always
+                // has enough output for the resampler — no underflow, no reader
+                // catch-up (a catch-up forces a ring repeat = click).
                 static const int XFADE = 256;
-                int feedTarget = (int)(numFrames * spd * 3.0f) + 512;
+                float feedRate = fmaxf(sonicSpd * 3.0f, rateAvg);
+                int feedTarget = (int)(numFrames * feedRate) + 512;
                 if (feedTarget > SCRATCH_SIZE) feedTarget = SCRATCH_SIZE;
                 int avail = sonicSamplesAvailable(sonic);
                 if (avail < feedTarget) {
-                    int toFeed = feedTarget - avail;
+                    // Sonic (speed=sonicSpd, pitch=1) turns N input frames into
+                    // N/sonicSpd output frames — so to raise the output by the
+                    // deficit we must feed deficit × sonicSpd INPUT frames.
+                    int toFeed = (int)((feedTarget - avail) * sonicSpd) + 8;
                     if (toFeed > SCRATCH_SIZE) toFeed = SCRATCH_SIZE;
                     int fed = 0;
                     while (fed < toFeed) {
@@ -428,11 +457,12 @@ public:
                 }
 
                 // ── Read Sonic output into the pitch ring (drift-free) ─────────
-                // readCount = round(numFrames × pitchNow) = exactly the frames the
-                // resampler consumes this callback, so ring occupancy is constant
-                // (no accumulation, no wrap onto the reader).
-                int readCount = (int)(numFrames * pitchNow + 0.5f);
-                if (readCount > RING_CAP - 8) readCount = RING_CAP - 8;
+                // readCount = round(numFrames × rateAvg) — the resampler glides
+                // from rateStart to rateEnd this callback and its average rate is
+                // rateAvg, so reading exactly rateAvg×numFrames keeps ring
+                // occupancy constant (no accumulation, no wrap onto the reader).
+                int readCount = (int)(numFrames * rateAvg + 0.5f);
+                if (readCount > SCRATCH_SIZE) readCount = SCRATCH_SIZE;
                 if (readCount < 0) readCount = 0;
                 int got = sonicReadFloatFromStream(sonic, readBuf, readCount);
 
@@ -447,24 +477,36 @@ public:
                 }
                 loopRingTotal[vi] = ringTotal + got;
 
-                // ── Engine ring resampler (linear fractional at pitchNow) ───────
-                // pos advances exactly got/numFrames per output frame, so total
-                // advance = got = amount written → occupancy constant, no drift.
-                // Linear interp between adjacent ring frames is continuous for any
-                // pitch change → no click. RING_HEAD priming keeps the reader from
-                // touching unwritten ring slots during Sonic's startup latency.
+                // ── Engine ring resampler (cubic, per-sample rate glide) ────────
+                // pos advances at a rate that GLIDES linearly from rateStart to
+                // rateEnd across the callback — zero rate steps between samples.
+                // Total advance = rateAvg × numFrames ≈ got → ring occupancy is
+                // constant, no drift, no wrap. Catmull-Rom interpolation removes
+                // the aliasing/stair-step of linear interpolation (audible on
+                // sustained loops). RING_HEAD priming keeps the reader clear of
+                // unwritten slots during Sonic's startup latency.
                 float pos = loopPitchPos[vi];
-                if (pos < 0.f) pos = 0.f;
+                // pos must be ≥ 1 so the cubic's p0 = pos-1 never reads a negative
+                // (unwritten) ring slot during the first callbacks after play.
+                if (pos < 1.f) pos = 1.f;
+                // Keep the reader RING_HEAD frames behind the write head: this
+                // primes the ring at startup AND absorbs Sonic's WSOLA burstiness
+                // (when WSOLA stalls a few callbacks then dumps a chunk, the 256
+                // frames of history keep the resampler fed). With the feed now
+                // covering readCount, pos should never actually catch up.
                 if (pos + RING_HEAD > (float)loopRingTotal[vi]) {
                     pos = (float)(loopRingTotal[vi] - RING_HEAD);
-                    if (pos < 0.f) pos = 0.f;
+                    if (pos < 1.f) pos = 1.f;
                 }
-                float adv = (numFrames > 0) ? (float)got / (float)numFrames : 1.f;
+                // If rate is changing, per-sample advance glides rateStart→rateEnd;
+                // otherwise it's constant. (Precomputed to keep the hot loop cheap.)
+                const float dRate = (rateEnd - rateStart) / (float)(numFrames > 0 ? numFrames : 1);
 
                 float panV  = loopSonicLastPan[vi];
                 float lGain = (panV <= 0.f) ? 1.f : (1.f - panV);
                 float rGain = (panV >= 0.f) ? 1.f : (1.f + panV);
 
+                float rr = rateStart;
                 for (int i = 0; i < numFrames; i++) {
                     // Envelope
                     if (!v.releasing) {
@@ -478,15 +520,31 @@ public:
                     }
                     float ev = loopSonicLastVol[vi] * v.envGain;
 
-                    long p0 = (long)pos;
-                    if (p0 + 1 >= loopRingTotal[vi]) break;   // starved (safety net)
-                    long s0 = ringBase + (p0 % RING_CAP) * 2;
-                    long s1 = ringBase + ((p0 + 1) % RING_CAP) * 2;
-                    float frac = pos - (float)p0;
-                    float L = loopRing[s0]     * (1.f - frac) + loopRing[s1]     * frac;
-                    float R = (loopCh > 1)
-                        ? loopRing[s0 + 1] * (1.f - frac) + loopRing[s1 + 1] * frac
-                        : L;
+                    long p1 = (long)pos;                       // target frame
+                    if (p1 + 2 >= loopRingTotal[vi]) break;    // cubic needs p3 valid
+                    long p0 = p1 - 1, p2 = p1 + 1, p3 = p1 + 2;
+                    float frac = pos - (float)p1;
+                    // Ring slot for a frame index (absolute ringTotal-space → slot)
+                    long q0 = ringBase + ((p0 % RING_CAP + RING_CAP) % RING_CAP) * 2;
+                    long q1 = ringBase + ((p1 % RING_CAP + RING_CAP) % RING_CAP) * 2;
+                    long q2 = ringBase + ((p2 % RING_CAP + RING_CAP) % RING_CAP) * 2;
+                    long q3 = ringBase + ((p3 % RING_CAP + RING_CAP) % RING_CAP) * 2;
+                    // Catmull-Rom cubic — C1 continuous, removes linear aliasing
+                    float m0 = 0.5f * (loopRing[q2] - loopRing[q0]);
+                    float m1 = 0.5f * (loopRing[q3] - loopRing[q1]);
+                    float L  = loopRing[q1] * (2.f*frac*frac*frac - 3.f*frac*frac + 1.f)
+                             + loopRing[q2] * (3.f*frac*frac - 2.f*frac*frac*frac)
+                             + m0 * (frac*frac*frac - 2.f*frac*frac + frac)
+                             + m1 * (frac*frac*frac - frac*frac);
+                    float R = L;
+                    if (loopCh > 1) {
+                        m0 = 0.5f * (loopRing[q2 + 1] - loopRing[q0 + 1]);
+                        m1 = 0.5f * (loopRing[q3 + 1] - loopRing[q1 + 1]);
+                        R  = loopRing[q1 + 1] * (2.f*frac*frac*frac - 3.f*frac*frac + 1.f)
+                           + loopRing[q2 + 1] * (3.f*frac*frac - 2.f*frac*frac*frac)
+                           + m0 * (frac*frac*frac - 2.f*frac*frac + frac)
+                           + m1 * (frac*frac*frac - frac*frac);
+                    }
 
                     if (nCh == 2) {
                         out[2 * i]     += L * ev * lGain;
@@ -494,7 +552,8 @@ public:
                     } else {
                         out[i] += (loopCh > 1 ? (L + R) * 0.5f : L) * ev;
                     }
-                    pos += adv;
+                    pos += rr;                    // glide: advance changes per sample
+                    rr  += dRate;
                 }
                 loopPitchPos[vi] = pos;
             } else {
@@ -691,7 +750,12 @@ public:
                 loopSonic[vi]          = sonicCreateStream(sampleRate, loopCh);
                 loopSonicChannels[vi]  = loopCh;
                 if (loopSonic[vi]) {
-                    sonicSetSpeed(loopSonic[vi], c.speed);
+                    // Sonic runs at the compensated speed (tempo S ÷ pitch P) so
+                    // that the engine ring resampler's ×P restores tempo = S.
+                    float cSpd = (c.pitch > 0.01f) ? c.speed / c.pitch : c.speed;
+                    if (cSpd < 0.15f) cSpd = 0.15f;
+                    if (cSpd > 6.0f)  cSpd = 6.0f;
+                    sonicSetSpeed(loopSonic[vi], cSpd);
                     sonicSetPitch(loopSonic[vi], 1.0f);  // Sonic = speed ONLY; pitch is engine-side
                     loopSonicLastSpeed[vi] = c.speed;
                     loopSonicLastVol[vi]   = c.volume;
