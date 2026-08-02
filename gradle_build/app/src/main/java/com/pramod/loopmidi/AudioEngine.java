@@ -256,22 +256,32 @@ public class AudioEngine {
      * background thread, then uploadPcm() (fast native copy) on the main thread.
      */
     public short[] decodeUriToPcm(Uri uri) throws IOException {
-        if (!nativeAvailable) return null;
-        AssetFileDescriptor afd = context.getContentResolver()
-                .openAssetFileDescriptor(uri, "r");
-        if (afd == null) return null;
-        byte[] raw = readAssetFileDescriptor(afd);
-        afd.close();
-        return decodeAudioToPcm(raw);
+        try {
+            if (!nativeAvailable) return null;
+            AssetFileDescriptor afd = context.getContentResolver()
+                    .openAssetFileDescriptor(uri, "r");
+            if (afd == null) return null;
+            byte[] raw = readAssetFileDescriptor(afd);
+            afd.close();
+            return decodeAudioToPcm(raw);
+        } catch (Exception e) {
+            Log.e(TAG, "decodeUriToPcm failed", e);
+            return null;
+        }
     }
 
     /** Decode a res/raw resource to PCM without touching native state. */
     public short[] decodeRawToPcm(int resId) throws IOException {
-        if (!nativeAvailable) return null;
-        InputStream is  = context.getResources().openRawResource(resId);
-        byte[]      raw = readFully(is);
-        is.close();
-        return decodeAudioToPcm(raw);
+        try {
+            if (!nativeAvailable) return null;
+            InputStream is  = context.getResources().openRawResource(resId);
+            byte[]      raw = readFully(is);
+            is.close();
+            return decodeAudioToPcm(raw);
+        } catch (Exception e) {
+            Log.e(TAG, "decodeRawToPcm failed", e);
+            return null;
+        }
     }
 
     /** Upload already-decoded PCM into native storage. Call on main thread. */
