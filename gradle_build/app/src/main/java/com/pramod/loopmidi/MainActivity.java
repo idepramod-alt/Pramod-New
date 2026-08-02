@@ -221,6 +221,15 @@ public class MainActivity extends Activity {
     private final Handler kitRepeatHandler = new Handler(Looper.getMainLooper());
     private Runnable kitRepeatRunnable;
 
+    // ── Async kit sample loading ──────────────────────────────────────────────
+    // Kit/bank switches decode 16 WAVs (file I/O + MediaCodec) which, done on the
+    // UI thread, is the felt latency. Samples are now decoded on this single
+    // background thread; the fast native upload runs back on the main thread.
+    // kitLoadGeneration invalidates stale loads when the user switches quickly.
+    private final java.util.concurrent.ExecutorService kitLoadExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile int kitLoadGeneration = 0;
+
     // ── Audio-routing callbacks (earphone / BT plug-unplug) ──────────────────
     private AudioDeviceCallback audioDeviceCallback = null;
     private BroadcastReceiver   noisyReceiver       = null;
@@ -1645,7 +1654,18 @@ public class MainActivity extends Activity {
                 // and switching back to Bank A shows Bank A's. (Before, only the
                 // button label and seekbars changed; the kit name and loaded pads
                 // stayed on the previous bank.)
-                loadKitFromMemory(kitIndex);
+                //
+                // OPTIMIZATION: Both banks' samples are always loaded together
+                // by loadKitFromMemory (called at init + every kit change). A
+                // bank toggle therefore does NOT need to reload samples — only
+                // the kit name display needs to flip to the active bank's name.
+                // loadKitFromMemory is ~1-2s (16 WAV decodes); removing it here
+                // makes the bank toggle instant.
+                if (bankMode == BANK_B) {
+                    txtKitName.setText(currentKitNameB);
+                } else {
+                    txtKitName.setText(currentKitName);
+                }
                 String msg;
                 if (bankMode == BANK_A)        msg = "🅰️ Bank A — only Bank A pads active";
                 else if (bankMode == BANK_B)   msg = "🅱️ Bank B — only Bank B pads active";
@@ -2839,9 +2859,8 @@ public class MainActivity extends Activity {
         editor.apply();
     }
 
+
     public void loadKitFromMemory(int kitNo) {
-        // Guard: engine can be null if called while Activity is stopped (e.g. from
-        // a kitRepeatRunnable that fired after onStop() set audioEngine = null).
         if (this.audioEngine == null) {
             Log.w(TAG, "loadKitFromMemory: audioEngine is null, skipping load for kitNo=" + kitNo);
             return;
@@ -2853,15 +2872,11 @@ public class MainActivity extends Activity {
         } else {
             this.currentKitName = this.prefs.getString("kit_name_" + kitNo, "KIT " + kitNo);
         }
-        // Bank B kit name (keyed by kitIndexB)
         this.currentKitNameB = this.prefs.getString("kit_name_B_" + this.kitIndexB, "KIT B:" + this.kitIndexB);
-        // Show the active bank's kit name in the UI
-        if (this.bankMode == BANK_B) {
-            this.txtKitName.setText(this.currentKitNameB);
-        } else {
-            this.txtKitName.setText(this.currentKitName);
-        }
+        if (this.bankMode == BANK_B) this.txtKitName.setText(this.currentKitNameB);
+        else this.txtKitName.setText(this.currentKitName);
         Log.i(TAG, "loadKitFromMemory: kitA=" + kitNo + " '" + this.currentKitName + "' kitB=" + this.kitIndexB + " '" + this.currentKitNameB + "'");
+
         for (int i = 0; i < 8; i++) {
             this.padVolume[i] = this.prefs.getFloat("kit_" + kitNo + "_vol_" + i, 0.8f);
             this.padPitch[i] = this.prefs.getFloat("kit_" + kitNo + "_pitch_" + i, 1.0f);
@@ -2874,70 +2889,11 @@ public class MainActivity extends Activity {
             this.padGain[i] = this.prefs.getFloat("kit_" + kitNo + "_gain_" + i, 1.0f);
             this.padPan[i]  = this.prefs.getFloat("kit_" + kitNo + "_pan_" + i, 0.0f);
             this.padChokeGroup[i] = this.prefs.getInt("kit_" + kitNo + "_choke_" + i, 0);
-            String uriStr = this.prefs.getString("kit_" + kitNo + "_uri_" + i, null);
-            int rawResId = this.prefs.getInt("kit_" + kitNo + "_raw_" + i, 0);
-            if (uriStr != null) {
-                try {
-                    this.selectedWavUris[i] = Uri.parse(uriStr);
-                    this.selectedRawResIds[i] = 0;
-                    this.samples[i] = this.audioEngine.loadWavFromUri(i, this.selectedWavUris[i]);
-                    if (this.samples[i] != null) {
-                        this.audioEngine.preloadSample(this.samples[i]);
-                    } else {
-                        this.selectedWavUris[i] = null;
-                        if (kitNo <= this.presetKitNames.length) {
-                            this.selectedRawResIds[i] = this.presetKits[this.currentPresetKit][i];
-                        } else {
-                            this.selectedRawResIds[i] = this.presetKits[0][i];
-                        }
-                        this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
-                        if (this.samples[i] != null) {
-                            this.audioEngine.preloadSample(this.samples[i]);
-                        }
-                    }
-                } catch (IOException e) {
-                    this.samples[i] = null;
-                    e.printStackTrace();
-                }
-            } else if (rawResId != 0) {
-                this.selectedWavUris[i] = null;
-                this.selectedRawResIds[i] = rawResId;
-                try {
-                    this.samples[i] = this.audioEngine.loadRawSound(i, rawResId);
-                } catch (IOException e) {
-                    this.samples[i] = null;
-                    e.printStackTrace();
-                }
-                AudioEngine.SampleData sampleData2 = this.samples[i];
-                if (sampleData2 != null) {
-                    this.audioEngine.preloadSample(sampleData2);
-                }
-            } else {
-                this.selectedWavUris[i] = null;
-                if (kitNo <= this.presetKitNames.length) {
-                    this.selectedRawResIds[i] = this.presetKits[this.currentPresetKit][i];
-                } else {
-                    this.selectedRawResIds[i] = this.presetKits[0][i];
-                }
-                try {
-                    this.samples[i] = this.audioEngine.loadRawSound(i, this.selectedRawResIds[i]);
-                } catch (IOException e) {
-                    this.samples[i] = null;
-                    e.printStackTrace();
-                }
-                AudioEngine.SampleData sampleData3 = this.samples[i];
-                if (sampleData3 != null) {
-                    this.audioEngine.preloadSample(sampleData3);
-                }
-            }
         }
         String assistUriStr = this.prefs.getString("kit_" + kitNo + "_assist_uri", null);
-        if (assistUriStr != null) {
-            this.assistSoundUri = Uri.parse(assistUriStr);
-        } else {
-            this.assistSoundUri = null;
-        }
-        // ── Bank B loading — uses kitIndexB (independent of Bank A's kitNo) ──
+        if (assistUriStr != null) this.assistSoundUri = Uri.parse(assistUriStr);
+        else this.assistSoundUri = null;
+
         int kB = this.kitIndexB;
         for (int i = 0; i < 8; i++) {
             this.padVolumeB[i]     = this.prefs.getFloat("kit_" + kB + "_B_vol_" + i, 0.8f);
@@ -2951,30 +2907,7 @@ public class MainActivity extends Activity {
             this.padGainB[i]       = this.prefs.getFloat("kit_" + kB + "_B_gain_" + i, 1.0f);
             this.padPanB[i]        = this.prefs.getFloat("kit_" + kB + "_B_pan_" + i, 0.0f);
             this.padChokeGroupB[i] = this.prefs.getInt("kit_" + kB + "_B_choke_" + i, 0);
-            String uriBStr  = this.prefs.getString("kit_" + kB + "_B_uri_" + i, null);
-            int    rawBResId = this.prefs.getInt("kit_" + kB + "_B_raw_" + i, 0);
-            if (uriBStr != null) {
-                try {
-                    this.selectedWavUrisB[i]   = Uri.parse(uriBStr);
-                    this.selectedRawResIdsB[i] = 0;
-                    this.samplesB[i] = this.audioEngine.loadWavFromUri(i + 8, this.selectedWavUrisB[i]);
-                    if (this.samplesB[i] != null) this.audioEngine.preloadSample(this.samplesB[i]);
-                    else this.selectedWavUrisB[i] = null;
-                } catch (IOException e) { this.samplesB[i] = null; }
-            } else if (rawBResId != 0) {
-                this.selectedWavUrisB[i]   = null;
-                this.selectedRawResIdsB[i] = rawBResId;
-                try {
-                    this.samplesB[i] = this.audioEngine.loadRawSound(i + 8, rawBResId);
-                    if (this.samplesB[i] != null) this.audioEngine.preloadSample(this.samplesB[i]);
-                } catch (IOException e) { this.samplesB[i] = null; }
-            } else {
-                this.selectedWavUrisB[i]   = null;
-                this.selectedRawResIdsB[i] = 0;
-                this.samplesB[i]           = null;
-            }
         }
-        // ── Bank-aware seekbar refresh after kit load ──────────────────────
         if (this.bankMode == BANK_B) {
             this.seekVolume.setProgress((int) (this.padVolumeB[this.selectedPad] * 100.0f));
             this.seekPitch.setProgress((int) ((this.padPitchB[this.selectedPad] - 0.5f) * 100.0f));
@@ -2982,7 +2915,62 @@ public class MainActivity extends Activity {
             this.seekVolume.setProgress((int) (this.padVolume[this.selectedPad] * 100.0f));
             this.seekPitch.setProgress((int) ((this.padPitch[this.selectedPad] - 0.5f) * 100.0f));
         }
+
+        final int gen = ++this.kitLoadGeneration;
+        final int kA = kitNo, kBk = this.kitIndexB;
+        this.kitLoadExecutor.execute(() -> loadKitSamplesBackground(kA, kBk, gen));
     }
+
+    private void loadKitSamplesBackground(final int kitNo, final int kitB, final int gen) {
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+        final Uri[]     urisA = new Uri[8];
+        final int[]     rawsA = new int[8];
+        final short[][] pcmsA = new short[8][];
+        for (int i = 0; i < 8; i++) {
+            if (gen != this.kitLoadGeneration) return;
+            try {
+                String uriStr = this.prefs.getString("kit_" + kitNo + "_uri_" + i, null);
+                int rawResId  = this.prefs.getInt("kit_" + kitNo + "_raw_" + i, 0);
+                if (uriStr != null) { urisA[i] = Uri.parse(uriStr); pcmsA[i] = engine.decodeUriToPcm(urisA[i]); }
+                else if (rawResId != 0) { rawsA[i] = rawResId; pcmsA[i] = engine.decodeRawToPcm(rawResId); }
+                else { int pk = (kitNo <= this.presetKitNames.length) ? this.currentPresetKit : 0; rawsA[i] = this.presetKits[pk][i]; pcmsA[i] = engine.decodeRawToPcm(rawsA[i]); }
+            } catch (Exception ignored) {}
+        }
+        final Uri[]     urisB = new Uri[8];
+        final int[]     rawsB = new int[8];
+        final short[][] pcmsB = new short[8][];
+        for (int i = 0; i < 8; i++) {
+            if (gen != this.kitLoadGeneration) return;
+            try {
+                String uriBStr = this.prefs.getString("kit_" + kitB + "_B_uri_" + i, null);
+                int rawBResId  = this.prefs.getInt("kit_" + kitB + "_B_raw_" + i, 0);
+                if (uriBStr != null) { urisB[i] = Uri.parse(uriBStr); pcmsB[i] = engine.decodeUriToPcm(urisB[i]); }
+                else if (rawBResId != 0) { rawsB[i] = rawBResId; pcmsB[i] = engine.decodeRawToPcm(rawBResId); }
+            } catch (Exception ignored) {}
+        }
+        if (gen != this.kitLoadGeneration) return;
+        this.runOnUiThread(() -> {
+            if (gen != this.kitLoadGeneration) return;
+            for (int i = 0; i < 8; i++) {
+                this.selectedWavUris[i]   = urisA[i]; this.selectedRawResIds[i] = rawsA[i];
+                if (pcmsA[i] != null && pcmsA[i].length > 0) {
+                    engine.uploadPcm(i, pcmsA[i]);
+                    AudioEngine.SampleData sd = new AudioEngine.SampleData(); sd.uri = urisA[i]; sd.soundId = i; sd.loaded = true;
+                    this.samples[i] = sd;
+                } else { this.samples[i] = null; }
+            }
+            for (int i = 0; i < 8; i++) {
+                this.selectedWavUrisB[i]   = urisB[i]; this.selectedRawResIdsB[i] = rawsB[i];
+                if (pcmsB[i] != null && pcmsB[i].length > 0) {
+                    engine.uploadPcm(i + 8, pcmsB[i]);
+                    AudioEngine.SampleData sd = new AudioEngine.SampleData(); sd.uri = urisB[i]; sd.soundId = i + 8; sd.loaded = true;
+                    this.samplesB[i] = sd;
+                } else { this.samplesB[i] = null; }
+            }
+        });
+    }
+
 
     public void loadKitFromFolder(Uri folderUri) throws IOException {
         int i;

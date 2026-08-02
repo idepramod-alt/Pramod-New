@@ -248,6 +248,39 @@ public class AudioEngine {
         }
     }
 
+    /**
+     * Decode-only helpers for BACKGROUND loading (kit/bank switches).
+     * Decoding is the heavy part (file I/O + MediaCodec) and previously ran on
+     * the UI thread inside loadKitFromMemory — that is the latency felt when
+     * switching banks or kits. These methods split the work: decode (slow) on a
+     * background thread, then uploadPcm() (fast native copy) on the main thread.
+     */
+    public short[] decodeUriToPcm(Uri uri) throws IOException {
+        if (!nativeAvailable) return null;
+        AssetFileDescriptor afd = context.getContentResolver()
+                .openAssetFileDescriptor(uri, "r");
+        if (afd == null) return null;
+        byte[] raw = readAssetFileDescriptor(afd);
+        afd.close();
+        return decodeAudioToPcm(raw);
+    }
+
+    /** Decode a res/raw resource to PCM without touching native state. */
+    public short[] decodeRawToPcm(int resId) throws IOException {
+        if (!nativeAvailable) return null;
+        InputStream is  = context.getResources().openRawResource(resId);
+        byte[]      raw = readFully(is);
+        is.close();
+        return decodeAudioToPcm(raw);
+    }
+
+    /** Upload already-decoded PCM into native storage. Call on main thread. */
+    public boolean uploadPcm(int padIndex, short[] pcm) {
+        if (!nativeAvailable || !validPad(padIndex) || pcm == null || pcm.length == 0) return false;
+        nativeLoadSample(padIndex, pcm, pcm.length / 2, 2);
+        return true;
+    }
+
     /** Load from res/raw resource. Supports any audio format. */
     public SampleData loadRawSound(int padIndex, int resId)
             throws Resources.NotFoundException, IOException {
