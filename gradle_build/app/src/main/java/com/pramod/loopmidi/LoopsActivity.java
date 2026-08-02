@@ -2040,27 +2040,49 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         et.setBackgroundColor(0xFF333333);
         et.setPadding(24, 16, 24, 16);
         et.setGravity(android.view.Gravity.CENTER);
+        // Show a "Done" action on the soft keyboard so the user can apply
+        // directly from the keyboard — no need to reach for the OK button.
+        et.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+
+        // Single apply routine shared by the OK button AND the keyboard Done key —
+        // both parse the input, apply the BPM, and close the dialog in one step.
+        final android.app.AlertDialog[] dlgHolder = new android.app.AlertDialog[1];
+        final Runnable applyAndClose = () -> {
+            android.app.AlertDialog dlg = dlgHolder[0];
+            String txt = et.getText().toString().trim();
+            if (txt.isEmpty()) {                 // empty → just close, no change
+                if (dlg != null) dlg.dismiss();
+                return;
+            }
+            try {
+                float bpm = Float.parseFloat(txt);
+                float speed = Math.max(0.1f, Math.min(2.0f, bpm / 120.0f));
+                if (seekTempo != null) {
+                    seekTempo.setProgress((int)(speed * 100f));
+                }
+                if (dlg != null) dlg.dismiss();
+            } catch (NumberFormatException e) {
+                android.widget.Toast.makeText(this, "Invalid BPM — enter a number (12–240)",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            }
+        };
 
         final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
             .setTitle("🎵 Set BPM")
             .setMessage("Enter BPM (12–240), default 120:")
             .setView(et)
-            .setPositiveButton("OK", (d, w) -> {
-                String txt = et.getText().toString().trim();
-                if (txt.isEmpty()) return;         // empty → no change
-                try {
-                    float bpm = Float.parseFloat(txt);
-                    float speed = Math.max(0.1f, Math.min(2.0f, bpm / 120.0f));
-                    if (seekTempo != null) {
-                        seekTempo.setProgress((int)(speed * 100f));
-                    }
-                } catch (NumberFormatException e) {
-                    android.widget.Toast.makeText(this, "Invalid BPM — enter a number (12–240)",
-                        android.widget.Toast.LENGTH_SHORT).show();
-                }
-            })
+            .setPositiveButton("OK", (d, w) -> applyAndClose.run())
             .setNegativeButton("Cancel", null)
             .create();
+        dlgHolder[0] = dlg;
+        // Keyboard "Done" → apply the BPM directly and close (same as OK).
+        et.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                applyAndClose.run();
+                return true;                    // consume — don't also hide keyboard
+            }
+            return false;
+        });
         dlg.show();
         // Auto-show the keyboard and widen the dialog for easy typing.
         // Set the soft-input mode on the DIALOG's window (not the activity's)
