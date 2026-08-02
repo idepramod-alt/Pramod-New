@@ -73,6 +73,7 @@ public class AudioEngine {
     private native void nativePlayLoopSP(int padIndex, float volume, float speed, float pitch, float pan);
     private native void nativeStopAll();
     private native void nativeStopPad(int padIndex);
+    private native void nativeReleasePad(int padIndex, float releaseMs);
     // Restart the Oboe stream with new device-native parameters (called when
     // the audio output device changes, e.g. earphone plug/unplug).
     // Preserves all loaded sample data and active voice state.
@@ -438,6 +439,18 @@ public class AudioEngine {
         if (!nativeAvailable) return;
         try { nativeStopAll(); }
         catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeStopAll missing", e); }
+    }
+
+    /**
+     * Smooth stop: fade the pad's voice out over {@code releaseMs} milliseconds
+     * instead of cutting it instantly. Engages the native per-voice release
+     * envelope, so the fade is click-free. Used by the Smooth Pad Transition
+     * toggle; stopPad()/stopAll() keep their instant behavior.
+     */
+    public void releasePad(int padIndex, float releaseMs) {
+        if (!nativeAvailable) return;
+        try { nativeReleasePad(padIndex, releaseMs); }
+        catch (UnsatisfiedLinkError e) { Log.e(TAG, "nativeReleasePad missing", e); }
     }
 
     /**

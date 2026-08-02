@@ -169,7 +169,7 @@ struct Voice {
 };
 
 // ─── Lock-free SPSC command queue ────────────────────────────────────────────
-enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH };
+enum CmdType { CMD_PLAY, CMD_STOP_PAD, CMD_STOP_ALL, CMD_UPDATE_SPEED_PITCH, CMD_RELEASE_PAD };
 
 struct Cmd {
     CmdType type;
@@ -818,6 +818,20 @@ public:
                     v.active.store(false, std::memory_order_relaxed);
             break;
 
+        // Smooth release: instead of hard-killing the voice, engage the existing
+        // per-voice release envelope. The render loop already decrements envGain
+        // by releaseRate per sample and deactivates the voice when it reaches 0,
+        // giving a click-free 100-200 ms fade-out (used by Smooth Pad Transition).
+        case CMD_RELEASE_PAD:
+            for (auto& v : voices)
+                if (v.active.load() && v.padIndex == c.padIdx && !v.releasing) {
+                    v.releasing  = true;
+                    v.releaseRate = (c.releaseMs > 0.f)
+                            ? (1.f / (c.releaseMs * (float)sampleRate / 1000.f))
+                            : 1.f;   // tiny positive rate → near-instant fade
+                }
+            break;
+
         case CMD_STOP_ALL:
             for (auto& v : voices)
                 v.active.store(false, std::memory_order_relaxed);
@@ -1137,6 +1151,14 @@ public:
         cmdQ.push(c);
     }
 
+    void releasePad(int padIdx, float releaseMs) {
+        Cmd c{};
+        c.type      = CMD_RELEASE_PAD;
+        c.padIdx    = padIdx;
+        c.releaseMs = releaseMs;
+        cmdQ.push(c);
+    }
+
     void stopAll() {
         Cmd c{};
         c.type = CMD_STOP_ALL;
@@ -1282,6 +1304,12 @@ JNIEXPORT void JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeStopPad(JNIEnv* env, jobject obj, jint padIdx) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->stopPad((int)padIdx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeReleasePad(JNIEnv* env, jobject obj, jint padIdx, jfloat releaseMs) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->releasePad((int)padIdx, (float)releaseMs);
 }
 
 // Called from Java AudioDeviceCallback when the audio output device changes

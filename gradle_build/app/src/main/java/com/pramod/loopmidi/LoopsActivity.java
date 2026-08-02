@@ -156,6 +156,24 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private int reverbLevel = 0;
     private volatile boolean isMultiMode = false;
     private volatile boolean isOneShotMode = false;
+
+    // ── Transition behavior toggles (default OFF — existing behavior untouched) ─
+    // keepPreviousLoop:   ON → kit switches don't stop currently-playing loops;
+    //                     only the Stop button / pad toggle-off silences them.
+    // smoothPadTransition:ON → when a pad is stopped (single-pad mode switch or
+    //                     toggle-off), its loop fades out over 150 ms instead of
+    //                     being cut instantly — no crackle/pop.
+    private volatile boolean keepPreviousLoop    = false;
+    private volatile boolean smoothPadTransition = false;
+    private CheckBox chkKeepPrevLoop;
+    private CheckBox chkSmoothTransition;
+    // Keep-Previous-Loop deferred reload: when a kit switch happens while the
+    // toggle is ON, pads that are still looping keep their OLD PCM (so their
+    // loop keeps sounding). Their new-kit source is recorded here so it can be
+    // loaded once their loop stops (toggle-off or Stop button).
+    private final boolean[] pendingKitReload = new boolean[8];
+    private final String[]  pendingKitAsset  = new String[8];  // asset kit path, or null
+    private final Uri[]     pendingKitUri    = new Uri[8];     // memory-kit uri, or null
     private boolean editMode = false;
     private int selectedPad = 0;
     private Uri[] loopUris = new Uri[8];
@@ -484,9 +502,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
                 // tap, regardless of Multi-Pad mode — a one-shot hit should always be
                 // able to stop a running loop, that is the point of its choke.
+                // Smooth Pad Transition ON → loops fade out instead of popping.
                 for (int i = 0; i < 8; i++) {
                     if (this.loopPlaying[i]) {
-                        this.audioEngine.stopPad(i);
+                        this.stopPadOrFade(i);
                         this.loopPlaying[i] = false;
                         updatePadLabel(i);
                     }
@@ -550,11 +569,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // loopPlaying stays true — pad is still actively looping
                 return;
             }
-            // OneShot OFF: normal toggle — second tap stops the loop
-            this.audioEngine.stopPad(index);
+            // OneShot OFF: normal toggle — second tap stops the loop (fades if ON)
+            this.stopPadOrFade(index);
             this.loopPlaying[index] = false;
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
             updatePadLabel(index);
+            this.maybeReloadDeferredPad(index);
             return;
         }
         // Start the loop via playLoopSP only. Previously this ALSO called
@@ -573,13 +593,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Touch-input single-pad mode: a new tap should stop the previous pad only
         // when Multi-Play is OFF. MIDI input should always use the single-trigger
         // behavior above and should not be affected by the Multi-Play checkbox.
-        if (this.isMultiMode) {
+        if (this.isMultiMode || this.keepPreviousLoop) {
+            // Multi-Play OR Keep Previous Loop: previous pads keep playing — only
+            // the Stop button (or tapping a pad again to toggle it off) silences
+            // them. Kept loops continue under the new kit; the user layers on top.
             return;
         }
         // Single-pad mode: new pad starts → previous pad stops automatically
+        // (with a 150 ms fade when Smooth Pad Transition is ON).
         for (int i = 0; i < 8; i++) {
             if (i != index && this.loopPlaying[i]) {
-                this.audioEngine.stopPad(i);
+                this.stopPadOrFade(i);
                 this.loopPlaying[i] = false;
                 updatePadLabel(i);
             }
@@ -765,14 +789,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Bump load generation — any in-flight background thread from a prior kit
         // change will see a different token and discard its stale results.
         final int myGeneration = ++this.loadGeneration;
-        // Stop currently playing loops on UI thread immediately (zero-latency feedback)
+        // Stop currently playing loops on UI thread immediately (zero-latency feedback).
+        // With Keep Previous Loop ON, loops that are still playing are PRESERVED:
+        // their pad keeps its old PCM (so the loop keeps sounding) and the new kit's
+        // sample for that pad is deferred (pendingKitReload) until the loop stops.
         for (int i2 = 0; i2 < 8; i2++) {
             if (this.loopPlaying[i2]) {
+                if (this.keepPreviousLoop) {
+                    this.pendingKitReload[i2] = true;
+                    this.pendingKitAsset[i2]  = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
+                    this.pendingKitUri[i2]    = null;
+                    // leave loopPlaying[i2] true, loopSamples[i2], loopUris[i2]
+                    // and the native PCM untouched — the loop keeps playing
+                    continue;
+                }
                 this.audioEngine.stopPad(i2);
                 this.loopPlaying[i2] = false;
             }
             this.loopSamples[i2] = null;
             this.loopUris[i2] = null;
+            // Non-preserved pads have no pending deferred reload
+            this.pendingKitReload[i2] = false;
+            this.pendingKitAsset[i2]  = null;
+            this.pendingKitUri[i2]    = null;
         }
         // Snapshot engine reference — engine can become null in onDestroy
         final AudioEngine engine = this.audioEngine;
@@ -790,6 +829,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // pad slot — silently overwriting it with the wrong kit's audio, so
                 // a sound "not even in this kit" plays when the pad is tapped.
                 if (myGeneration != this.loadGeneration) return;
+                // Keep Previous Loop: pads whose loop is still playing keep their old
+                // PCM — do NOT reload them (would change what the running loop sounds).
+                if (this.pendingKitReload[i2]) {
+                    loaded[i2] = null;   // leave loopSamples[i2] as the old sample
+                    continue;
+                }
                 try {
                     String assetPath = "kit" + i + "/loop_pad_" + (i2 + 1) + ".wav";
                     loaded[i2] = engine.loadWavFromAsset(i2, assetPath);
@@ -801,6 +846,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // Discard if user switched kit/channel while we were loading
                 if (myGeneration != this.loadGeneration) return;
                 for (int i2 = 0; i2 < 8; i2++) {
+                    // Keep Previous Loop: never clobber a still-playing pad's sample
+                    if (this.pendingKitReload[i2]) continue;
                     this.loopSamples[i2] = loaded[i2];
                 }
             });
@@ -1164,6 +1211,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 updatePadLabel(i);    // preserve drum-mode orange, don't force black
             }
         }
+        // Keep Previous Loop: deferred pads get their new kit sample once stopped
+        for (int i = 0; i < 8; i++) {
+            this.maybeReloadDeferredPad(i);
+        }
         // Push the latest loop/pad settings to Firebase for the signed-in account
         CloudSync.pushCurrentUserSettings(this);
     }
@@ -1240,6 +1291,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             for (int i = 0; i < 8; i++) {
                 this.loopPlaying[i] = false;
                 updatePadLabel(i);    // drum-mode pads keep their orange indicator
+            }
+            // Keep Previous Loop: pads whose loops survived a kit switch were
+            // deferred — now that everything is stopped, load their new kit sample.
+            for (int i = 0; i < 8; i++) {
+                this.maybeReloadDeferredPad(i);
             }
             if (this.txtLoopStatus != null) {
                 this.txtLoopStatus.setText("STOPPED");
@@ -1344,6 +1400,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.btnMasterVolMode  = (Button) findViewById(R.id.btnMasterVolMode);
         this.chkMultiMode = (CheckBox) findViewById(R.id.chkMultiMode);
         this.chkOneShotMode = (CheckBox) findViewById(R.id.chkOneShotMode);
+        this.chkKeepPrevLoop = (CheckBox) findViewById(R.id.chkKeepPrevLoop);
+        this.chkSmoothTransition = (CheckBox) findViewById(R.id.chkSmoothTransition);
         this.seekDrumChoke = (SeekBar) findViewById(R.id.seekDrumChoke);
         this.txtDrumChokeVal = (TextView) findViewById(R.id.txtDrumChokeVal);
         this.chkDrumDelay = (CheckBox) findViewById(R.id.chkDrumDelay);
@@ -1468,6 +1526,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.reverbLevel  = this.prefs.getInt("loop_reverb_level", 0);
         this.isMultiMode  = this.prefs.getBoolean("loop_multi_mode", false);
         this.isOneShotMode = this.prefs.getBoolean("loop_one_shot_mode", false);
+        // Transition behavior toggles — persisted, default OFF (existing behavior)
+        this.keepPreviousLoop    = this.prefs.getBoolean("keep_previous_loop_playing", false);
+        this.smoothPadTransition = this.prefs.getBoolean("smooth_pad_transition", false);
         // Restore per-pad volumes, per-pad drum/loop mode, and per-pad drum FX
         // (choke + delay) — same per-pad pattern MainActivity uses.
         for (int i = 0; i < 8; i++) {
@@ -2234,6 +2295,34 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         CheckBox checkBox2 = this.chkOneShotMode;
         if (checkBox2 != null) {
             checkBox2.setOnCheckedChangeListener(checkListener);
+        }
+
+        // ── Transition behavior toggles (KEEP PREV LOOP / SMOOTH FADE) ────────
+        // Persisted in prefs; state is read back in onCreate above.
+        // Keep Prev Loop just flips the flag — it never touches running loops,
+        // so existing playback is unaffected by the toggle itself.
+        CompoundButton.OnCheckedChangeListener transitionListener =
+                new CompoundButton.OnCheckedChangeListener() {
+            @Override // android.widget.CompoundButton.OnCheckedChangeListener
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (buttonView.getId() == R.id.chkKeepPrevLoop) {
+                    LoopsActivity.this.keepPreviousLoop = isChecked;
+                    LoopsActivity.this.prefs.edit()
+                            .putBoolean("keep_previous_loop_playing", isChecked).apply();
+                } else if (buttonView.getId() == R.id.chkSmoothTransition) {
+                    LoopsActivity.this.smoothPadTransition = isChecked;
+                    LoopsActivity.this.prefs.edit()
+                            .putBoolean("smooth_pad_transition", isChecked).apply();
+                }
+            }
+        };
+        if (this.chkKeepPrevLoop != null) {
+            this.chkKeepPrevLoop.setChecked(this.keepPreviousLoop);
+            this.chkKeepPrevLoop.setOnCheckedChangeListener(transitionListener);
+        }
+        if (this.chkSmoothTransition != null) {
+            this.chkSmoothTransition.setChecked(this.smoothPadTransition);
+            this.chkSmoothTransition.setOnCheckedChangeListener(transitionListener);
         }
 
         // ── LOOP SYNC — SYNC ALL + per-pad NUDGE ─────────────────────────────
@@ -3278,12 +3367,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void loadLoopsFromMemory() throws IllegalStateException {
         for (int i = 0; i < 8; i++) {
+            boolean preserveLoop = false;
             if (this.loopPlaying[i]) {
-                this.audioEngine.stopPad(i);
-                this.loopPlaying[i] = false;
+                if (this.keepPreviousLoop) {
+                    // Keep Previous Loop: preserve the playing loop. The new kit's
+                    // URI for this pad is filled in below; we only mark it pending
+                    // and leave the old sample/PCM untouched.
+                    preserveLoop = true;
+                    this.pendingKitReload[i] = true;
+                    this.pendingKitAsset[i]  = null;
+                    // pendingKitUri[i] filled from prefs in the URI-resolution loop
+                } else {
+                    this.audioEngine.stopPad(i);
+                    this.loopPlaying[i] = false;
+                }
             }
-            this.loopSamples[i] = null;
-            this.loopUris[i] = null;
+            if (!preserveLoop) {
+                this.loopSamples[i] = null;
+                this.loopUris[i] = null;
+                // Non-preserved pads have no pending deferred reload
+                this.pendingKitReload[i] = false;
+                this.pendingKitAsset[i]  = null;
+                this.pendingKitUri[i]    = null;
+            }
             // Kit load: restore per-pad drum/loop override for THIS kit (not reset).
             // Each kit has its own saved overrides keyed by loopChannelIndex.
             this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + i, false);
@@ -3333,8 +3439,20 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         for (int i2 = 0; i2 < 8; i2++) {
             String uriStr = this.prefs.getString("loop_uri_ch_" + this.loopChannelIndex + "_" + i2, null);
             if (uriStr != null) {
-                this.loopUris[i2] = Uri.parse(uriStr);
-                urisToLoad[i2]    = this.loopUris[i2];
+                Uri parsed = Uri.parse(uriStr);
+                if (this.pendingKitReload[i2]) {
+                    // Keep Previous Loop: record the NEW kit's URI for deferred
+                    // reload, but do NOT overwrite loopUris[i2]/PCM while the old
+                    // loop is still playing.
+                    this.pendingKitUri[i2] = parsed;
+                    continue;
+                }
+                this.loopUris[i2] = parsed;
+                urisToLoad[i2]    = parsed;
+            } else if (this.pendingKitReload[i2]) {
+                // New kit has no URI for this pad → nothing to defer
+                this.pendingKitReload[i2] = false;
+                this.pendingKitUri[i2]    = null;
             }
         }
         // Snapshot engine reference — safe against onDestroy races
@@ -3358,6 +3476,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // Discard if user switched loop channel while we were decoding
                 if (myGeneration != this.loadGeneration) return;
                 for (int i2 = 0; i2 < 8; i2++) {
+                    // Keep Previous Loop: never clobber a still-playing pad's sample
+                    if (this.pendingKitReload[i2]) continue;
                     this.loopSamples[i2] = loaded[i2];
                     if (loaded[i2] != null && loaded[i2].loaded) {
                         preloadLoop(i2);
@@ -3932,6 +4052,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 for (int i = 0; i < 8; i++) {
                     loopPlaying[i] = false;
                     updatePadLabel(i);
+                }
+                // Keep Previous Loop: deferred pads get their new kit sample now
+                for (int i = 0; i < 8; i++) {
+                    maybeReloadDeferredPad(i);
                 }
                 if (speedPitchRunnable != null) {
                     speedPitchHandler.removeCallbacks(speedPitchRunnable);
@@ -4700,7 +4824,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     // the natural MIDI "roll" pattern is many quick hits, not a deliberate
                     // toggle-stop, so we treat short intervals as a retrigger.
                     long elapsed = System.currentTimeMillis() - loopStartTimeMs[index];
-                    try { engine.stopPad(index); } catch (Exception ignored) {}
+                    if (this.smoothPadTransition) { try { engine.releasePad(index, 150f); } catch (Exception ignored) {} }
+                    else { try { engine.stopPad(index); } catch (Exception ignored) {} }
                     if (elapsed < 400) {
                         // Retrigger: restart loop without stopping it perceptibly
                         try { engine.playLoopSP(index, vol, this.currentSpeed, effectivePitch(index), padLoopPan[index]); }
@@ -4711,15 +4836,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         // Deliberate toggle-off: loop was playing long enough to be intentional
                         this.loopPlaying[index] = false;
                         loopStartTimeMs[index] = 0;
+                        runOnUiThread(() -> maybeReloadDeferredPad(index));
                     }
                 }
             } else {
                 // Single-pad mode: MIDI se naya loop start karne se pehle baaki pads stop karo
                 // jab tak Multi-Play button manually ON na ho tab tak multi-play nahi chalna chahiye.
-                if (!this.isMultiMode) {
+                // Keep Previous Loop ON → previous pads keep playing (same as Multi-Play).
+                // Smooth Pad Transition ON → previous pads fade out instead of cutting.
+                if (!this.isMultiMode && !this.keepPreviousLoop) {
                     for (int i = 0; i < 8; i++) {
                         if (i != index && this.loopPlaying[i]) {
-                            try { engine.stopPad(i); } catch (Exception ignored2) {}
+                            if (this.smoothPadTransition) { try { engine.releasePad(i, 150f); } catch (Exception ignored2) {} }
+                            else { try { engine.stopPad(i); } catch (Exception ignored2) {} }
                             this.loopPlaying[i] = false;
                             loopStartTimeMs[i] = 0;
                         }
@@ -4743,6 +4872,55 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         } catch (Exception e) {
         }
+    }
+
+    /**
+     * Stop a pad's loop — instant cut (default) or 150 ms click-free fade
+     * (Smooth Pad Transition ON). The fade engages the native release envelope,
+     * so the pad stops without any crackle/pop; new pads still start instantly.
+     */
+    private void stopPadOrFade(int index) {
+        AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+        if (this.smoothPadTransition) {
+            try { engine.releasePad(index, 150f); } catch (Exception ignored) {}
+        } else {
+            try { engine.stopPad(index); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Keep Previous Loop: if pad {@code index} has a deferred new-kit reload
+     * pending (its loop survived a kit switch), load the new kit's sample for it
+     * now — after the old loop has stopped. Called on loop toggle-off and by the
+     * Stop button.
+     */
+    private void maybeReloadDeferredPad(int index) {
+        if (index < 0 || index >= 8 || !this.pendingKitReload[index]) return;
+        this.pendingKitReload[index] = false;
+        final String asset = this.pendingKitAsset[index];
+        final Uri    uri   = this.pendingKitUri[index];
+        this.pendingKitAsset[index] = null;
+        this.pendingKitUri[index]   = null;
+        if (asset == null && uri == null) return;
+        final int idx = index;
+        final AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+        final int myGeneration = this.loadGeneration;
+        // Decode off the UI thread (same pattern as loadLoopsFromMemory)
+        new Thread(() -> {
+            try {
+                AudioEngine.SampleData sd = (uri != null)
+                        ? engine.loadWavFromUri(idx, uri)
+                        : engine.loadWavFromAsset(idx, asset);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    // Discard if a newer kit switch happened while decoding
+                    if (myGeneration != this.loadGeneration) return;
+                    this.loopSamples[idx] = sd;
+                    this.loopUris[idx]    = (sd != null) ? sd.uri : null;
+                });
+            } catch (Exception ignored) {}
+        }).start();
     }
 
     // ═════════════════════════════════════════════════════════════════════════

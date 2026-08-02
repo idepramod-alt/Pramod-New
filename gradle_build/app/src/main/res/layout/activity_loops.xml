@@ -206,6 +206,20 @@
                 android:layout_weight="1" android:buttonTint="#ff00afff"/>
         </LinearLayout>
 
+        <!-- Transition behavior row (default OFF — existing behavior unchanged) -->
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp">
+            <CheckBox android:textSize="11sp" android:textColor="#ffffffff"
+                android:id="@+id/chkKeepPrevLoop" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:text="KEEP PREV LOOP"
+                android:layout_weight="1" android:buttonTint="#ff33ff88"/>
+            <CheckBox android:textSize="11sp" android:textColor="#ffffffff"
+                android:id="@+id/chkSmoothTransition" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:text="SMOOTH FADE"
+                android:layout_weight="1" android:buttonTint="#ffffaa33"/>
+        </LinearLayout>
+
         <!-- Drum-mode-only FX (per pad — same as MainActivity's per-pad
              chkDelay/seekDelayTime/seekDelayLevel/seekChokeGroup, just scoped to
              whichever pad is selected here). Only affects real DRUM MODE hits;
