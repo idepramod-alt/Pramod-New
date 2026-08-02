@@ -309,11 +309,6 @@
         <TextView android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="BPM:" android:layout_marginEnd="4dp"/>
-        <EditText android:textSize="10sp" android:textColor="#ffffffff"
-            android:textColorHint="#ff888888" android:gravity="center"
-            android:id="@+id/editCustomBpm" android:background="#ff444444"
-            android:padding="2dp" android:layout_width="40dp" android:layout_height="30dp"
-            android:hint="120" android:inputType="numberDecimal"/>
         <Button android:textSize="8sp" android:textColor="#ffffffff"
             android:id="@+id/btnSetBpm" android:background="@drawable/btn_3d_dark"
             android:layout_width="45dp" android:layout_height="30dp"

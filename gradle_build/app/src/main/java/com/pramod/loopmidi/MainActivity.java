@@ -986,28 +986,15 @@ public class MainActivity extends Activity {
         } else if (cc == ccKitPrev
                 && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
             ccStepDebounceMs[cc] = System.currentTimeMillis();
-            // Kit Prev — Bank A
-            runOnUiThread(() -> {
-                if (kitIndex > 1) {
-                    saveKitToMemory(kitIndex);
-                    kitIndex--;
-                    loadKitFromMemory(kitIndex);
-                    // loadKitFromMemory already sets currentKitName (with preset-name
-                    // fallback) and updates txtKitName — no duplicate setText needed.
-                }
-            });
+            // Kit Prev — bank-aware: Bank B mode changes Bank B's kit (kitIndexB),
+            // otherwise Bank A's (kitIndex). changeKitBy also updates txtKitName.
+            runOnUiThread(() -> changeKitBy(-1));
 
         } else if (cc == ccKitNext
                 && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
             ccStepDebounceMs[cc] = System.currentTimeMillis();
-            // Kit Next — Bank A
-            runOnUiThread(() -> {
-                saveKitToMemory(kitIndex);
-                kitIndex++;
-                loadKitFromMemory(kitIndex);
-                // loadKitFromMemory already sets currentKitName (with preset-name
-                // fallback) and updates txtKitName — no duplicate setText needed.
-            });
+            // Kit Next — bank-aware (see changeKitBy).
+            runOnUiThread(() -> changeKitBy(+1));
 
         } else {
             // ── CC → Pad trigger (user-defined CC-to-pad mapping) ─────────────
@@ -1651,6 +1638,14 @@ public class MainActivity extends Activity {
                 bankMode = (bankMode + 1) % 3;
                 prefs.edit().putInt("bank_mode", bankMode).apply();
                 updateBankToggleButton();
+                // ── Reload the kit so the active bank's kit is fully reflected ──
+                // loadKitFromMemory always loads BOTH banks (Bank A under kitIndex,
+                // Bank B under kitIndexB) and sets txtKitName to the ACTIVE bank's
+                // kit name — so switching to Bank B now shows/loads Bank B's kit,
+                // and switching back to Bank A shows Bank A's. (Before, only the
+                // button label and seekbars changed; the kit name and loaded pads
+                // stayed on the previous bank.)
+                loadKitFromMemory(kitIndex);
                 String msg;
                 if (bankMode == BANK_A)        msg = "🅰️ Bank A — only Bank A pads active";
                 else if (bankMode == BANK_B)   msg = "🅱️ Bank B — only Bank B pads active";

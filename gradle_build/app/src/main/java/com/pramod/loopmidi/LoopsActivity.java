@@ -118,7 +118,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private float[] padDrumDelayTime = new float[8];
     private float[] padDrumDelayLevel = new float[8];
     private int currentScaleOffset;
-    private EditText editCustomBpm;
     private Equalizer globalEq;
     private PresetReverb globalReverb;
     private volatile boolean isVisible;
@@ -1338,7 +1337,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.seekPitch = (SeekBar) findViewById(R.id.seekPitch);
         this.txtTempoVal = (TextView) findViewById(R.id.txtTempoVal);
         this.txtPitchVal = (TextView) findViewById(R.id.txtPitchVal);
-        this.editCustomBpm = (EditText) findViewById(R.id.editCustomBpm);
         this.btnSetBpm = (Button) findViewById(R.id.btnSetBpm);
         this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
         this.txtMasterVolVal  = (TextView) findViewById(R.id.txtMasterVolVal);
