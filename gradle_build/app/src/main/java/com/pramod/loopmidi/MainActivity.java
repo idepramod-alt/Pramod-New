@@ -2980,6 +2980,12 @@ public class MainActivity extends Activity {
         JSONArray dlyLArray = null;
         JSONArray eqHArray = null;
         DocumentFile kitFolder2 = null;
+        // Invalidate any in-flight background load (loadKitSamplesBackground started
+        // by onActivityResult's audioEngine-recreate path). That background thread
+        // would otherwise finish AFTER we synchronously load the folder's WAVs and
+        // overwrite them with the previous kit's samples — making it look like the
+        // folder kit loaded (toast shown) but the pads stay silent/wrong.
+        this.kitLoadGeneration++;
         try {
             DocumentFile kitFolder3 = DocumentFile.fromTreeUri(this, folderUri);
             if (kitFolder3 == null) {
