@@ -2918,6 +2918,11 @@ public class MainActivity extends Activity {
 
         final int gen = ++this.kitLoadGeneration;
         final int kA = kitNo, kBk = this.kitIndexB;
+        // Persist the loaded kit index every time a kit is loaded — regardless of
+        // how the user got here (prev/next buttons, jump dialog, favorite, folder
+        // load, restart). Some paths only bump kitIndex in memory; without this,
+        // an app restart could come back on whatever index was in prefs (often 1).
+        prefs.edit().putInt(KEY_KIT_INDEX, kitNo).apply();
         this.kitLoadExecutor.execute(() -> loadKitSamplesBackground(kA, kBk, gen));
     }
 
@@ -3191,6 +3196,8 @@ public class MainActivity extends Activity {
                     ted.putString("kit_" + this.kitIndexB + "_B_tree_uri", folderUri.toString());
                     ted.putString("kit_" + this.kitIndexB + "_B_folder_name", kitFolderNameSaved);
                 }
+                ted.putInt(KEY_KIT_INDEX, this.kitIndex);   // folder load targets the current kit
+                ted.putInt("kit_index_B", this.kitIndexB);
                 ted.apply();
             }
             // ── Restore the OTHER bank synchronously (race-free) ────────────────
@@ -3747,11 +3754,14 @@ public class MainActivity extends Activity {
         // Persist kit indices explicitly so they survive a process kill between
         // onPause and the next onCreate (changeKitBy/showKitJumpDialog already do
         // this on navigation, but a folder-load without any navigation won't).
+        // commit() (not apply()) so the write hits disk synchronously — apply() is
+        // async and its queued flush can be lost on an immediate process kill,
+        // which made the app restart on kit 1 no matter what kit was loaded.
         prefs.edit()
             .putInt(KEY_KIT_INDEX, kitIndex)
             .putInt("kit_index_B", kitIndexB)
             .putInt("bank_mode", bankMode)
-            .apply();
+            .commit();
         saveKitToMemory(this.kitIndex);
     }
 
