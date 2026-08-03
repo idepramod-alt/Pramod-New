@@ -1653,38 +1653,6 @@ public class MainActivity extends Activity {
         this.bankMode = this.prefs.getInt("bank_mode", BANK_A);
         updateBankToggleButton();
         loadKitFromMemory(this.kitIndex);
-        // ── TEMP DIAGNOSTIC — tells us exactly what the restart restored ────────
-        // REMOVE AFTER DEBUGGING.
-        int dbgKit = this.kitIndex;
-        boolean dbgUri0 = this.prefs.getString("kit_" + dbgKit + "_uri_0", null) != null;
-        boolean dbgTree = this.prefs.getString("kit_" + dbgKit + "_tree_uri", null) != null;
-        String dbgFolder = this.prefs.getString("kit_" + dbgKit + "_folder_name", null);
-        boolean dbgListRoot = this.prefs.getString("kit_" + dbgKit + "_list_root", null) != null;
-        Log.i(TAG, "DBG restart: kitIndex=" + this.kitIndex
-                + " prefs_kit_index=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
-                + " kitName='" + this.currentKitName + "'"
-                + " uri0=" + dbgUri0 + " tree=" + dbgTree
-                + " folder=" + dbgFolder + " listRoot=" + dbgListRoot
-                + " bankMode=" + this.bankMode);
-        String dbgMsg = "DBG RESTART (v2)\n"
-                + "────────────────\n"
-                + "INDEX: memory=" + this.kitIndex
-                + "  prefs=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
-                + "\nNAME: '" + this.currentKitName + "'"
-                + "\nkit_name_" + dbgKit + ": '"
-                + this.prefs.getString("kit_name_" + dbgKit, "<null>") + "'"
-                + "\npad1 URI: " + (dbgUri0 ? "YES" : "NO")
-                + "  tree_uri: " + (dbgTree ? "YES" : "NO")
-                + "\nfolder: " + (dbgFolder != null ? dbgFolder : "<null>")
-                + "  list_root: " + (dbgListRoot ? "YES" : "NO")
-                + "\nBANK: " + this.bankMode;
-        try {
-            new AlertDialog.Builder(this)
-                .setTitle("DBG Restart v2")
-                .setMessage(dbgMsg)
-                .setPositiveButton("OK", null)
-                .show();
-        } catch (Exception ignored) {}
         updateEditButtonUI();
         // ── Init complete: kitIndex + currentKitName are now correct ────────────
         // From this point on, saveKitToMemory will write real kit data.
