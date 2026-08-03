@@ -3224,22 +3224,38 @@ public class MainActivity extends Activity {
     /**
      * Re-resolve a kit WAV through the PERSISTED TREE grant. Child document URIs
      * don't survive an app restart on their own (takePersistableUriPermission on
-     * a tree child throws SecurityException — only the tree grant is persistable),
-     * so after a restart loadKitSamplesBackground re-opens the WAV via
-     * DocumentFile.fromTreeUri(treeRoot).findFile(kitFolder).findFile("Pad N.wav").
+     * a tree child throws SecurityException — only the TREE grant is persistable),
+     * so after a restart loadKitSamplesBackground re-opens the WAV from the saved
+     * tree URI. Two entry-point shapes are handled:
+     *   A) Direct folder picker (btnLoadKit): folderUri IS the kit folder → resolve
+     *      the WAV straight from it.
+     *   B) Kit-list dialog (showKitListDialog): folderUri is a tree CHILD (the .mcn
+     *      folder) whose own grant isn't persistable — but the persisted LIST root
+     *      tree URI + the saved kit folder name re-locate it.
+     * Strategy 1 covers A; if the WAV isn't found there, strategy 2 covers B.
      */
     private Uri resolveKitWavFromTree(int kitNo, int padIdx, boolean bankB) {
         try {
+            // Prefer the persisted LIST ROOT tree grant (kit-list dialog) — it is
+            // always a persistable tree uri. Fall back to the direct folder picker's
+            // tree uri (which IS the kit folder).
             String treeUriStr = this.prefs.getString(
+                    "kit_" + kitNo + (bankB ? "_B_list_root" : "_list_root"), null);
+            if (treeUriStr == null) treeUriStr = this.prefs.getString(
                     "kit_" + kitNo + (bankB ? "_B_tree_uri" : "_tree_uri"), null);
             String folderName = this.prefs.getString(
                     "kit_" + kitNo + (bankB ? "_B_folder_name" : "_folder_name"), null);
-            if (treeUriStr == null || folderName == null) return null;
-            DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(treeUriStr));
-            if (root == null) return null;
-            DocumentFile kitFolder = root.findFile(folderName);
+            if (treeUriStr == null) return null;
+            DocumentFile kitFolder = DocumentFile.fromTreeUri(this, Uri.parse(treeUriStr));
             if (kitFolder == null) return null;
+            // Strategy 1 — treeUri IS the kit folder (direct folder picker)
             DocumentFile wav = kitFolder.findFile(KitManager.DEFAULT_WAV_NAMES[padIdx]);
+            if (wav == null && folderName != null) {
+                // Strategy 2 — treeUri is the LIST ROOT, folderName is the .mcn kit
+                // folder inside it (kit-list dialog entry point)
+                DocumentFile sub = kitFolder.findFile(folderName);
+                if (sub != null) wav = sub.findFile(KitManager.DEFAULT_WAV_NAMES[padIdx]);
+            }
             return (wav != null) ? wav.getUri() : null;
         } catch (Exception ignored) { return null; }
     }
@@ -3506,6 +3522,16 @@ public class MainActivity extends Activity {
                     }
                     MainActivity mainActivity = MainActivity.this;
                     mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                    // ── Persist the LIST ROOT tree uri for restart-resolve ─────────
+                    // selectedKitFolder is a tree CHILD (the .mcn kit folder) — child
+                    // grants don't survive a restart. The LIST ROOT tree grant WAS
+                    // persisted (takePersistableUriPermission in the REQ_LIST_FOLDER
+                    // branch), so save it alongside the kit folder name; the restart
+                    // decode re-enters root.findFile(kitFolder).findFile(Pad N.wav).
+                    SharedPreferences.Editor ted = mainActivity.prefs.edit();
+                    ted.putString("kit_" + mainActivity.kitIndex + "_list_root", folderUri.toString());
+                    ted.putString("kit_" + mainActivity.kitIndexB + "_B_list_root", folderUri.toString());
+                    ted.apply();
                 }
             }).setNeutralButton("Change Folder", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.24
                 @Override // android.content.DialogInterface.OnClickListener
