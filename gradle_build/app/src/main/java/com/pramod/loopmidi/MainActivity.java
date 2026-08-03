@@ -2932,7 +2932,18 @@ public class MainActivity extends Activity {
             try {
                 String uriStr = this.prefs.getString("kit_" + kitNo + "_uri_" + i, null);
                 int rawResId  = this.prefs.getInt("kit_" + kitNo + "_raw_" + i, 0);
-                if (uriStr != null) { urisA[i] = Uri.parse(uriStr); pcmsA[i] = engine.decodeUriToPcm(urisA[i]); }
+                if (uriStr != null) {
+                    urisA[i] = Uri.parse(uriStr);
+                    pcmsA[i] = engine.decodeUriToPcm(urisA[i]);
+                    if (pcmsA[i] == null) {
+                        // The saved child URI no longer opens (document-picker grant
+                        // expired across restart — child URIs don't persist, only the
+                        // tree grant does). Re-resolve the WAV via the persisted tree
+                        // grant + kit folder name, then retry the decode.
+                        Uri r = resolveKitWavFromTree(kitNo, i, false);
+                        if (r != null) { urisA[i] = r; pcmsA[i] = engine.decodeUriToPcm(r); }
+                    }
+                }
                 else if (rawResId != 0) { rawsA[i] = rawResId; pcmsA[i] = engine.decodeRawToPcm(rawResId); }
                 else { int pk = (kitNo <= this.presetKitNames.length) ? this.currentPresetKit : 0; rawsA[i] = this.presetKits[pk][i]; pcmsA[i] = engine.decodeRawToPcm(rawsA[i]); }
             } catch (Exception ignored) {}
@@ -2945,7 +2956,14 @@ public class MainActivity extends Activity {
             try {
                 String uriBStr = this.prefs.getString("kit_" + kitB + "_B_uri_" + i, null);
                 int rawBResId  = this.prefs.getInt("kit_" + kitB + "_B_raw_" + i, 0);
-                if (uriBStr != null) { urisB[i] = Uri.parse(uriBStr); pcmsB[i] = engine.decodeUriToPcm(urisB[i]); }
+                if (uriBStr != null) {
+                    urisB[i] = Uri.parse(uriBStr);
+                    pcmsB[i] = engine.decodeUriToPcm(urisB[i]);
+                    if (pcmsB[i] == null) {
+                        Uri r = resolveKitWavFromTree(kitB, i, true);
+                        if (r != null) { urisB[i] = r; pcmsB[i] = engine.decodeUriToPcm(r); }
+                    }
+                }
                 else if (rawBResId != 0) { rawsB[i] = rawBResId; pcmsB[i] = engine.decodeRawToPcm(rawBResId); }
             } catch (Exception ignored) {}
         }
@@ -3154,6 +3172,27 @@ public class MainActivity extends Activity {
                 persistUriReadPermission(selectedWavUris[pi]);
                 persistUriReadPermission(selectedWavUrisB[pi]);
             }
+            // ── Save the TREE grant + kit folder name for restart-resolve ───────
+            // takePersistableUriPermission() on child document URIs SILENTLY FAILS
+            // (SecurityException) — tree children don't get their own persistable
+            // grant. The folder's TREE grant IS persistable, so we persist that and
+            // remember the kit folder name. On app restart, if a saved child URI no
+            // longer opens (permission gone), loadKitSamplesBackground re-resolves
+            // the WAV via DocumentFile.fromTreeUri(root).findFile(folder).findFile(name).
+            String kitFolderNameSaved = null;
+            try { kitFolderNameSaved = kitFolder3.getName(); } catch (Exception ignored) {}
+            if (kitFolderNameSaved != null) {
+                SharedPreferences.Editor ted = this.prefs.edit();
+                if (loadIntoA) {
+                    ted.putString("kit_" + this.kitIndex + "_tree_uri", folderUri.toString());
+                    ted.putString("kit_" + this.kitIndex + "_folder_name", kitFolderNameSaved);
+                }
+                if (loadIntoB) {
+                    ted.putString("kit_" + this.kitIndexB + "_B_tree_uri", folderUri.toString());
+                    ted.putString("kit_" + this.kitIndexB + "_B_folder_name", kitFolderNameSaved);
+                }
+                ted.apply();
+            }
             // ── Restore the OTHER bank synchronously (race-free) ────────────────
             // The folder load above only touched the ACTIVE bank's samples. When the
             // audio engine was recreated (file picker fired onStop() → engine null),
@@ -3180,6 +3219,29 @@ public class MainActivity extends Activity {
     private void persistUriReadPermission(Uri uri) {
         if (uri == null) return;
         try { getContentResolver().takePersistableUriPermission(uri, 1); } catch (Exception ignored) {}
+    }
+
+    /**
+     * Re-resolve a kit WAV through the PERSISTED TREE grant. Child document URIs
+     * don't survive an app restart on their own (takePersistableUriPermission on
+     * a tree child throws SecurityException — only the tree grant is persistable),
+     * so after a restart loadKitSamplesBackground re-opens the WAV via
+     * DocumentFile.fromTreeUri(treeRoot).findFile(kitFolder).findFile("Pad N.wav").
+     */
+    private Uri resolveKitWavFromTree(int kitNo, int padIdx, boolean bankB) {
+        try {
+            String treeUriStr = this.prefs.getString(
+                    "kit_" + kitNo + (bankB ? "_B_tree_uri" : "_tree_uri"), null);
+            String folderName = this.prefs.getString(
+                    "kit_" + kitNo + (bankB ? "_B_folder_name" : "_folder_name"), null);
+            if (treeUriStr == null || folderName == null) return null;
+            DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(treeUriStr));
+            if (root == null) return null;
+            DocumentFile kitFolder = root.findFile(folderName);
+            if (kitFolder == null) return null;
+            DocumentFile wav = kitFolder.findFile(KitManager.DEFAULT_WAV_NAMES[padIdx]);
+            return (wav != null) ? wav.getUri() : null;
+        } catch (Exception ignored) { return null; }
     }
 
     /**
