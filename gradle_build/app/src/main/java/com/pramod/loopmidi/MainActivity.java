@@ -172,6 +172,12 @@ public class MainActivity extends Activity {
     private String currentKitName  = "KIT 1";
     private String currentKitNameB = "KIT B:1";
     private String pendingSaveKitName = null;
+    // Guard: prevent saveKitToMemory from firing during onCreate init
+    // (before kitIndex/currentKitName are restored from prefs). Without this,
+    // initSeekBars → onProgressChanged → saveKitToMemory writes stale "KIT 1"
+    // to whichever kit slot kitIndex points at during init, corrupting the
+    // saved name on next restart.
+    private boolean initialized = false;
 
     // ── Favorite Kit Bank (MainActivity — 10 quick slots) ─────────────────────
     // Each slot stores Bank A kit + Bank B kit + bankMode so switching a favorite
@@ -1648,36 +1654,41 @@ public class MainActivity extends Activity {
         updateBankToggleButton();
         loadKitFromMemory(this.kitIndex);
         // ── TEMP DIAGNOSTIC — tells us exactly what the restart restored ────────
-        // Shows the kit index read from prefs, the in-memory kitIndex, the kit
-        // name, and whether kit 30's pad URIs were persisted. This distinguishes:
-        //   (a) prefs hold kit_index=1        → SAVE path is broken
-        //   (b) prefs hold 30 but name="KIT 1"→ NAME save path is broken
-        //   (c) prefs hold 30, name correct, pad URIs missing → URI save broken
         // REMOVE AFTER DEBUGGING.
+        int dbgKit = this.kitIndex;
+        boolean dbgUri0 = this.prefs.getString("kit_" + dbgKit + "_uri_0", null) != null;
+        boolean dbgTree = this.prefs.getString("kit_" + dbgKit + "_tree_uri", null) != null;
+        String dbgFolder = this.prefs.getString("kit_" + dbgKit + "_folder_name", null);
+        boolean dbgListRoot = this.prefs.getString("kit_" + dbgKit + "_list_root", null) != null;
         Log.i(TAG, "DBG restart: kitIndex=" + this.kitIndex
                 + " prefs_kit_index=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
                 + " kitName='" + this.currentKitName + "'"
-                + " kitName30='" + this.prefs.getString("kit_name_30", "<null>") + "'"
-                + " kit30_uri0=" + (this.prefs.getString("kit_30_uri_0", null) != null)
+                + " uri0=" + dbgUri0 + " tree=" + dbgTree
+                + " folder=" + dbgFolder + " listRoot=" + dbgListRoot
                 + " bankMode=" + this.bankMode);
-        String dbgMsg = "INDEX: memory=" + this.kitIndex
+        String dbgMsg = "DBG RESTART (v2)\n"
+                + "────────────────\n"
+                + "INDEX: memory=" + this.kitIndex
                 + "  prefs=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
                 + "\nNAME: '" + this.currentKitName + "'"
-                + "\nkit_name_30: '" + this.prefs.getString("kit_name_30", "<null>") + "'"
-                + "\nkit30 pad1 URI saved: "
-                + (this.prefs.getString("kit_30_uri_0", null) != null ? "YES" : "NO")
-                + "\nBANK: " + this.bankMode
-                + "\n\n(A) prefs=1  → save broken\n"
-                + "(B) prefs=30 + name 'KIT 1' → name overwritten\n"
-                + "(C) prefs=30 + name ok + URI NO → pad sounds not saved";
+                + "\nkit_name_" + dbgKit + ": '"
+                + this.prefs.getString("kit_name_" + dbgKit, "<null>") + "'"
+                + "\npad1 URI: " + (dbgUri0 ? "YES" : "NO")
+                + "  tree_uri: " + (dbgTree ? "YES" : "NO")
+                + "\nfolder: " + (dbgFolder != null ? dbgFolder : "<null>")
+                + "  list_root: " + (dbgListRoot ? "YES" : "NO")
+                + "\nBANK: " + this.bankMode;
         try {
             new AlertDialog.Builder(this)
-                .setTitle("⚠️ DBG Restart")
+                .setTitle("DBG Restart v2")
                 .setMessage(dbgMsg)
                 .setPositiveButton("OK", null)
                 .show();
         } catch (Exception ignored) {}
         updateEditButtonUI();
+        // ── Init complete: kitIndex + currentKitName are now correct ────────────
+        // From this point on, saveKitToMemory will write real kit data.
+        this.initialized = true;
         this.btnEditMode.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.5
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
@@ -1697,7 +1708,7 @@ public class MainActivity extends Activity {
         if (this.btnBankToggle != null) {
             this.btnBankToggle.setOnClickListener(v -> {
                 bankMode = (bankMode + 1) % 3;
-                prefs.edit().putInt("bank_mode", bankMode).apply();
+                prefs.edit().putInt("bank_mode", bankMode).commit();
                 updateBankToggleButton();
                 // ── Reload the kit so the active bank's kit is fully reflected ──
                 // loadKitFromMemory always loads BOTH banks (Bank A under kitIndex,
@@ -2853,6 +2864,13 @@ public class MainActivity extends Activity {
     }
 
     public void saveKitToMemory(int kitNo) {
+        // During onCreate, initSeekBars fires onProgressChanged which calls
+        // saveKitToMemory before kitIndex/currentKitName are restored from prefs.
+        // Skip those stale saves to avoid overwriting real kit data with defaults.
+        if (!this.initialized) {
+            Log.w(TAG, "saveKitToMemory: SKIPPED (not initialized yet) kitNo=" + kitNo);
+            return;
+        }
         Log.i(TAG, "saveKitToMemory: saving kitNo=" + kitNo + " name='" + this.currentKitName + "'");
         SharedPreferences.Editor editor = this.prefs.edit();
         editor.putString("kit_name_" + kitNo, this.currentKitName);
@@ -2908,7 +2926,10 @@ public class MainActivity extends Activity {
         } else {
             editor.remove("kit_" + kitNo + "_assist_uri");
         }
-        editor.apply();
+        // commit() (not apply()) — synchronous write so kit data survives an
+        // immediate process kill (recent-apps swipe). apply()'s async flush
+        // can be lost when the process is terminated before it runs.
+        editor.commit();
     }
 
 
@@ -2974,7 +2995,8 @@ public class MainActivity extends Activity {
         // how the user got here (prev/next buttons, jump dialog, favorite, folder
         // load, restart). Some paths only bump kitIndex in memory; without this,
         // an app restart could come back on whatever index was in prefs (often 1).
-        prefs.edit().putInt(KEY_KIT_INDEX, kitNo).apply();
+        // commit() (not apply()) — synchronous write survives immediate process kill.
+        prefs.edit().putInt(KEY_KIT_INDEX, kitNo).commit();
         this.kitLoadExecutor.execute(() -> loadKitSamplesBackground(kA, kBk, gen));
     }
 
@@ -3117,13 +3139,13 @@ public class MainActivity extends Activity {
                     // Bank B mode: update Bank B's kit name and display
                     this.currentKitNameB = "B:" + stripped;
                     this.txtKitName.setText(this.currentKitNameB);
-                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).apply();
+                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).commit();
                 } else if (bankMode == LAYER_AB) {
                     // A+B Layer mode: update both bank names from the same folder
                     this.currentKitName  = stripped;
                     this.currentKitNameB = "B:" + stripped;
                     this.txtKitName.setText(stripped + " [A+B]");
-                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).apply();
+                    prefs.edit().putString("kit_name_B_" + this.kitIndexB, this.currentKitNameB).commit();
                 } else {
                     // Bank A mode
                     this.currentKitName = stripped;
@@ -3250,7 +3272,9 @@ public class MainActivity extends Activity {
                 }
                 ted.putInt(KEY_KIT_INDEX, this.kitIndex);   // folder load targets the current kit
                 ted.putInt("kit_index_B", this.kitIndexB);
-                ted.apply();
+                // commit() so kit index + tree grant + folder name survive an
+                // immediate process kill (recent-apps swipe).
+                ted.commit();
             }
             // ── Restore the OTHER bank synchronously (race-free) ────────────────
             // The folder load above only touched the ACTIVE bank's samples. When the
@@ -3590,7 +3614,7 @@ public class MainActivity extends Activity {
                     SharedPreferences.Editor ted = mainActivity.prefs.edit();
                     ted.putString("kit_" + mainActivity.kitIndex + "_list_root", folderUri.toString());
                     ted.putString("kit_" + mainActivity.kitIndexB + "_B_list_root", folderUri.toString());
-                    ted.apply();
+                    ted.commit();
                 }
             }).setNeutralButton("Change Folder", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.24
                 @Override // android.content.DialogInterface.OnClickListener
@@ -3614,7 +3638,7 @@ public class MainActivity extends Activity {
             if (newKitB >= 1 && newKitB <= MAX_KITS) {
                 saveKitToMemory(kitIndex);           // flush Bank B to kitIndexB (see saveKitToMemory)
                 kitIndexB = newKitB;
-                prefs.edit().putInt("kit_index_B", kitIndexB).apply();
+                prefs.edit().putInt("kit_index_B", kitIndexB).commit();
                 loadKitFromMemory(kitIndex);         // reloads Bank B from new kitIndexB
                 Toast.makeText(this,
                     "🅱️ Bank B → Kit " + kitIndexB, Toast.LENGTH_SHORT).show();
@@ -3625,14 +3649,14 @@ public class MainActivity extends Activity {
                 if (kitIndex > 1) {
                     saveKitToMemory(kitIndex);
                     kitIndex--;
-                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
                     loadKitFromMemory(kitIndex);
                 }
             } else {
                 if (kitIndex < MAX_KITS) {
                     saveKitToMemory(kitIndex);
                     kitIndex++;
-                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                    prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
                     loadKitFromMemory(kitIndex);
                 }
             }
@@ -3681,7 +3705,7 @@ public class MainActivity extends Activity {
             .putInt(PREF_FAV_KIT_A     + slot, kitIndex)
             .putInt(PREF_FAV_KIT_B     + slot, kitIndexB)
             .putInt(PREF_FAV_BANK_MODE + slot, bankMode)
-            .apply();
+            .commit();
         updateFavoriteButton(slot);
         Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " saved: " + currentKitName,
             Toast.LENGTH_SHORT).show();
@@ -3703,7 +3727,7 @@ public class MainActivity extends Activity {
             .putInt(KEY_KIT_INDEX, kitIndex)
             .putInt("kit_index_B", kitIndexB)
             .putInt("bank_mode",   bankMode)
-            .apply();
+            .commit();
         loadKitFromMemory(kitIndex);
         updateBankToggleButton();
         Toast.makeText(this, "⭐ Favorite " + (slot + 1) + " loaded: " + currentKitName,
@@ -3776,10 +3800,10 @@ public class MainActivity extends Activity {
                             if (bankMode == BANK_B) {
                                 // Jump Bank B's kit independently
                                 kitIndexB = target;
-                                prefs.edit().putInt("kit_index_B", kitIndexB).apply();
+                                prefs.edit().putInt("kit_index_B", kitIndexB).commit();
                             } else {
                                 kitIndex = target;
-                                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).apply();
+                                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
                             }
                             loadKitFromMemory(kitIndex);
                         } else {
