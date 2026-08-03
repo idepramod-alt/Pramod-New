@@ -299,18 +299,27 @@
             <SeekBar android:tag="seekEqHi" android:layout_width="0dp"
                 android:layout_height="wrap_content" android:max="100" android:progress="50"
                 android:layout_weight="1"/>
+            <TextView android:tag="txtEqHiDb" android:textSize="9sp" android:textColor="#ff888888"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginLeft="2dp" android:text="0dB"/>
             <TextView android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginLeft="4dp" android:text="MID"/>
             <SeekBar android:tag="seekEqMid" android:layout_width="0dp"
                 android:layout_height="wrap_content" android:max="100" android:progress="50"
                 android:layout_weight="1"/>
+            <TextView android:tag="txtEqMidDb" android:textSize="9sp" android:textColor="#ff888888"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginLeft="2dp" android:text="0dB"/>
             <TextView android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginLeft="4dp" android:text="LOW"/>
             <SeekBar android:tag="seekEqLow" android:layout_width="0dp"
                 android:layout_height="wrap_content" android:max="100" android:progress="50"
                 android:layout_weight="1"/>
+            <TextView android:tag="txtEqLowDb" android:textSize="9sp" android:textColor="#ff888888"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginLeft="2dp" android:text="0dB"/>
         </LinearLayout>
     </LinearLayout>
     </ScrollView>

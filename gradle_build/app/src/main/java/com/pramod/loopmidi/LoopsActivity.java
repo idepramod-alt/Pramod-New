@@ -498,6 +498,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         padLoopEqLow[index], padLoopEqMid[index], padLoopEqHigh[index], chokeGroup, 0.0f, 0.0f);
             }
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
+            // Keep Previous Loop: fade out old-kit loops on first DRUM/ONE-SHOT hit
+            if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
             if (isOneShotTriggered) {
                 // ONE-SHOT MODE choke: cut off any pad still ringing as a LOOP on every
                 // tap, regardless of Multi-Pad mode — a one-shot hit should always be
@@ -553,6 +555,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         updatePadLabel(i);
                     }
                 }
+                // Keep Previous Loop: fade out old-kit loops on first new-pad play
+                if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
             } else {
                 this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
                 updatePadLabel(index);
@@ -587,6 +591,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
+        // Keep Previous Loop: fade out old-kit loops on first new-pad play
+        if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
         if (audioAlreadyTriggered) {
             return;
         }
@@ -715,6 +721,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             eq.setBandLevel((short) 2, midLevel);   // band 2 → MID
             eq.setBandLevel((short) 3, hiLevel);    // band 3 → HIGH
             eq.setBandLevel((short) 4, hiLevel);    // band 4 → HIGH
+
+            // Update dB display labels next to each seekbar
+            TextView txtHiDb  = (TextView) decorView.findViewWithTag("txtEqHiDb");
+            TextView txtMidDb = (TextView) decorView.findViewWithTag("txtEqMidDb");
+            TextView txtLowDb = (TextView) decorView.findViewWithTag("txtEqLowDb");
+            if (txtHiDb  != null) txtHiDb.setText(String.format("%.1f dB", hiLevel  / 1000.0));
+            if (txtMidDb != null) txtMidDb.setText(String.format("%.1f dB", midLevel / 1000.0));
+            if (txtLowDb != null) txtLowDb.setText(String.format("%.1f dB", lowLevel / 1000.0));
         } catch (Throwable th) {
         }
     }
@@ -2638,11 +2652,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void updateAllActiveLoops() {
         // Live-update speed/pitch on already-playing loops WITHOUT stopping or
-        // restarting them — stopPad()+playSample() here used to kill the voice
-        // and restart it from position 0 on every single slider tick, causing
-        // the audible "cut" every time speed/pitch was dragged.
+        // restarting them. The native CMD_UPDATE_SPEED_PITCH handler no-ops for
+        // pads with no active voice (loop or drum), so we can safely send the
+        // update for every loaded pad. This covers both LOOP mode (updates loop
+        // voice) and DRUM/ONE-SHOT mode (updates active drum voices by padIndex).
         for (int i = 0; i < 8; i++) {
-            if (this.loopPlaying[i] && this.loopSamples[i] != null && this.audioEngine != null) {
+            if (this.loopSamples[i] != null && this.audioEngine != null) {
                 this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i), padLoopPan[i]);
             }
         }
@@ -4840,10 +4855,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             } else {
-                // Single-pad mode: MIDI se naya loop start karne se pehle baaki pads stop karo
-                // jab tak Multi-Play button manually ON na ho tab tak multi-play nahi chalna chahiye.
-                // Keep Previous Loop ON → previous pads keep playing (same as Multi-Play).
-                // Smooth Pad Transition ON → previous pads fade out instead of cutting.
+                // ── NEW LOOP START ──────────────────────────────────────────
+                // Play the new pad FIRST, THEN stop old pads — consistent with
+                // the touch path in toggleLoop() and eliminates the gap that
+                // occurred when MIDI stopped old pads before starting the new one.
+                try { engine.playLoopSP(index, vol,
+                                        this.currentSpeed, effectivePitch(index), padLoopPan[index]); }
+                catch (Exception ignored) {}
+                this.loopPlaying[index] = true;
+                loopStartTimeMs[index] = System.currentTimeMillis();
+                // Single-pad mode: stop old pads AFTER new pad starts
                 if (!this.isMultiMode && !this.keepPreviousLoop) {
                     for (int i = 0; i < 8; i++) {
                         if (i != index && this.loopPlaying[i]) {
@@ -4854,11 +4875,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         }
                     }
                 }
-                try { engine.playLoopSP(index, vol,
-                                        this.currentSpeed, effectivePitch(index)); }
-                catch (Exception ignored) {}
-                this.loopPlaying[index] = true;
-                loopStartTimeMs[index] = System.currentTimeMillis();
             }
             return true;
         }
@@ -4886,6 +4902,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { engine.releasePad(index, 150f); } catch (Exception ignored) {}
         } else {
             try { engine.stopPad(index); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Keep Previous Loop: fade out all loops from the PREVIOUS kit that survived
+     * the kit switch via {@code pendingKitReload}. Called on the first new-pad
+     * play after a kit switch. The old loops fade smoothly (150 ms release
+     * envelope); their new-kit samples are loaded in background via
+     * {@link #maybeReloadDeferredPad}.
+     */
+    private void fadeOutOldKitLoops() {
+        for (int i = 0; i < 8; i++) {
+            if (this.pendingKitReload[i] && this.loopPlaying[i]) {
+                try { this.audioEngine.releasePad(i, 150f); } catch (Exception ignored) {}
+                this.loopPlaying[i] = false;
+                this.loopStartTimeMs[i] = 0;
+                updatePadLabel(i);
+                this.maybeReloadDeferredPad(i);
+            }
         }
     }
 

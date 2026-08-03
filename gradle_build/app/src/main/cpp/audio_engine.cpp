@@ -862,6 +862,8 @@ public:
             // ── Update active drum/one-shot voice with this pad index ──
             // Drum voices are allocated at indices LOOP_VOICES..NUM_VOICES-1.
             // They are identified by padIndex (pad number), not voice slot.
+            // Update ALL active drum voices for this pad (rapid overlapping
+            // hits may have multiple active voices without choke groups).
             for (int dvi = LOOP_VOICES; dvi < NUM_VOICES; dvi++) {
                 Voice& dv = voices[dvi];
                 if (dv.active.load() && dv.padIndex == c.padIdx && !dv.isLoop) {
@@ -869,7 +871,6 @@ public:
                     dv.pitch .store(c.pitch,  std::memory_order_relaxed);
                     dv.volume.store(c.volume, std::memory_order_relaxed);
                     dv.pan   .store(c.pan,    std::memory_order_relaxed);
-                    break;  // at most one active one-shot per pad
                 }
             }
             break;
