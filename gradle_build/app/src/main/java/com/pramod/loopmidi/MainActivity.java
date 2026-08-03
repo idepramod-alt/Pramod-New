@@ -1625,6 +1625,20 @@ public class MainActivity extends Activity {
         this.bankMode = this.prefs.getInt("bank_mode", BANK_A);
         updateBankToggleButton();
         loadKitFromMemory(this.kitIndex);
+        // ── TEMP DIAGNOSTIC — tells us exactly what the restart restored ────────
+        // Shows the kit index read from prefs, the in-memory kitIndex, and the kit
+        // name that was set. If the kit resets to 1 on restart, this tells us
+        // whether prefs really hold 1 (persistence broken) or prefs hold 30 but the
+        // NAME is wrong (kit_name_30 was overwritten). REMOVE AFTER DEBUGGING.
+        Log.i(TAG, "DBG restart: kitIndex=" + this.kitIndex
+                + " prefs_kit_index=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
+                + " kitName='" + this.currentKitName + "'"
+                + " kitName30='" + this.prefs.getString("kit_name_30", "<null>") + "'"
+                + " bankMode=" + this.bankMode);
+        Toast.makeText(this,
+                "DBG idx=" + this.kitIndex + " prefs=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
+                + " name='" + this.currentKitName + "'",
+                Toast.LENGTH_LONG).show();
         updateEditButtonUI();
         this.btnEditMode.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.5
             @Override // android.view.View.OnClickListener
