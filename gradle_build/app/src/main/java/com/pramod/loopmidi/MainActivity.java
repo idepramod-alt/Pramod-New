@@ -3143,21 +3143,80 @@ public class MainActivity extends Activity {
             // Refresh seekbars for the active bank's pad, then persist
             refreshSeekBarsForCurrentBankAndPad();
             saveKitToMemory(this.kitIndex);
-            // ── Restore BOTH banks from the freshly-saved prefs ─────────────────
-            // The folder load above only touched the ACTIVE bank's samples. If the
+            // ── Persist URI permissions for the folder kit IMMEDIATELY ──────────
+            // The document-picker grant is temporary and expires as soon as the
+            // activity resumes. If we don't takePersistableUriPermission() now, a
+            // background decode (or a later app restart) can no longer open these
+            // WAVs → the kit appears to "reset"/go silent. Doing it here (inside
+            // loadKitFromFolder) covers BOTH entry points (direct folder picker and
+            // the kit-list dialog).
+            for (int pi = 0; pi < 8; pi++) {
+                persistUriReadPermission(selectedWavUris[pi]);
+                persistUriReadPermission(selectedWavUrisB[pi]);
+            }
+            // ── Restore the OTHER bank synchronously (race-free) ────────────────
+            // The folder load above only touched the ACTIVE bank's samples. When the
             // audio engine was recreated (file picker fired onStop() → engine null),
-            // the OTHER bank's samples were never loaded into the fresh engine — so
-            // after loading a folder kit into Bank B, Bank A's previously-loaded kit
-            // went silent. loadKitFromMemory() (async) reloads BOTH banks from prefs:
-            // the active bank gets the just-saved folder WAVs, the other bank gets its
-            // previously-saved sounds. Safe: the gen++ at the top of this method has
-            // already aborted the stale load from onActivityResult's engine-recreate
-            // path, so there is no competing write.
-            try { loadKitFromMemory(this.kitIndex); } catch (Exception ignored) {}
+            // the other bank's samples were never loaded into the fresh engine — so
+            // after loading a folder kit into Bank B, Bank A went silent. We restore
+            // the other bank from prefs HERE on the calling thread: deterministic and
+            // immune to the async race that background loadKitFromMemory had (that
+            // race's late decode could hit the persisted URIs before the folder
+            // picker's temporary grant was taken over, silently failing → empty bank).
+            if (bankMode == BANK_A) {
+                restoreBankSamplesSync(false);      // restore Bank B
+            } else if (bankMode == BANK_B) {
+                restoreBankSamplesSync(true);       // restore Bank A
+            }
+            // LAYER_AB → both banks were already loaded from the folder above.
             Toast.makeText(this, "Kit Loaded Successfully!", 0).show();
         } catch (Exception ignored) {
             ignored.printStackTrace();
             Toast.makeText(this, "Load Error: " + ignored.getMessage(), 0).show();
+        }
+    }
+
+    /** Persist read access to a kit WAV uri so it survives an app restart. */
+    private void persistUriReadPermission(Uri uri) {
+        if (uri == null) return;
+        try { getContentResolver().takePersistableUriPermission(uri, 1); } catch (Exception ignored) {}
+    }
+
+    /**
+     * Synchronously reload one bank's samples from prefs. Called after loading a
+     * folder kit into the other bank, to restore the bank the folder load did not
+     * touch. Runs on the caller's thread (UI) — no async race, no generation
+     * invalidation, no stale-overwrite problem.
+     * @param bankA true → restore Bank A pads (slots 0-7); false → Bank B (slots 8-15)
+     */
+    private void restoreBankSamplesSync(boolean bankA) {
+        AudioEngine engine = this.audioEngine;
+        if (engine == null) return;
+        int kitNo = bankA ? this.kitIndex : this.kitIndexB;
+        for (int i = 0; i < 8; i++) {
+            String uriStr = this.prefs.getString(
+                    "kit_" + kitNo + (bankA ? "_uri_" : "_B_uri_") + i, null);
+            int rawId = this.prefs.getInt(
+                    "kit_" + kitNo + (bankA ? "_raw_" : "_B_raw_") + i, 0);
+            int padIdx = bankA ? i : i + 8;
+            try {
+                if (uriStr != null) {
+                    Uri u = Uri.parse(uriStr);
+                    AudioEngine.SampleData sd = engine.loadWavFromUri(padIdx, u);
+                    if (sd != null) { engine.preloadSample(sd); if (bankA) this.samples[i] = sd; else this.samplesB[i] = sd; }
+                    else if (bankA) this.samples[i] = null; else this.samplesB[i] = null;
+                } else if (rawId != 0) {
+                    AudioEngine.SampleData sd = engine.loadRawSound(padIdx, rawId);
+                    if (sd != null) { engine.preloadSample(sd); if (bankA) this.samples[i] = sd; else this.samplesB[i] = sd; }
+                    else if (bankA) this.samples[i] = null; else this.samplesB[i] = null;
+                } else {
+                    // No saved uri/raw → fall back to the preset kit sound so the
+                    // bank is never left completely empty.
+                    int pk = (kitNo <= this.presetKitNames.length) ? this.currentPresetKit : 0;
+                    AudioEngine.SampleData sd = engine.loadRawSound(padIdx, this.presetKits[pk][i]);
+                    if (sd != null) { engine.preloadSample(sd); if (bankA) this.samples[i] = sd; else this.samplesB[i] = sd; }
+                }
+            } catch (Exception ignored) {}
         }
     }
 
