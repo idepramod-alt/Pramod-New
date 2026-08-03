@@ -181,6 +181,24 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
     boolean[] loopPlaying = new boolean[8];
 
+    // ── BPM Beat Blink Indicator ────────────────────────────────────────────
+    // Small dot next to BPM label that flashes on each beat, driven by a
+    // Java Handler at the current BPM interval. No audio impact.
+    private View bpmBlinkDot;
+    private final android.os.Handler bpmHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean bpmBlinkOn = false;
+    private final Runnable bpmBlinkRunnable = new Runnable() {
+        @Override public void run() {
+            if (bpmBlinkDot == null) return;
+            bpmBlinkOn = !bpmBlinkOn;
+            bpmBlinkDot.setBackgroundResource(bpmBlinkOn
+                ? R.drawable.bpm_blink_on : R.drawable.bpm_blink_off);
+            float bpm = Math.max(1f, currentSpeed * 120f);
+            long intervalMs = (long) (60000f / bpm);
+            bpmHandler.postDelayed(this, intervalMs);
+        }
+    };
+
     // ── Master Volume Mode ────────────────────────────────────────────────────
     // true  = slider controls ALL pads simultaneously (original behaviour)
     // false = slider controls only the most-recently tapped pad individually
@@ -498,6 +516,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         padLoopEqLow[index], padLoopEqMid[index], padLoopEqHigh[index], chokeGroup, 0.0f, 0.0f);
             }
             this.txtLoopStatus.setText((this.padDrumMode[index] ? "DRUM" : "ONE-SHOT") + ": PAD " + (index + 1));
+            startBpmBlink();
             // Keep Previous Loop: fade out old-kit loops on first DRUM/ONE-SHOT hit
             if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
             if (isOneShotTriggered) {
@@ -591,6 +610,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
         this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
+        startBpmBlink();
         // Keep Previous Loop: fade out old-kit loops on first new-pad play
         if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
         if (audioAlreadyTriggered) {
@@ -599,7 +619,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Touch-input single-pad mode: a new tap should stop the previous pad only
         // when Multi-Play is OFF. MIDI input should always use the single-trigger
         // behavior above and should not be affected by the Multi-Play checkbox.
-        if (this.isMultiMode || this.keepPreviousLoop) {
+        // Keep Previous Loop: only affects kit-switch behavior (fadeOutOldKitLoops),
+        // NOT within-kit single-pad enforcement — pads within the same kit should
+        // still stop each other when Multi-Play is OFF.
+        if (this.isMultiMode) {
             // Multi-Play OR Keep Previous Loop: previous pads keep playing — only
             // the Stop button (or tapping a pad again to toggle it off) silences
             // them. Kept loops continue under the new kit; the user layers on top.
@@ -708,12 +731,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             int midProg = seekBar2.getProgress();
             int lowProg = seekBar3.getProgress();
 
-            // Linear map: 0..100 → minLevel..maxLevel
-            // At progress=50 (seekbar default): hiLevel = minLevel + 50*(range/100)
-            // Since range is symmetric around 0, that gives exactly 0 mB (flat). ✓
-            short hiLevel  = (short) Math.round(minLevel + hiProg  * (maxLevel - minLevel) / 100.0);
-            short midLevel = (short) Math.round(minLevel + midProg * (maxLevel - minLevel) / 100.0);
-            short lowLevel = (short) Math.round(minLevel + lowProg * (maxLevel - minLevel) / 100.0);
+            // Fixed ±3 dB (3000 mB) range, centered at progress=50 (0 dB flat).
+            // 50 ticks × 60 mB/tick = 3000 mB. Equalizer.setBandLevel silently
+            // clamps to hardware limits if the device supports less than ±3 dB.
+            short hiLevel  = (short) Math.round((hiProg  - 50) * 60.0);
+            short midLevel = (short) Math.round((midProg - 50) * 60.0);
+            short lowLevel = (short) Math.round((lowProg - 50) * 60.0);
 
             Equalizer eq = this.globalEq;
             eq.setBandLevel((short) 0, lowLevel);   // band 0 → LOW
@@ -1306,6 +1329,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 this.loopPlaying[i] = false;
                 updatePadLabel(i);    // drum-mode pads keep their orange indicator
             }
+            stopBpmBlink();
             // Keep Previous Loop: pads whose loops survived a kit switch were
             // deferred — now that everything is stopped, load their new kit sample.
             for (int i = 0; i < 8; i++) {
@@ -1408,6 +1432,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.txtTempoVal = (TextView) findViewById(R.id.txtTempoVal);
         this.txtPitchVal = (TextView) findViewById(R.id.txtPitchVal);
         this.btnSetBpm = (Button) findViewById(R.id.btnSetBpm);
+        this.bpmBlinkDot = findViewById(R.id.bpmBlinkDot);
         this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
         this.txtMasterVolVal  = (TextView) findViewById(R.id.txtMasterVolVal);
         this.txtMasterVolLabel = (android.widget.TextView) findViewById(R.id.txtMasterVolLabel);
@@ -4820,6 +4845,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     drumDelayActive, drumDelayMs, drumDelayLevel,
                     padLoopEqLow[index], padLoopEqMid[index], padLoopEqHigh[index],
                     chokeGroup, 0.0f, 0.0f);
+            // ONE-SHOT single-pad enforcement: stop other active pads so MIDI
+            // matches touch behavior (one pad at a time). Real DRUM mode stays
+            // polyphonic (!effectiveDrumMode guard).
+            if (!this.isMultiMode && !effectiveDrumMode) {
+                for (int i = 0; i < 8; i++) {
+                    if (i != index) { engine.stopPad(i); }
+                }
+            }
             return true;
 
         } else {
@@ -4895,6 +4928,28 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      * (Smooth Pad Transition ON). The fade engages the native release envelope,
      * so the pad stops without any crackle/pop; new pads still start instantly.
      */
+
+    // ── BPM Beat Blink ──────────────────────────────────────────────────────
+    /** Start the beat-synced blink indicator at the current BPM. */
+    private void startBpmBlink() {
+        if (bpmBlinkDot == null) return;
+        bpmHandler.removeCallbacks(bpmBlinkRunnable);
+        bpmBlinkOn = false;
+        bpmBlinkDot.setBackgroundResource(R.drawable.bpm_blink_off);
+        float bpm = Math.max(1f, currentSpeed * 120f);
+        long intervalMs = (long) (60000f / bpm);
+        bpmHandler.postDelayed(bpmBlinkRunnable, intervalMs);
+    }
+
+    /** Stop the beat blink indicator. */
+    private void stopBpmBlink() {
+        bpmHandler.removeCallbacks(bpmBlinkRunnable);
+        if (bpmBlinkDot != null) {
+            bpmBlinkDot.setBackgroundResource(R.drawable.bpm_blink_off);
+        }
+        bpmBlinkOn = false;
+    }
+
     private void stopPadOrFade(int index) {
         AudioEngine engine = this.audioEngine;
         if (engine == null) return;
@@ -5010,10 +5065,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Stop all active pads so mode change takes effect cleanly
         if (this.audioEngine != null) {
             this.audioEngine.stopAll();
-            for (int i = 0; i < 8; i++) {
-                this.loopPlaying[i] = false;
-                updatePadLabel(i);
-            }
+        }
+        // Always refresh pad colors, even if engine is null — ensures
+        // orange (drum) / black (loop) theme is correct after mode switch.
+        for (int i = 0; i < 8; i++) {
+            this.loopPlaying[i] = false;
+            updatePadLabel(i);
         }
         this.prefs.edit()
             .putBoolean("global_drum_mode",   this.isGlobalDrumMode)
