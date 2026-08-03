@@ -239,6 +239,23 @@ public class MainActivity extends Activity {
         super.onResume();
         this.isVisible = true;
 
+        // ── Force-restore the SAVED kit index on every foreground ──────────────
+        // onCreate's init order is: initPads()/initSeekBars()/setupFavorites()
+        // (defaults) THEN loadKitFromMemory() (saved values) — so defaults can
+        // never overwrite the saved kit. This extra check guarantees it regardless
+        // of init order: if prefs hold a different index than the in-memory one,
+        // trust prefs and reload. (Normal resumes are cheap — no reload when the
+        // index already matches.)
+        int savedIdx = this.prefs.getInt(KEY_KIT_INDEX, this.kitIndex);
+        int savedIdxB = this.prefs.getInt("kit_index_B", this.kitIndexB);
+        int savedMode = this.prefs.getInt("bank_mode", this.bankMode);
+        boolean kitStateStale = (savedIdx != this.kitIndex)
+                || (savedIdxB != this.kitIndexB)
+                || (savedMode != this.bankMode);
+        if (savedIdx >= 1 && savedIdx != this.kitIndex) this.kitIndex = savedIdx;
+        if (savedIdxB >= 1 && savedIdxB != this.kitIndexB) this.kitIndexB = savedIdxB;
+        if (savedMode >= BANK_A && savedMode <= LAYER_AB) this.bankMode = savedMode;
+
         if (this.audioEngine == null) {
             // Engine was stopped in onStop() while LoopsActivity was on screen.
             // Recreate the engine and reload the current kit so drum pads work.
@@ -261,6 +278,11 @@ public class MainActivity extends Activity {
                     if (nativeBurst < 32 || nativeBurst > 8192) nativeBurst = 256;
                 } catch (NumberFormatException ignored) {}
                 this.audioEngine.reinitStream(nativeSR, nativeBurst);
+            }
+            // Reload ONLY when the saved kit state didn't match what onCreate had
+            // loaded (init-overwrite protection). Skipped on normal resumes.
+            if (kitStateStale) {
+                loadKitFromMemory(this.kitIndex);
             }
         }
     }
@@ -1626,19 +1648,35 @@ public class MainActivity extends Activity {
         updateBankToggleButton();
         loadKitFromMemory(this.kitIndex);
         // ── TEMP DIAGNOSTIC — tells us exactly what the restart restored ────────
-        // Shows the kit index read from prefs, the in-memory kitIndex, and the kit
-        // name that was set. If the kit resets to 1 on restart, this tells us
-        // whether prefs really hold 1 (persistence broken) or prefs hold 30 but the
-        // NAME is wrong (kit_name_30 was overwritten). REMOVE AFTER DEBUGGING.
+        // Shows the kit index read from prefs, the in-memory kitIndex, the kit
+        // name, and whether kit 30's pad URIs were persisted. This distinguishes:
+        //   (a) prefs hold kit_index=1        → SAVE path is broken
+        //   (b) prefs hold 30 but name="KIT 1"→ NAME save path is broken
+        //   (c) prefs hold 30, name correct, pad URIs missing → URI save broken
+        // REMOVE AFTER DEBUGGING.
         Log.i(TAG, "DBG restart: kitIndex=" + this.kitIndex
                 + " prefs_kit_index=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
                 + " kitName='" + this.currentKitName + "'"
                 + " kitName30='" + this.prefs.getString("kit_name_30", "<null>") + "'"
+                + " kit30_uri0=" + (this.prefs.getString("kit_30_uri_0", null) != null)
                 + " bankMode=" + this.bankMode);
-        Toast.makeText(this,
-                "DBG idx=" + this.kitIndex + " prefs=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
-                + " name='" + this.currentKitName + "'",
-                Toast.LENGTH_LONG).show();
+        String dbgMsg = "INDEX: memory=" + this.kitIndex
+                + "  prefs=" + this.prefs.getInt(KEY_KIT_INDEX, -1)
+                + "\nNAME: '" + this.currentKitName + "'"
+                + "\nkit_name_30: '" + this.prefs.getString("kit_name_30", "<null>") + "'"
+                + "\nkit30 pad1 URI saved: "
+                + (this.prefs.getString("kit_30_uri_0", null) != null ? "YES" : "NO")
+                + "\nBANK: " + this.bankMode
+                + "\n\n(A) prefs=1  → save broken\n"
+                + "(B) prefs=30 + name 'KIT 1' → name overwritten\n"
+                + "(C) prefs=30 + name ok + URI NO → pad sounds not saved";
+        try {
+            new AlertDialog.Builder(this)
+                .setTitle("⚠️ DBG Restart")
+                .setMessage(dbgMsg)
+                .setPositiveButton("OK", null)
+                .show();
+        } catch (Exception ignored) {}
         updateEditButtonUI();
         this.btnEditMode.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.5
             @Override // android.view.View.OnClickListener
