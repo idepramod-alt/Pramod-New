@@ -16,7 +16,7 @@ public class WavFileWriter {
     private int channels;
     private int bitsPerSample;
     private int dataSize;
-    private final boolean isFloat;
+    private boolean isFloat;
 
     public void open(java.io.File file, int sampleRate, int channels, int bitsPerSample) throws IOException {
         this.sampleRate = sampleRate;

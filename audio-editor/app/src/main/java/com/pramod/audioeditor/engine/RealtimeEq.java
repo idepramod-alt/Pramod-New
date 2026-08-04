@@ -24,12 +24,12 @@ public class RealtimeEq {
 
         if (channels == 2) {
             for (int i = 0; i < frames * 2; i += 2) {
-                buf[i]     = cl.process(buf[i]);
-                buf[i + 1] = cr.process(buf[i + 1]);
+                buf[i]     = (float) cl.process(buf[i]);
+                buf[i + 1] = (float) cr.process(buf[i + 1]);
             }
         } else {
             for (int i = 0; i < frames; i++) {
-                buf[i] = cl.process(buf[i]);
+                buf[i] = (float) cl.process(buf[i]);
             }
         }
     }

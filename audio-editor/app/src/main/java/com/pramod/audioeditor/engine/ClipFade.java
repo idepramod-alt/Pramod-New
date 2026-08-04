@@ -35,7 +35,7 @@ public class ClipFade {
      * Blends the tail of segment A with the head of segment B.
      */
     public static void applyCrossfade(float[] a, int aLen, float[] b, int bStart, int fadeSamples) {
-        int n = Math.min(fadeSamples, aLen, b.length - bStart);
+        int n = Math.min(fadeSamples, Math.min(aLen, b.length - bStart));
         for (int i = 0; i < n; i++) {
             float t = (float) i / n;
             float gainA = (float) Math.cos(t * Math.PI / 2);
