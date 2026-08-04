@@ -79,6 +79,9 @@ public class AudioEngine {
     // Preserves all loaded sample data and active voice state.
     private native void nativeReinitStream(int nativeSR, int nativeBurst);
 
+    /** Returns the Oboe stream's audio session ID for Equalizer attachment. */
+    public native int nativeGetAudioSessionId();
+
     // ── Internal/system-audio recording (post-mix tap, no MediaProjection) ──
     private native void nativeStartRecording();
     private native void nativeStopRecording();

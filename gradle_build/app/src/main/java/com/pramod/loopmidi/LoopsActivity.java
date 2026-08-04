@@ -691,7 +691,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private void updateEQ() {
         try {
             if (this.globalEq == null) {
-                Equalizer equalizer = new Equalizer(0, 0);
+                // Attach Equalizer to the Oboe stream's audio session (not session 0).
+                // Session 0 is the Android framework mix — Oboe's low-latency exclusive
+                // stream bypasses it, so an Equalizer on session 0 has no effect.
+                int sessionId = 0;
+                if (this.audioEngine != null) {
+                    try { sessionId = this.audioEngine.nativeGetAudioSessionId(); }
+                    catch (Throwable ignored) {}
+                }
+                Equalizer equalizer = new Equalizer(0, sessionId);
                 this.globalEq = equalizer;
                 equalizer.setEnabled(true);
             }
@@ -703,22 +711,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 return;
             }
 
-            // ── Device-adaptive scaling ──────────────────────────────────────────
+            // ── Device-adaptive EQ mapping ─────────────────────────────────────
             // Android Equalizer uses MILLIBELS (1 dB = 1000 mB).
-            // Device support range varies:  ±1500 mB (±1.5 dB) on most devices,
-            // up to ±15000 mB (±15 dB) on some high-end hardware.
-            //
-            // BUG that was here: old formula used a fixed ×300 multiplier which
-            // produced ±15 000 mB.  On a typical device (max ±1500 mB) this means
-            // even 1-tick of slider movement from centre = 300 mB = 20% of the full
-            // range, so the EQ snaps to max-cut/boost after barely any movement —
-            // the "sound dab ya cut" symptom.
-            //
-            // FIX: query the device's actual min/max band level and map slider
+            // Query the device's actual min/max band level and map slider
             //   0   → minLevel (max cut)
             //   50  → 0 mB    (neutral / flat response)
             //   100 → maxLevel (max boost)
-            // This distributes the full device EQ range smoothly across 100 steps.
             short[] bandRange = this.globalEq.getBandLevelRange();
             short minLevel = bandRange[0];
             short maxLevel = bandRange[1];
@@ -731,12 +729,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             int midProg = seekBar2.getProgress();
             int lowProg = seekBar3.getProgress();
 
-            // Fixed ±3 dB (3000 mB) range, centered at progress=50 (0 dB flat).
-            // 50 ticks × 60 mB/tick = 3000 mB. Equalizer.setBandLevel silently
-            // clamps to hardware limits if the device supports less than ±3 dB.
-            short hiLevel  = (short) Math.round((hiProg  - 50) * 60.0);
-            short midLevel = (short) Math.round((midProg - 50) * 60.0);
-            short lowLevel = (short) Math.round((lowProg - 50) * 60.0);
+            // Linear map: 0..100 → minLevel..maxLevel
+            short hiLevel  = (short) Math.round(minLevel + hiProg  * (maxLevel - minLevel) / 100.0);
+            short midLevel = (short) Math.round(minLevel + midProg * (maxLevel - minLevel) / 100.0);
+            short lowLevel = (short) Math.round(minLevel + lowProg * (maxLevel - minLevel) / 100.0);
 
             Equalizer eq = this.globalEq;
             eq.setBandLevel((short) 0, lowLevel);   // band 0 → LOW
@@ -1047,6 +1043,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.globalReverb != null) {
             try { this.globalReverb.release(); } catch (Exception ignored) {}
             this.globalReverb = null;
+        }
+        // Release Equalizer so it re-attaches to the new Oboe stream's session
+        // on next updateEQ() call (the old session ID is no longer valid).
+        if (this.globalEq != null) {
+            try { this.globalEq.release(); } catch (Exception ignored) {}
+            this.globalEq = null;
         }
         try {
             closeMidiDevice();

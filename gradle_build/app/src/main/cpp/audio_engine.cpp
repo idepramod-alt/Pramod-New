@@ -231,6 +231,7 @@ public:
     CmdQueue  cmdQ;
     int       nextDrumVoice = LOOP_VOICES;
     std::shared_ptr<oboe::AudioStream> stream;
+    int audioSessionId = 0;  // Oboe stream's audio session ID for Equalizer attachment
     // Bumped every time init() successfully (re)opens the stream. Used by the
     // ErrorDisconnected fallback-restart watchdog (see onErrorAfterClose) to
     // detect whether someone else (Java's AudioDeviceCallback path) already
@@ -1042,6 +1043,11 @@ public:
         // latency; hardware glitch-guard is the driver's job in Exclusive+LowLatency.
         stream->setBufferSizeInFrames(framesPerBurst * 1);
 
+        // Store Oboe's assigned audio session ID so Java Equalizer can attach
+        // to this stream instead of the default session 0 (which bypasses Oboe).
+        audioSessionId = stream->getSessionId();
+        LOGI("Audio session ID: %d", audioSessionId);
+
         // Store the actual channel count Oboe negotiated with the device.
         // We request 2 but some devices silently open as 1 in exclusive mode.
         streamChannels = stream->getChannelCount();
@@ -1323,6 +1329,12 @@ Java_com_pramod_loopmidi_AudioEngine_nativeReinitStream(
         JNIEnv* env, jobject obj, jint nativeSR, jint nativeBurst) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->init((int)nativeSR, (int)nativeBurst);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeGetAudioSessionId(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    return e ? e->audioSessionId : 0;
 }
 
 // ── Internal/system-audio recording (post-mix tap of the engine's own output) ──
