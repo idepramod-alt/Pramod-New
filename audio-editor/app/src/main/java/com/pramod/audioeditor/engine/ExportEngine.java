@@ -66,34 +66,45 @@ public class ExportEngine {
     private static void exportMp3(PcmSource src, long from, long to, ExportSettings settings,
                                   com.pramod.audioeditor.data.EqSettings eq,
                                   File output, ProgressListener listener) throws IOException {
-        // MP3 export — try to use jump3r (de.sciss.jump3r) if available,
+        // MP3 export — try to use jump3r via reflection if available,
         // otherwise fall back to WAV export
         try {
             Class.forName("de.sciss.jump3r.LameEncoder");
-            // jump3r is available — use it
+
             File tempWav = new File(output.getParentFile(), "temp_encode.wav");
             exportWav(src, from, to, settings, eq, tempWav, null);
 
-            de.sciss.jump3r.LameEncoder encoder =
-                    new de.sciss.jump3r.LameEncoder(
+            // Use reflection to avoid compile-time dependency on jump3r
+            Class<?> qualClass = Class.forName("de.sciss.jump3r.Quality");
+            Object quality = qualClass.getField("QUALITY_HIGH").get(null);
+
+            Class<?> encClass = Class.forName("de.sciss.jump3r.LameEncoder");
+            Object encoder = encClass.getConstructor(
+                    java.io.InputStream.class, java.io.OutputStream.class,
+                    int.class, int.class, int.class, qualClass)
+                    .newInstance(
                             new java.io.FileInputStream(tempWav),
                             new java.io.FileOutputStream(output),
-                            settings.sampleRate, 2, settings.mp3Bitrate,
-                            de.sciss.jump3r.Quality.QUALITY_HIGH);
+                            settings.sampleRate, 2, settings.mp3Bitrate, quality);
 
-            byte[] buffer = new byte[encoder.getBufferSize()];
-            int bytesRead;
+            java.lang.reflect.Method getBufSize = encClass.getMethod("getBufferSize");
+            java.lang.reflect.Method encode = encClass.getMethod("encodeBuffer", byte[].class);
+            java.lang.reflect.Method closeEnc = encClass.getMethod("close");
+
+            byte[] buffer = new byte[(int) getBufSize.invoke(encoder)];
             int totalBytes = (int) tempWav.length();
             int written = 0;
 
-            while ((bytesRead = encoder.encodeBuffer(buffer)) > 0) {
+            while (true) {
+                int bytesRead = (int) encode.invoke(encoder, buffer);
+                if (bytesRead <= 0) break;
                 written += bytesRead;
                 if (listener != null) {
                     int pct = (int)((long)written * 90 / totalBytes);
                     listener.onProgress(Math.min(90, pct));
                 }
             }
-            encoder.close();
+            closeEnc.invoke(encoder);
             tempWav.delete();
             if (listener != null) listener.onProgress(100);
         } catch (ClassNotFoundException e) {
