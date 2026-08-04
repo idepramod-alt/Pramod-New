@@ -59,7 +59,10 @@ public class ExportEngine {
             }
         };
 
-        OfflineRenderEngine.render(src, from, to, eq, limiter, sink, listener);
+        // Adapt ExportEngine.ProgressListener → OfflineRenderEngine.ProgressListener
+        OfflineRenderEngine.ProgressListener orl = listener != null
+                ? pct -> listener.onProgress(pct) : null;
+        OfflineRenderEngine.render(src, from, to, eq, limiter, sink, orl);
         writer.close();
     }
 

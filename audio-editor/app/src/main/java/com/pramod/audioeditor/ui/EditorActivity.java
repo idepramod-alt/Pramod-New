@@ -1,5 +1,6 @@
 package com.pramod.audioeditor.ui;
 
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
@@ -299,7 +300,7 @@ public class EditorActivity extends AppCompatActivity {
 
     private void setMode(EditModel.Mode mode, Button activeBtn) {
         editModel.setMode(mode);
-        waveformView.setMode(mode);
+        waveformView.setMode(viewModeFor(mode));
 
         // Reset all mode buttons
         int[] btnIds = {R.id.btnModeSelect, R.id.btnModeTrim, R.id.btnModeSplit, R.id.btnModeEq};
@@ -310,6 +311,15 @@ public class EditorActivity extends AppCompatActivity {
 
         // Show/hide EQ panel
         eqPanel.setVisibility(mode == EditModel.Mode.EQ ? View.VISIBLE : View.GONE);
+    }
+
+    private static ProWaveformView.Mode viewModeFor(EditModel.Mode m) {
+        switch (m) {
+            case TRIM: return ProWaveformView.Mode.TRIM;
+            case SPLIT: return ProWaveformView.Mode.SPLIT;
+            case EQ: return ProWaveformView.Mode.EQ;
+            default: return ProWaveformView.Mode.SELECT;
+        }
     }
 
     // ── Playback ─────────────────────────────────────────────────────────────

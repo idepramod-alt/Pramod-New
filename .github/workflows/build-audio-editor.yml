@@ -48,13 +48,25 @@ jobs:
       - name: Build
         working-directory: audio-editor
         run: |
+          set -o pipefail
           gradle wrapper --gradle-version 8.7
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
+          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain 2>&1 | tee gradle-build.log
+          echo "=== APK outputs ==="
+          ls -la app/build/outputs/apk/debug/ || true
 
-      - name: Upload
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: audio-editor/gradle-build.log
+          if-no-files-found: ignore
+
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: audio-editor
           path: audio-editor/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
