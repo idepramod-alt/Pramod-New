@@ -45,16 +45,21 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build
+      - name: Build APK
         working-directory: audio-editor
         run: |
           gradle wrapper --gradle-version 8.7
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
+          ./gradlew assembleDebug --no-daemon
 
-      - name: Upload
+      - name: Check APK exists
+        run: |
+          ls -la audio-editor/app/build/outputs/apk/debug/ || echo "APK directory not found"
+
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: audio-editor
-          path: audio-editor/app/build/outputs/apk/debug/*.apk
+          name: AudioEditor-v1.0-debug
+          path: audio-editor/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
