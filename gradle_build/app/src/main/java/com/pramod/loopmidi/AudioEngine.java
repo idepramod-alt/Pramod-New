@@ -82,6 +82,15 @@ public class AudioEngine {
     /** Returns the Oboe stream's audio session ID for Equalizer attachment. */
     public native int nativeGetAudioSessionId();
 
+    /** Set global 3-band EQ (master bus) in dB. Applied to all audio output. */
+    private native void nativeSetGlobalEQ(float lowDB, float midDB, float highDB);
+
+    /** Public wrapper: set global EQ from Java (dB values, e.g. -12 to +12). */
+    public void setGlobalEQ(float lowDB, float midDB, float highDB) {
+        try { nativeSetGlobalEQ(lowDB, midDB, highDB); }
+        catch (UnsatisfiedLinkError ignored) {}
+    }
+
     // ── Internal/system-audio recording (post-mix tap, no MediaProjection) ──
     private native void nativeStartRecording();
     private native void nativeStopRecording();

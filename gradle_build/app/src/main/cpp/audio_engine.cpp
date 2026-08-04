@@ -255,6 +255,18 @@ public:
     float delayBuf[NUM_VOICES][DELAY_BUF_SIZE];
     int   delayWrite[NUM_VOICES] = {0};
 
+    // ── Global 3-band EQ (master bus) ──────────────────────────────────────
+    // Applied to the final mixed output after soft saturation. Uses the same
+    // biquad filters as per-pad EQ but on the master bus, so it affects ALL
+    // audio (loops + drums). Updated from Java via nativeSetGlobalEQ().
+    BiquadCoeffs gEqLowC, gEqMidC, gEqHighC;
+    BiquadState  gEqLowSL, gEqMidSL, gEqHighSL;   // Left channel
+    BiquadState  gEqLowSR, gEqMidSR, gEqHighSR;   // Right channel
+    bool         gEqDirty = true;  // recompute coefficients on next render
+    std::atomic<float> gEqLowDB{0.f};
+    std::atomic<float> gEqMidDB{0.f};
+    std::atomic<float> gEqHighDB{0.f};
+
     // ── Loop voices: Sonic (speed/WSOLA) + engine ring resampler (pitch) ────
     // ARCHITECTURE (gives INDEPENDENT speed and pitch, both click-free):
     //   • Sonic applies SPEED only (pitch pinned to 1.0). WSOLA time-stretch
@@ -664,12 +676,30 @@ public:
         }
 
         // Soft saturation (tanh) applied to the full output buffer.
-        // Voices now write directly into stereo positions (out[2*i]/out[2*i+1]),
-        // so saturate all nCh samples per frame together.
         {
             int outSamples = numFrames * nCh;
             for (int i = 0; i < outSamples; i++) {
                 out[i] = tanhf(out[i]);
+            }
+        }
+
+        // ── Global 3-band EQ (master bus) ──────────────────────────────────
+        // Applied to the final mixed output after soft saturation. Uses the
+        // same biquad filters as per-pad EQ. Recomputes coefficients when
+        // dB values change (gEqDirty flag). Processes L/R independently.
+        if (gEqDirty) {
+            float lo = gEqLowDB.load(std::memory_order_relaxed);
+            float mi = gEqMidDB.load(std::memory_order_relaxed);
+            float hi = gEqHighDB.load(std::memory_order_relaxed);
+            gEqLowC  = makeLowShelf ((float)sampleRate,  150.f, lo);
+            gEqMidC  = makePeaking  ((float)sampleRate, 1000.f, mi, 0.9f);
+            gEqHighC = makeHighShelf((float)sampleRate, 6000.f, hi);
+            gEqDirty = false;
+        }
+        if (nCh == 2) {
+            for (int i = 0; i < numFrames; i++) {
+                out[i * 2]     = biquadProcess(gEqLowC,  gEqLowSL,  biquadProcess(gEqMidC,  gEqMidSL,  biquadProcess(gEqHighC, gEqHighSL, out[i * 2])));
+                out[i * 2 + 1] = biquadProcess(gEqLowC,  gEqLowSR,  biquadProcess(gEqMidC,  gEqMidSR,  biquadProcess(gEqHighC, gEqHighSR, out[i * 2 + 1])));
             }
         }
 
@@ -1335,6 +1365,17 @@ JNIEXPORT jint JNICALL
 Java_com_pramod_loopmidi_AudioEngine_nativeGetAudioSessionId(JNIEnv* env, jobject obj) {
     AudioEngineImpl* e = getEngine(env, obj);
     return e ? e->audioSessionId : 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeSetGlobalEQ(
+        JNIEnv* env, jobject obj, jfloat lowDB, jfloat midDB, jfloat highDB) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (!e) return;
+    e->gEqLowDB.store((float)lowDB,  std::memory_order_relaxed);
+    e->gEqMidDB.store((float)midDB,  std::memory_order_relaxed);
+    e->gEqHighDB.store((float)highDB, std::memory_order_relaxed);
+    e->gEqDirty = true;
 }
 
 // ── Internal/system-audio recording (post-mix tap of the engine's own output) ──

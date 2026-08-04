@@ -118,7 +118,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private float[] padDrumDelayTime = new float[8];
     private float[] padDrumDelayLevel = new float[8];
     private int currentScaleOffset;
-    private Equalizer globalEq;
     private PresetReverb globalReverb;
     private volatile boolean isVisible;
     private MidiManager midiManager;
@@ -690,19 +689,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     private void updateEQ() {
         try {
-            if (this.globalEq == null) {
-                // Attach Equalizer to the Oboe stream's audio session (not session 0).
-                // Session 0 is the Android framework mix — Oboe's low-latency exclusive
-                // stream bypasses it, so an Equalizer on session 0 has no effect.
-                int sessionId = 0;
-                if (this.audioEngine != null) {
-                    try { sessionId = this.audioEngine.nativeGetAudioSessionId(); }
-                    catch (Throwable ignored) {}
-                }
-                Equalizer equalizer = new Equalizer(0, sessionId);
-                this.globalEq = equalizer;
-                equalizer.setEnabled(true);
-            }
             View decorView = getWindow().getDecorView();
             SeekBar seekBar  = (SeekBar) decorView.findViewWithTag("seekEqHi");
             SeekBar seekBar2 = (SeekBar) decorView.findViewWithTag("seekEqMid");
@@ -711,43 +697,27 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 return;
             }
 
-            // ── Device-adaptive EQ mapping ─────────────────────────────────────
-            // Android Equalizer uses MILLIBELS (1 dB = 1000 mB).
-            // Query the device's actual min/max band level and map slider
-            //   0   → minLevel (max cut)
-            //   50  → 0 mB    (neutral / flat response)
-            //   100 → maxLevel (max boost)
-            short[] bandRange = this.globalEq.getBandLevelRange();
-            short minLevel = bandRange[0];
-            short maxLevel = bandRange[1];
-
-            // Clamp to sane defaults if the device returns garbage values
-            if (minLevel >= 0) minLevel = -1500;
-            if (maxLevel <= 0) maxLevel =  1500;
-
             int hiProg  = seekBar.getProgress();
             int midProg = seekBar2.getProgress();
             int lowProg = seekBar3.getProgress();
 
-            // Linear map: 0..100 → minLevel..maxLevel
-            short hiLevel  = (short) Math.round(minLevel + hiProg  * (maxLevel - minLevel) / 100.0);
-            short midLevel = (short) Math.round(minLevel + midProg * (maxLevel - minLevel) / 100.0);
-            short lowLevel = (short) Math.round(minLevel + lowProg * (maxLevel - minLevel) / 100.0);
+            // Map seekbar 0..100 → -12..+12 dB. Progress=50 → 0 dB (flat).
+            float hiDB  = (float)((hiProg  - 50) * 0.24);  // 50 * 0.24 = 12
+            float midDB = (float)((midProg - 50) * 0.24);
+            float lowDB = (float)((lowProg - 50) * 0.24);
 
-            Equalizer eq = this.globalEq;
-            eq.setBandLevel((short) 0, lowLevel);   // band 0 → LOW
-            eq.setBandLevel((short) 1, lowLevel);   // band 1 → LOW
-            eq.setBandLevel((short) 2, midLevel);   // band 2 → MID
-            eq.setBandLevel((short) 3, hiLevel);    // band 3 → HIGH
-            eq.setBandLevel((short) 4, hiLevel);    // band 4 → HIGH
+            // Apply via native global EQ (master biquad filters in audio engine)
+            if (this.audioEngine != null) {
+                this.audioEngine.setGlobalEQ(lowDB, midDB, hiDB);
+            }
 
             // Update dB display labels next to each seekbar
             TextView txtHiDb  = (TextView) decorView.findViewWithTag("txtEqHiDb");
             TextView txtMidDb = (TextView) decorView.findViewWithTag("txtEqMidDb");
             TextView txtLowDb = (TextView) decorView.findViewWithTag("txtEqLowDb");
-            if (txtHiDb  != null) txtHiDb.setText(String.format("%.1f dB", hiLevel  / 1000.0));
-            if (txtMidDb != null) txtMidDb.setText(String.format("%.1f dB", midLevel / 1000.0));
-            if (txtLowDb != null) txtLowDb.setText(String.format("%.1f dB", lowLevel / 1000.0));
+            if (txtHiDb  != null) txtHiDb.setText(String.format("%.1f dB", hiDB));
+            if (txtMidDb != null) txtMidDb.setText(String.format("%.1f dB", midDB));
+            if (txtLowDb != null) txtLowDb.setText(String.format("%.1f dB", lowDB));
         } catch (Throwable th) {
         }
     }
@@ -1043,12 +1013,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.globalReverb != null) {
             try { this.globalReverb.release(); } catch (Exception ignored) {}
             this.globalReverb = null;
-        }
-        // Release Equalizer so it re-attaches to the new Oboe stream's session
-        // on next updateEQ() call (the old session ID is no longer valid).
-        if (this.globalEq != null) {
-            try { this.globalEq.release(); } catch (Exception ignored) {}
-            this.globalEq = null;
         }
         try {
             closeMidiDevice();
