@@ -1801,8 +1801,12 @@ public class MainActivity extends Activity {
                         MainActivity.this.padVolumeB[MainActivity.this.selectedPad] = progress / 100.0f;
                     }
                 }
-                MainActivity mainActivity = MainActivity.this;
-                mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                // Only persist on user drag — programmatic setProgress during pad
+                // switch should NOT trigger a synchronous disk write (commit()).
+                if (fromUser) {
+                    MainActivity mainActivity = MainActivity.this;
+                    mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                }
             }
 
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
@@ -1827,8 +1831,10 @@ public class MainActivity extends Activity {
                         MainActivity.this.padPitchB[MainActivity.this.selectedPad] = (progress / 100.0f) + 0.5f;
                     }
                 }
-                MainActivity mainActivity = MainActivity.this;
-                mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                if (fromUser) {
+                    MainActivity mainActivity = MainActivity.this;
+                    mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                }
             }
 
             @Override // android.widget.SeekBar.OnSeekBarChangeListener
@@ -1852,8 +1858,12 @@ public class MainActivity extends Activity {
                         MainActivity.this.padDelayOnB[MainActivity.this.selectedPad] = isChecked;
                     }
                 }
-                MainActivity mainActivity = MainActivity.this;
-                mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                // Only persist on user tap — programmatic setChecked during pad
+                // switch should NOT trigger a synchronous disk write.
+                if (buttonView.isPressed()) {
+                    MainActivity mainActivity = MainActivity.this;
+                    mainActivity.saveKitToMemory(mainActivity.kitIndex);
+                }
             }
         });
         this.seekDelayTime.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.MainActivity.15

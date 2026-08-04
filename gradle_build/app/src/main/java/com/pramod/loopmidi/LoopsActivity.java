@@ -741,10 +741,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     @Override // android.app.Activity, android.view.Window.Callback
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        try {
-            updateEQ();
-        } catch (Throwable unused) {
-        }
+        // EQ is now handled by seekbar listeners directly — no need to run
+        // updateEQ() on every touch event (was causing 3x findViewWithTag
+        // traversals before every pad tap).
         return super.dispatchTouchEvent(ev);
     }
 
@@ -976,6 +975,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     @Override // android.app.Activity
     protected void onDestroy() {
         super.onDestroy();
+        stopBpmBlink();
         // Clean up admin deactivation listener
         if (deactivateListener != null && deactivateRef != null) {
             deactivateRef.removeEventListener(deactivateListener);
@@ -1195,6 +1195,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     protected void onPause() {
         super.onPause();
         this.isVisible = false;
+        stopBpmBlink();
 
         // Full APK back-to-main: keep loops running in background.
         // sBackgroundPlayback is set in onBackPressed() just before we reorder
@@ -2596,6 +2597,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
             });
         }
+
+        // ── EQ seekbar listeners (ADV panel) ───────────────────────────────
+        // Instead of calling updateEQ() on EVERY dispatchTouchEvent (which adds
+        // 3x findViewWithTag traversals before every pad tap), wire listeners
+        // directly to the EQ seekbars so native EQ only updates on user drag.
+        View decorView = getWindow().getDecorView();
+        SeekBar eqHi  = (SeekBar) decorView.findViewWithTag("seekEqHi");
+        SeekBar eqMid = (SeekBar) decorView.findViewWithTag("seekEqMid");
+        SeekBar eqLow = (SeekBar) decorView.findViewWithTag("seekEqLow");
+        SeekBar.OnSeekBarChangeListener eqListener = new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int prog, boolean fromUser) {
+                if (fromUser) updateEQ();
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        };
+        if (eqHi  != null) eqHi.setOnSeekBarChangeListener(eqListener);
+        if (eqMid != null) eqMid.setOnSeekBarChangeListener(eqListener);
+        if (eqLow != null) eqLow.setOnSeekBarChangeListener(eqListener);
     }
 
     /**
