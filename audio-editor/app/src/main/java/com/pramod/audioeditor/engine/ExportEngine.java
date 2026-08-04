@@ -66,19 +66,20 @@ public class ExportEngine {
     private static void exportMp3(PcmSource src, long from, long to, ExportSettings settings,
                                   com.pramod.audioeditor.data.EqSettings eq,
                                   File output, ProgressListener listener) throws IOException {
-        // MP3 export using jump3r
+        // MP3 export — try to use jump3r (de.sciss.jump3r) if available,
+        // otherwise fall back to WAV export
         try {
-            // Render to 16-bit PCM first, then encode
+            Class.forName("de.sciss.jump3r.LameEncoder");
+            // jump3r is available — use it
             File tempWav = new File(output.getParentFile(), "temp_encode.wav");
             exportWav(src, from, to, settings, eq, tempWav, null);
 
-            // Use jump3r for MP3 encoding
-            net.sourceforge.lame_ajmp.LameEncoder encoder =
-                    new net.sourceforge.lame_ajmp.LameEncoder(
+            de.sciss.jump3r.LameEncoder encoder =
+                    new de.sciss.jump3r.LameEncoder(
                             new java.io.FileInputStream(tempWav),
                             new java.io.FileOutputStream(output),
                             settings.sampleRate, 2, settings.mp3Bitrate,
-                            net.sourceforge.lame_ajmp.Quality.QUALITY_HIGH);
+                            de.sciss.jump3r.Quality.QUALITY_HIGH);
 
             byte[] buffer = new byte[encoder.getBufferSize()];
             int bytesRead;
@@ -95,8 +96,16 @@ public class ExportEngine {
             encoder.close();
             tempWav.delete();
             if (listener != null) listener.onProgress(100);
+        } catch (ClassNotFoundException e) {
+            // jump3r not available — fall back to WAV with .wav extension
+            File wavOutput = new File(output.getParentFile(),
+                    output.getName().replace(".mp3", ".wav"));
+            exportWav(src, from, to, settings, eq, wavOutput, listener);
+            if (listener != null) {
+                listener.onProgress(100);
+                listener.onComplete(wavOutput);
+            }
         } catch (Exception e) {
-            // Fallback: export as WAV with .mp3 extension warning
             throw new IOException("MP3 encoding failed: " + e.getMessage());
         }
     }
