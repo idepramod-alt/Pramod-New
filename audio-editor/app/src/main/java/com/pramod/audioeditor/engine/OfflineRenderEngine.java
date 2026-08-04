@@ -2,9 +2,7 @@ package com.pramod.audioeditor.engine;
 
 import com.pramod.audioeditor.data.EqSettings;
 import com.pramod.audioeditor.data.PcmSource;
-import com.pramod.audioeditor.data.WavFileWriter;
 
-import java.io.File;
 import java.io.IOException;
 
 /**
