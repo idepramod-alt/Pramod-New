@@ -50,7 +50,7 @@ jobs:
       - name: Generate Gradle wrapper
         working-directory: audio-editor
         run: |
-          gradle wrapper --gradle-version 8.7 --distribution-type bin
+          gradle wrapper --gradle-version 8.7
           chmod +x gradlew
 
       - name: Build APK
