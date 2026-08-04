@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="#FF111111">
+
+    <!-- Left: Waveform + Transport -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="3"
+        android:orientation="vertical">
+
+        <!-- Top bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:background="#FF1A1A2E">
+
+            <Button
+                android:id="@+id/btnBack"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
+                android:text="←"
+                android:textColor="#FFCCCCCC"
+                android:textSize="18sp"
+                android:background="#FF333333"/>
+
+            <TextView
+                android:id="@+id/txtFileName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="No file loaded"
+                android:textColor="#FF00CCAA"
+                android:textSize="14sp"
+                android:paddingStart="12dp"
+                android:singleLine="true"
+                android:ellipsize="end"/>
+
+            <Button
+                android:id="@+id/btnOpen"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="📂 Open"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:background="#FF00CCAA"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"/>
+
+            <Button
+                android:id="@+id/btnExport"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="💾 Export"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:background="#FF4488FF"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+        <!-- Waveform -->
+        <com.pramod.audioeditor.view.ProWaveformView
+            android:id="@+id/waveformView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#FF111111"/>
+
+        <!-- Transport bar -->
+        <com.pramod.audioeditor.view.TransportBarView
+            android:id="@+id/transportBar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="#FF1A1A2E"/>
+    </LinearLayout>
+
+    <!-- Right: Controls panel -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:background="#FF151520"
+        android:padding="8dp">
+
+        <!-- Mode buttons -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="MODE"
+            android:textColor="#FF666666"
+            android:textSize="10sp"
+            android:paddingBottom="4dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btnModeSelect" android:layout_width="0dp" android:layout_height="40dp"
+                android:layout_weight="1" android:text="Select" android:textSize="10sp"
+                android:textColor="#FFFFFFFF" android:background="#FF00CCAA" android:layout_marginEnd="2dp"/>
+            <Button android:id="@+id/btnModeTrim" android:layout_width="0dp" android:layout_height="40dp"
+                android:layout_weight="1" android:text="Trim" android:textSize="10sp"
+                android:textColor="#FFFFFFFF" android:background="#FF333333" android:layout_marginEnd="2dp"/>
+            <Button android:id="@+id/btnModeSplit" android:layout_width="0dp" android:layout_height="40dp"
+                android:layout_weight="1" android:text="Split" android:textSize="10sp"
+                android:textColor="#FFFFFFFF" android:background="#FF333333" android:layout_marginEnd="2dp"/>
+            <Button android:id="@+id/btnModeEq" android:layout_width="0dp" android:layout_height="40dp"
+                android:layout_weight="1" android:text="EQ" android:textSize="10sp"
+                android:textColor="#FFFFFFFF" android:background="#FF333333"/>
+        </LinearLayout>
+
+        <!-- Selection info -->
+        <TextView android:id="@+id/txtSelectionInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Selection: --"
+            android:textColor="#FF888888"
+            android:textSize="11sp"
+            android:paddingTop="8dp"/>
+
+        <!-- Trim info -->
+        <TextView android:id="@+id/txtTrimInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Trim: --"
+            android:textColor="#FF888888"
+            android:textSize="11sp"
+            android:paddingTop="4dp"/>
+
+        <!-- Action buttons -->
+        <Button android:id="@+id/btnPlaySelection"
+            android:layout_width="match_parent" android:layout_height="40dp"
+            android:text="▶ Play Selection" android:textSize="11sp"
+            android:textColor="#FFFFFFFF" android:background="#FF00AA66"
+            android:layout_marginTop="8dp"/>
+
+        <Button android:id="@+id/btnApplyTrim"
+            android:layout_width="match_parent" android:layout_height="40dp"
+            android:text="✂ Apply Trim" android:textSize="11sp"
+            android:textColor="#FFFFFFFF" android:background="#FFCC8800"
+            android:layout_marginTop="4dp"/>
+
+        <Button android:id="@+id/btnSplit"
+            android:layout_width="match_parent" android:layout_height="40dp"
+            android:text="🔪 Split Here" android:textSize="11sp"
+            android:textColor="#FFFFFFFF" android:background="#FFCC4444"
+            android:layout_marginTop="4dp"/>
+
+        <!-- EQ Panel (collapsible) -->
+        <com.pramod.audioeditor.view.EqPanelView
+            android:id="@+id/eqPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:visibility="gone"/>
+
+        <!-- Loading indicator -->
+        <LinearLayout android:id="@+id/loadingPanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone"
+            android:background="#CC111111">
+            <TextView android:id="@+id/txtLoading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Loading..."
+                android:textColor="#FF00CCAA"
+                android:textSize="16sp"/>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
