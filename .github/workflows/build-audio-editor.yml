@@ -30,51 +30,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK licenses
+      - name: Accept licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Install SDK
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Set up Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Generate Gradle wrapper
+      - name: Build
         working-directory: audio-editor
         run: |
-          which gradle || echo "gradle not found"
-          gradle --version || echo "gradle version failed"
           gradle wrapper --gradle-version 8.7
           chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
 
-      - name: Build APK
-        working-directory: audio-editor
-        run: |
-          ./gradlew assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --warning-mode all
-
-      - name: Check APK
-        if: success()
-        run: |
-          echo "=== Checking APK ==="
-          find audio-editor -name "*.apk" -type f
-          ls -la audio-editor/app/build/outputs/apk/debug/ || echo "Debug APK dir not found"
-
-      - name: Upload APK artifact
+      - name: Upload
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AudioEditor-v1.0-debug
-          path: audio-editor/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
-          if-no-files-found: error
+          name: audio-editor
+          path: audio-editor/app/build/outputs/apk/debug/*.apk
