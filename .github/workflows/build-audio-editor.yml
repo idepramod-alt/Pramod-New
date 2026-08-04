@@ -51,7 +51,7 @@ jobs:
           set -o pipefail
           gradle wrapper --gradle-version 8.7
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain 2>&1 | tee gradle-build.log
+          ./gradlew assembleDebug --no-daemon --console=plain 2>&1 | tee gradle-build.log
           echo "=== APK outputs ==="
           ls -la app/build/outputs/apk/debug/ || true
 
@@ -82,8 +82,8 @@ jobs:
               log = fs.readFileSync('audio-editor/gradle-build.log', 'utf8');
             } catch(e) { log = 'Could not read build log'; }
             const lines = log.split('\n');
-            const tail = lines.slice(-200).join('\n');
-            const body = '## ❌ Audio Editor Build Failed\n\n**Build log (last 200 lines):**\n\n```\n' + tail + '\n```';
+            const tail = lines.slice(-400).join('\n');
+            const body = '## ❌ Audio Editor Build Failed\n\n**Build log (last 400 lines):**\n\n```\n' + tail + '\n```';
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
