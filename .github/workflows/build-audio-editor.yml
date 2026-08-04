@@ -50,6 +50,8 @@ jobs:
       - name: Generate Gradle wrapper
         working-directory: audio-editor
         run: |
+          which gradle || echo "gradle not found"
+          gradle --version || echo "gradle version failed"
           gradle wrapper --gradle-version 8.7
           chmod +x gradlew
 
