@@ -7,7 +7,6 @@ import android.media.MediaFormat;
 import android.net.Uri;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 
 /**
@@ -17,10 +16,19 @@ import java.util.ArrayList;
  */
 public class BpmDetector {
 
-    private static final int TARGET_SR = 22050;  // Low SR for efficiency
-    private static final int HOP = 512;           // ~23ms hop at 22050 Hz
+    private static final int HOP = 512;           // samples per analysis frame
     private static final float MIN_BPM = 60f;
     private static final float MAX_BPM = 240f;
+
+    /** Result container holding detected BPM and sample rate used. */
+    public static class BpmResult {
+        public final int bpm;
+        public final int sampleRate;
+        public BpmResult(int bpm, int sampleRate) {
+            this.bpm = bpm;
+            this.sampleRate = sampleRate;
+        }
+    }
 
     /**
      * Detect BPM from an audio URI. Runs on any thread (blocks for decode).
@@ -28,16 +36,15 @@ public class BpmDetector {
      */
     public static int detectBpm(Context context, Uri uri) {
         try {
-            float[] pcm = decodeToMono(context, uri);
-            if (pcm == null || pcm.length < TARGET_SR) return 120;
-            return detectFromPcm(pcm);
+            BpmResult result = decodeAndDetect(context, uri);
+            return result.bpm;
         } catch (Exception e) {
             return 120;
         }
     }
 
-    /** Decode audio URI to mono float PCM at TARGET_SR. */
-    private static float[] decodeToMono(Context context, Uri uri) throws Exception {
+    /** Decode audio URI to mono float PCM and detect BPM. */
+    private static BpmResult decodeAndDetect(Context context, Uri uri) throws Exception {
         MediaExtractor extractor = new MediaExtractor();
         extractor.setDataSource(context, uri, null);
 
@@ -50,11 +57,12 @@ public class BpmDetector {
                 break;
             }
         }
-        if (audioTrack < 0) return null;
+        if (audioTrack < 0) return new BpmResult(120, 44100);
 
         extractor.selectTrack(audioTrack);
         MediaFormat format = extractor.getTrackFormat(audioTrack);
         int channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+        int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
         String mime = format.getString(MediaFormat.KEY_MIME);
 
         MediaCodec decoder = MediaCodec.createDecoderByType(mime);
@@ -87,11 +95,18 @@ public class BpmDetector {
                         byte[] bytes = new byte[info.size];
                         outBuf.get(bytes);
                         int nSamples = info.size / 2; // 16-bit
+                        // Convert to mono: average channels or take left
                         for (int i = 0; i < nSamples; i += channels) {
                             int idx = i * 2;
                             if (idx + 1 < bytes.length) {
                                 short s = (short) ((bytes[idx] & 0xFF) | (bytes[idx + 1] << 8));
-                                samples.add(s / 32768f);
+                                float val = s / 32768f;
+                                // If stereo, average both channels for better onset detection
+                                if (channels == 2 && idx + 3 < bytes.length) {
+                                    short s2 = (short) ((bytes[idx + 2] & 0xFF) | (bytes[idx + 3] << 8));
+                                    val = (val + s2 / 32768f) / 2f;
+                                }
+                                samples.add(val);
                             }
                         }
                     }
@@ -106,11 +121,13 @@ public class BpmDetector {
 
         float[] pcm = new float[samples.size()];
         for (int i = 0; i < pcm.length; i++) pcm[i] = samples.get(i);
-        return pcm;
+
+        int bpm = detectFromPcm(pcm, sampleRate);
+        return new BpmResult(bpm, sampleRate);
     }
 
     /** Detect BPM from mono PCM via onset autocorrelation. */
-    private static int detectFromPcm(float[] samples) {
+    private static int detectFromPcm(float[] samples, int sampleRate) {
         int nHops = samples.length / HOP;
         if (nHops < 30) return 120;
 
@@ -126,38 +143,86 @@ public class BpmDetector {
             energy[i] = (float) Math.sqrt(sum / HOP);
         }
 
-        // Onset envelope (half-wave rectified diff)
+        // Onset envelope: half-wave rectified first-order difference
+        // Also apply a small noise gate to suppress quiet sections
+        float noiseGate = 0.005f;
         float[] onset = new float[nHops];
         for (int i = 1; i < nHops; i++) {
-            float d = energy[i] - energy[i - 1];
-            onset[i] = d > 0 ? d : 0;
+            if (energy[i] < noiseGate && energy[i - 1] < noiseGate) {
+                onset[i] = 0;
+            } else {
+                float d = energy[i] - energy[i - 1] * 0.9f; // leaky integrator
+                onset[i] = d > 0 ? d : 0;
+            }
         }
 
         // Autocorrelation over BPM range 60-240
-        int minLag = Math.max(2, (int) (TARGET_SR / (HOP * MAX_BPM / 60.0)));
-        int maxLag = Math.min(nHops / 2, (int) (TARGET_SR / (HOP * MIN_BPM / 60.0)));
+        // lag (in hops) = sampleRate / (HOP * bpm / 60)
+        int minLag = Math.max(2, (int) (sampleRate * 60.0 / (HOP * MAX_BPM)));
+        int maxLag = Math.min(nHops / 3, (int) (sampleRate * 60.0 / (HOP * MIN_BPM)));
+
+        if (minLag >= maxLag) return 120;
 
         float bestScore = -1;
         int bestLag = -1;
 
         for (int lag = minLag; lag <= maxLag; lag++) {
             float sum = 0;
-            float denom = 0;
-            for (int i = 0; i < nHops - lag; i++) {
+            float normA = 0;
+            float normB = 0;
+            int count = nHops - lag;
+            for (int i = 0; i < count; i++) {
                 sum += onset[i] * onset[i + lag];
-                denom += onset[i + lag] * onset[i + lag];
+                normA += onset[i] * onset[i];
+                normB += onset[i + lag] * onset[i + lag];
             }
-            if (denom > 0) sum /= Math.sqrt(denom);
+            float denom = (float) Math.sqrt(normA * normB);
+            if (denom > 0) sum /= denom;
             if (sum > bestScore) {
                 bestScore = sum;
                 bestLag = lag;
             }
         }
 
-        if (bestLag <= 0 || bestScore < 0.05f) return 120;
+        if (bestLag <= 0 || bestScore < 0.10f) return 120;
 
-        float bpm = 60.0f * TARGET_SR / (HOP * bestLag);
+        float bpm = 60.0f * sampleRate / (HOP * bestLag);
+
+        // Harmonic preference: check if BPM/2 or BPM*2 has better on-beat energy
+        float bpm2 = bpm * 2f;
+        float bpmHalf = bpm / 2f;
+        if (bpm2 <= MAX_BPM && bpm2 >= MIN_BPM) {
+            int lag2 = (int) (sampleRate * 60.0 / (HOP * bpm2));
+            float score2 = autocorrelationScore(onset, nHops, lag2);
+            if (score2 > bestScore * 1.15f) bpm = bpm2;
+        }
+        if (bpmHalf >= MIN_BPM && bpmHalf <= MAX_BPM) {
+            int lagHalf = (int) (sampleRate * 60.0 / (HOP * bpmHalf));
+            float scoreHalf = autocorrelationScore(onset, nHops, lagHalf);
+            if (scoreHalf > bestScore * 1.15f) bpm = bpmHalf;
+        }
+
         if (bpm < MIN_BPM || bpm > MAX_BPM) return 120;
+
+        // Snap to common BPM rounding (prefer round numbers)
+        int rounded = Math.round(bpm);
+        if (Math.abs(bpm - rounded) < 1.5f && rounded >= MIN_BPM && rounded <= MAX_BPM) {
+            return rounded;
+        }
         return Math.round(bpm);
+    }
+
+    /** Compute normalized autocorrelation score for a specific lag. */
+    private static float autocorrelationScore(float[] onset, int nHops, int lag) {
+        if (lag <= 0 || lag >= nHops) return 0;
+        float sum = 0, normA = 0, normB = 0;
+        int count = nHops - lag;
+        for (int i = 0; i < count; i++) {
+            sum += onset[i] * onset[i + lag];
+            normA += onset[i] * onset[i];
+            normB += onset[i + lag] * onset[i + lag];
+        }
+        float denom = (float) Math.sqrt(normA * normB);
+        return denom > 0 ? sum / denom : 0;
     }
 }
