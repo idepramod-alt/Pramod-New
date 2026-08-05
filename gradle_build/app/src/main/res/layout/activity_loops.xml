@@ -35,6 +35,11 @@
             android:id="@+id/btnEditLoops" android:background="@drawable/btn_3d_dark"
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="2dp" android:text="EDIT" android:layout_weight="1"/>
+        <Button android:textSize="8sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnPadEdit" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="2dp" android:text="PAD EDIT" android:lines="1"
+            android:maxLines="1" android:textScaleX="0.85" android:layout_weight="1"/>
         <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
             android:id="@+id/btnRenameLoop" android:background="@drawable/btn_3d_purple"
             android:layout_width="0dp" android:layout_height="match_parent"

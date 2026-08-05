@@ -1197,7 +1197,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         });
     }
 
-    /** Tap loop channel name → number keyboard → jump directly to any channel 1-100. */
+    /** Tap loop channel name → number keyboard → jump directly to any channel 1-100.
+     *  Type number + keyboard Done → kit jumps, no GO button needed. */
     private void showLoopJumpDialog() {
         EditText et = new EditText(this);
         et.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -1206,29 +1207,43 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         et.setHintTextColor(0xff888888);
         et.setGravity(Gravity.CENTER);
         et.setTextSize(26);
-        new AlertDialog.Builder(this)
+        // Done key on keyboard performs the jump directly
+        et.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+
+        Runnable doJump = () -> {
+            String s = et.getText().toString().trim();
+            if (s.isEmpty()) return;
+            try {
+                int target = Integer.parseInt(s);
+                if (target >= 1 && target <= MAX_LOOPS) {
+                    saveLoopsToMemory();
+                    loopChannelIndex = target;
+                    prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+                    currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
+                    txtLoopChannel.setText(currentLoopName);
+                    loadCurrentKit();
+                } else {
+                    Toast.makeText(this, "1 se " + MAX_LOOPS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
+                }
+            } catch (NumberFormatException ignored) {}
+        };
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
             .setTitle("Loop channel number daalo (1–" + MAX_LOOPS + ")")
             .setView(et)
-            .setPositiveButton("GO ▶", (d, w) -> {
-                String s = et.getText().toString().trim();
-                if (!s.isEmpty()) {
-                    try {
-                        int target = Integer.parseInt(s);
-                        if (target >= 1 && target <= MAX_LOOPS) {
-                            saveLoopsToMemory();
-                            loopChannelIndex = target;
-                            prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-                            currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
-                            txtLoopChannel.setText(currentLoopName);
-                            loadCurrentKit();
-                        } else {
-                            Toast.makeText(this, "1 se " + MAX_LOOPS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
-            })
             .setNegativeButton("Cancel", null)
-            .show();
+            .create();
+
+        et.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                doJump.run();
+                dlg.dismiss();
+                return true;
+            }
+            return false;
+        });
+
+        dlg.show();
         et.post(() -> {
             et.requestFocus();
             InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
@@ -1423,6 +1438,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         restoreTrackPaths(); // Bug Fix: app restart pe recording list restore karo
         this.btnBack = (Button) findViewById(R.id.btnBack);
         this.btnEditLoops = (Button) findViewById(R.id.btnEditLoops);
+        Button btnPadEdit = (Button) findViewById(R.id.btnPadEdit);
+        btnPadEdit.setOnClickListener(v -> showPadEditDialog());
         this.btnAdvancedLoops = (Button) findViewById(R.id.btnAdvancedLoops);
         this.advancedControlPanel     = findViewById(R.id.advancedControlPanelScroll);
         this.recControlPanelScroll    = findViewById(R.id.recControlPanelScroll);
@@ -1655,11 +1672,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             editMode = !editMode;
             btnEditLoops.setText(editMode ? "EDIT ON" : "EDIT OFF");
             btnEditLoops.setBackgroundResource(editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
-        });
-        // Long-press EDIT → open Pad Edit (EQ/Gain/Pitch/Pan per pad), kept out of the tap flow
-        this.btnEditLoops.setOnLongClickListener(v -> {
-            showPadEditDialog();
-            return true;
         });
         Button button = this.btnAdvancedLoops;
         if (button != null) {
