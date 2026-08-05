@@ -3198,6 +3198,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.loopPlaying[index]) {
             this.audioEngine.stopPad(index);
             this.loopPlaying[index] = false;
+            maybeStopBpmBlinkIfIdle();
         }
         this.loopSamples[index] = null;
         this.loopUris[index] = null;
