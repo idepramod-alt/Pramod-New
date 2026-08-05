@@ -1,23 +1,21 @@
 package com.pramod.loopmidi;
 
 import android.content.Context;
-import android.media.AudioFormat;
-import android.media.AudioRecord;
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.net.Uri;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
 
 /**
- * BPM detection utility — two-method consensus algorithm.
- * Decodes audio to mono PCM, then runs peak-interval + autocorrelation detection.
- * Fast WAV path avoids MediaCodec entirely.
+ * BPM detection — decodes audio to mono PCM, then runs dual-method detection.
+ * Primary: direct InputStream decode (handles WAV and raw PCM).
+ * Fallback: MediaCodec (handles MP3, OGG, FLAC, AAC, M4A).
  */
 public class BpmDetector {
 
@@ -25,11 +23,10 @@ public class BpmDetector {
     private static final float MIN_BPM = 60f;
     private static final float MAX_BPM = 240f;
 
-    /** Detect BPM from an audio URI. Returns integer 60-240, or 120 fallback. */
     public static int detectBpm(Context context, Uri uri) {
         try {
             float[] pcm = decodeToMono(context, uri);
-            if (pcm == null || pcm.length < 22050) return 120; // need at least 0.5s
+            if (pcm == null || pcm.length < 22050) return 120;
             int sr = getSampleRate(context, uri);
             return detectBest(pcm, sr);
         } catch (Exception e) {
@@ -56,182 +53,232 @@ public class BpmDetector {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // DECODE — fast WAV path + MediaCodec fallback
+    // DECODE — try WAV first, then MediaCodec
     // ═══════════════════════════════════════════════════════════════════════
 
     private static float[] decodeToMono(Context context, Uri uri) throws Exception {
-        // Try fast WAV path first (no MediaCodec needed)
+        // Try WAV/PCM direct decode first (fastest, most reliable)
         float[] wav = tryDecodeWav(context, uri);
         if (wav != null && wav.length > 0) return wav;
 
-        // MediaCodec path for compressed formats
-        return decodeWithMediaCodec(context, uri);
+        // Try MediaCodec for compressed formats
+        float[] mc = tryDecodeMediaCodec(context, uri);
+        if (mc != null && mc.length > 0) return mc;
+
+        return null;
     }
 
-    /** Fast decoder for 16-bit WAV files — parses header directly. */
+    /**
+     * Decode WAV/PCM file directly from InputStream.
+     * Handles standard44-byte WAV headers and raw PCM.
+     */
     private static float[] tryDecodeWav(Context context, Uri uri) {
+        InputStream is = null;
         try {
-            InputStream is = context.getContentResolver().openInputStream(uri);
+            is = context.getContentResolver().openInputStream(uri);
             if (is == null) return null;
 
-            byte[] header = new byte[44];
-            int read = is.read(header, 0, 44);
-            if (read < 44) { is.close(); return null; }
+            // Read header bytes (may need more than44 for non-standard headers)
+            byte[] header = readFully(is, 44);
+            if (header == null || header.length < 44) return null;
 
             // Check RIFF/WAVE magic
-            if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') { is.close(); return null; }
-            if (header[8] != 'W' || header[9] != 'A' || header[10] != 'V' || header[11] != 'E') { is.close(); return null; }
+            if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F')
+                return null;
+            if (header[8] != 'W' || header[9] != 'A' || header[10] != 'V' || header[11] != 'E')
+                return null;
 
-            int channels = (header[22] & 0xFF) | ((header[23] & 0xFF) << 8);
-            int bitsPerSample = (header[34] & 0xFF) | ((header[35] & 0xFF) << 8);
-            int dataSize = (header[40] & 0xFF) | ((header[41] & 0xFF) << 8)
-                    | ((header[42] & 0xFF) << 16) | ((header[43] & 0xFF) << 24);
+            int channels = u16(header, 22);
+            int bitsPerSample = u16(header, 34);
+            int fmtChunkSize = u32(header, 16);
+            int dataSize = u32(header, 40);
 
-            if (bitsPerSample != 16 || channels < 1 || channels > 2) { is.close(); return null; }
-            if (dataSize <= 0 || dataSize > 100_000_000) { is.close(); return null; } // sanity check
+            if (channels < 1 || channels > 2) return null;
+            if (bitsPerSample != 16) return null;
+
+            // If fmt chunk is larger than16, skip extra bytes to reach "data" chunk
+            int extraFmtBytes = fmtChunkSize - 16;
+            if (extraFmtBytes > 0 && extraFmtBytes < 100) {
+                byte[] skip = readFully(is, extraFmtBytes);
+                // After extra fmt bytes, we should be at "data" chunk
+                // Read data header (8 bytes: "data" + size)
+                byte[] dataHeader = readFully(is, 8);
+                if (dataHeader != null && dataHeader.length >= 8
+                        && dataHeader[0] == 'd' && dataHeader[1] == 'a'
+                        && dataHeader[2] == 't' && dataHeader[3] == 'a') {
+                    dataSize = (dataHeader[4] & 0xFF) | ((dataHeader[5] & 0xFF) << 8)
+                            | ((dataHeader[6] & 0xFF) << 16) | ((dataHeader[7] & 0xFF) << 24);
+                }
+            }
+
+            // Read all PCM data
+            byte[] pcmBytes;
+            if (dataSize > 0 && dataSize < 100_000_000) {
+                pcmBytes = readFully(is, dataSize);
+            } else {
+                // dataSize unknown or 0 — read all remaining bytes
+                pcmBytes = readAllRemaining(is);
+            }
+
+            if (pcmBytes == null || pcmBytes.length < 2) return null;
 
             int bytesPerFrame = channels * 2;
-            int totalFrames = dataSize / bytesPerFrame;
+            int totalFrames = pcmBytes.length / bytesPerFrame;
+            if (totalFrames < 100) return null;
 
-            // Read all PCM data at once
-            byte[] pcmBytes = new byte[dataSize];
-            int offset = 0;
-            while (offset < dataSize) {
-                int n = is.read(pcmBytes, offset, dataSize - offset);
-                if (n <= 0) break;
-                offset += n;
-            }
-            is.close();
-
-            // Convert to mono float using ShortBuffer (efficient, no Float boxing)
             ShortBuffer sb = ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer();
-            short[] shortBuf = new short[totalFrames * channels];
-            sb.get(shortBuf);
+            short[] shorts = new short[totalFrames * channels];
+            sb.get(shorts);
 
             float[] mono = new float[totalFrames];
             if (channels == 2) {
                 for (int i = 0; i < totalFrames; i++) {
-                    mono[i] = (shortBuf[i * 2] + shortBuf[i * 2 + 1]) / (2f * 32768f);
+                    mono[i] = (shorts[i * 2] + shorts[i * 2 + 1]) / (2f * 32768f);
                 }
             } else {
                 for (int i = 0; i < totalFrames; i++) {
-                    mono[i] = shortBuf[i] / 32768f;
+                    mono[i] = shorts[i] / 32768f;
                 }
             }
             return mono;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (is != null) try { is.close(); } catch (Exception ignored) {}
         }
     }
 
-    /** MediaCodec decoder for compressed formats (MP3, OGG, FLAC, AAC, etc). */
-    private static float[] decodeWithMediaCodec(Context context, Uri uri) throws Exception {
-        MediaExtractor extractor = new MediaExtractor();
-        extractor.setDataSource(context, uri, null);
-
-        int audioTrack = -1;
-        for (int i = 0; i < extractor.getTrackCount(); i++) {
-            MediaFormat fmt = extractor.getTrackFormat(i);
-            String mime = fmt.getString(MediaFormat.KEY_MIME);
-            if (mime != null && mime.startsWith("audio/")) { audioTrack = i; break; }
+    /** Read exactly n bytes from InputStream, or null on failure. */
+    private static byte[] readFully(InputStream is, int n) {
+        try {
+            byte[] buf = new byte[n];
+            int pos = 0;
+            while (pos < n) {
+                int read = is.read(buf, pos, n - pos);
+                if (read < 0) break;
+                pos += read;
+            }
+            return pos == n ? buf : null;
+        } catch (Exception e) {
+            return null;
         }
-        if (audioTrack < 0) { extractor.release(); return null; }
+    }
 
-        extractor.selectTrack(audioTrack);
-        MediaFormat format = extractor.getTrackFormat(audioTrack);
-        int channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
-        String mime = format.getString(MediaFormat.KEY_MIME);
-        if (mime == null) { extractor.release(); return null; }
+    /** Read all remaining bytes from InputStream. */
+    private static byte[] readAllRemaining(InputStream is) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) {
+                baos.write(buf, 0, n);
+            }
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
-        // Estimate output size for pre-allocation
-        long durationUs = format.containsKey(MediaFormat.KEY_DURATION)
-                ? format.getLong(MediaFormat.KEY_DURATION) : 30_000_000L; // 30s default
-        int estFrames = (int) (44100L * durationUs / 1_000_000L);
+    /** Read unsigned16-bit LE from byte array. */
+    private static int u16(byte[] b, int off) {
+        return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8);
+    }
 
-        // Use primitive float array instead of ArrayList<Float>
-        float[] pcm = new float[Math.max(1024, Math.min(estFrames, 2_000_000))]; // cap at 2M frames
-        int pcmPos = 0;
+    /** Read unsigned32-bit LE from byte array. */
+    private static int u32(byte[] b, int off) {
+        return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8)
+                | ((b[off + 2] & 0xFF) << 16) | ((b[off + 3] & 0xFF) << 24);
+    }
 
-        MediaCodec decoder = MediaCodec.createDecoderByType(mime);
-        decoder.configure(format, null, null, 0);
-        decoder.start();
+    // ═══════════════════════════════════════════════════════════════════════
+    // MediaCodec fallback for compressed formats
+    // ═══════════════════════════════════════════════════════════════════════
 
-        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        boolean done = false;
+    private static float[] tryDecodeMediaCodec(Context context, Uri uri) {
+        MediaExtractor extractor = null;
+        MediaCodec decoder = null;
+        try {
+            extractor = new MediaExtractor();
+            extractor.setDataSource(context, uri, null);
 
-        while (!done) {
-            // Feed input
-            int inIdx = decoder.dequeueInputBuffer(10000);
-            if (inIdx >= 0) {
-                ByteBuffer inBuf = decoder.getInputBuffer(inIdx);
-                if (inBuf != null) {
-                    int sz = extractor.readSampleData(inBuf, 0);
-                    if (sz < 0) {
-                        decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                    } else {
-                        decoder.queueInputBuffer(inIdx, 0, sz, extractor.getSampleTime(), 0);
-                        extractor.advance();
-                    }
+            int audioTrack = -1;
+            int channels = 1;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat fmt = extractor.getTrackFormat(i);
+                String mime = fmt.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/") && !mime.equals(MediaFormat.MIMETYPE_AUDIO_RAW)) {
+                    audioTrack = i;
+                    channels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                    extractor.selectTrack(i);
+                    decoder = MediaCodec.createDecoderByType(mime);
+                    decoder.configure(fmt, null, null, 0);
+                    decoder.start();
+                    break;
                 }
             }
+            if (audioTrack < 0 || decoder == null) return null;
 
-            // Read output
-            int outIdx = decoder.dequeueOutputBuffer(info, 10000);
-            if (outIdx >= 0) {
-                if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) done = true;
-                if (info.size > 0) {
-                    ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);
-                    if (outBuf != null) {
-                        outBuf.position(info.offset);
-                        outBuf.limit(info.offset + info.size);
+            java.util.ArrayList<float[]> chunks = new java.util.ArrayList<>();
+            int totalFrames = 0;
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean done = false;
 
-                        // Read as short array via ShortBuffer (efficient)
-                        int nShorts = info.size / 2;
-                        short[] sbuf = new short[nShorts];
-                        outBuf.asShortBuffer().get(sbuf);
-
-                        int bytesPerFrame = channels * 2;
-                        int nFrames = info.size / bytesPerFrame;
-
-                        // Ensure pcm array is big enough
-                        if (pcmPos + nFrames > pcm.length) {
-                            float[] newPcm = new float[Math.min(pcm.length * 2, pcmPos + nFrames + 1024)];
-                            System.arraycopy(pcm, 0, newPcm, 0, pcmPos);
-                            pcm = newPcm;
-                        }
-
-                        // Convert to mono
-                        if (channels == 2) {
-                            for (int f = 0; f < nFrames; f++) {
-                                int si = f * 2;
-                                if (si + 1 < nShorts) {
-                                    pcm[pcmPos++] = (sbuf[si] + sbuf[si + 1]) / (2f * 32768f);
-                                }
-                            }
+            while (!done) {
+                int inIdx = decoder.dequeueInputBuffer(10000);
+                if (inIdx >= 0) {
+                    ByteBuffer inBuf = decoder.getInputBuffer(inIdx);
+                    if (inBuf != null) {
+                        inBuf.clear();
+                        int sz = extractor.readSampleData(inBuf, 0);
+                        if (sz < 0) {
+                            decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                         } else {
-                            for (int f = 0; f < nFrames; f++) {
-                                if (f < nShorts) {
-                                    pcm[pcmPos++] = sbuf[f] / 32768f;
-                                }
-                            }
+                            decoder.queueInputBuffer(inIdx, 0, sz, extractor.getSampleTime(), 0);
+                            extractor.advance();
                         }
                     }
                 }
-                decoder.releaseOutputBuffer(outIdx, false);
+                int outIdx = decoder.dequeueOutputBuffer(info, 10000);
+                if (outIdx >= 0) {
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) done = true;
+                    if (info.size > 0) {
+                        ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);
+                        if (outBuf != null) {
+                            outBuf.position(info.offset);
+                            outBuf.limit(info.offset + info.size);
+                            int nShorts = info.size / 2;
+                            short[] sbuf = new short[nShorts];
+                            outBuf.asShortBuffer().get(sbuf);
+                            int nFrames = info.size / (channels * 2);
+                            float[] chunk = new float[nFrames];
+                            if (channels == 2) {
+                                for (int f = 0; f < nFrames && f * 2 + 1 < nShorts; f++) {
+                                    chunk[f] = (sbuf[f * 2] + sbuf[f * 2 + 1]) / (2f * 32768f);
+                                }
+                            } else {
+                                for (int f = 0; f < nFrames && f < nShorts; f++) {
+                                    chunk[f] = sbuf[f] / 32768f;
+                                }
+                            }
+                            chunks.add(chunk);
+                            totalFrames += nFrames;
+                        }
+                    }
+                    decoder.releaseOutputBuffer(outIdx, false);
+                }
             }
-        }
 
-        decoder.stop();
-        decoder.release();
-        extractor.release();
-
-        // Trim to actual size
-        if (pcmPos < pcm.length) {
-            float[] trimmed = new float[pcmPos];
-            System.arraycopy(pcm, 0, trimmed, 0, pcmPos);
-            return trimmed;
+            if (totalFrames == 0) return null;
+            float[] pcm = new float[totalFrames];
+            int pos = 0;
+            for (float[] c : chunks) { System.arraycopy(c, 0, pcm, pos, c.length); pos += c.length; }
+            return pcm;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (decoder != null) { try { decoder.stop(); } catch (Exception ignored) {} try { decoder.release(); } catch (Exception ignored) {} }
+            if (extractor != null) { try { extractor.release(); } catch (Exception ignored) {} }
         }
-        return pcm;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -243,25 +290,21 @@ public class BpmDetector {
         int bpm2 = detectByAutocorrelation(pcm, sampleRate);
 
         if (bpm1 == 120 && bpm2 == 120) return 120;
+        if (bpm1 == 120) return bpm2;
+        if (bpm2 == 120) return bpm1;
         if (Math.abs(bpm1 - bpm2) <= 3) return bpm1;
         if (bpm1 >= 90 && bpm1 <= 150) return bpm1;
         if (bpm2 >= 90 && bpm2 <= 150) return bpm2;
         return (Math.abs(bpm1 - 120) <= Math.abs(bpm2 - 120)) ? bpm1 : bpm2;
     }
 
-    // ── Method 1: Peak Interval ──────────────────────────────────────────
-
     private static int detectByPeakInterval(float[] samples, int sampleRate) {
         float[] energy = computeEnergy(samples);
         float[] onset = computeOnset(energy);
-
-        // Adaptive threshold
         float med = computeMedian(onset);
-        float threshold = med * 1.5f;
-        if (threshold < 0.001f) threshold = computeMean(onset) * 2f;
+        float threshold = Math.max(med * 1.5f, computeMean(onset) * 2f);
         if (threshold < 0.0005f) return 120;
 
-        // Find peaks
         java.util.ArrayList<Integer> peaks = new java.util.ArrayList<>();
         for (int i = 2; i < onset.length - 1; i++) {
             if (onset[i] > threshold && onset[i] > onset[i - 1] && onset[i] >= onset[i + 1]) {
@@ -270,42 +313,33 @@ public class BpmDetector {
         }
         if (peaks.size() < 4) return 120;
 
-        // Compute intervals
         java.util.ArrayList<Float> intervals = new java.util.ArrayList<>();
         for (int i = 1; i < peaks.size(); i++) {
             intervals.add((float) (peaks.get(i) - peaks.get(i - 1)));
         }
-
         float bestInterval = findModeInterval(intervals);
         if (bestInterval <= 0) return 120;
-
-        float bpm = 60.0f * sampleRate / (HOP * bestInterval);
-        return clampBpm(bpm);
+        return clampBpm(60.0f * sampleRate / (HOP * bestInterval));
     }
 
     private static float findModeInterval(java.util.ArrayList<Float> intervals) {
         if (intervals.isEmpty()) return 0;
         java.util.Collections.sort(intervals);
-        float bestInterval = intervals.get(0);
+        float best = intervals.get(0);
         int bestCount = 0;
         for (int i = 0; i < intervals.size(); i++) {
             float center = intervals.get(i);
             int count = 0;
-            for (float v : intervals) {
-                if (Math.abs(v - center) <= 0.5f) count++;
-            }
-            if (count > bestCount) { bestCount = count; bestInterval = center; }
+            for (float v : intervals) if (Math.abs(v - center) <= 0.5f) count++;
+            if (count > bestCount) { bestCount = count; best = center; }
         }
-        return bestCount >= 3 ? bestInterval : 0;
+        return bestCount >= 3 ? best : 0;
     }
-
-    // ── Method 2: Autocorrelation ────────────────────────────────────────
 
     private static int detectByAutocorrelation(float[] samples, int sampleRate) {
         float[] energy = computeEnergy(samples);
         float[] onset = computeOnset(energy);
         int nHops = onset.length;
-
         int minLag = Math.max(2, (int) (sampleRate * 60.0 / (HOP * MAX_BPM)));
         int maxLag = Math.min(nHops / 2, (int) (sampleRate * 60.0 / (HOP * MIN_BPM)));
         if (minLag >= maxLag) return 120;
@@ -324,26 +358,18 @@ public class BpmDetector {
             float acf = denom > 0 ? sum / denom : 0;
             if (acf > bestScore) { bestScore = acf; bestLag = lag; }
         }
-
         if (bestLag <= 0 || bestScore < 0.08f) return 120;
         float bpm = 60.0f * sampleRate / (HOP * bestLag);
 
-        // Check harmonics
         float best = bpm;
-        float bestBeatE = beatEnergy(onset, nHops, sampleRate, bpm);
+        float bestE = beatEnergy(onset, nHops, sampleRate, bpm);
         for (int m = 2; m <= 3; m++) {
             float c = bpm * m;
-            if (c <= MAX_BPM) {
-                float e = beatEnergy(onset, nHops, sampleRate, c);
-                if (e > bestBeatE * 1.15f) { best = c; bestBeatE = e; }
-            }
+            if (c <= MAX_BPM) { float e = beatEnergy(onset, nHops, sampleRate, c); if (e > bestE * 1.15f) { best = c; bestE = e; } }
         }
         for (int d = 2; d <= 3; d++) {
             float c = bpm / d;
-            if (c >= MIN_BPM) {
-                float e = beatEnergy(onset, nHops, sampleRate, c);
-                if (e > bestBeatE * 1.15f) { best = c; bestBeatE = e; }
-            }
+            if (c >= MIN_BPM) { float e = beatEnergy(onset, nHops, sampleRate, c); if (e > bestE * 1.15f) { best = c; bestE = e; } }
         }
         return clampBpm(best);
     }
@@ -355,10 +381,6 @@ public class BpmDetector {
         for (int i = 0; i < nHops; i += Math.max(1, (int) lag)) total += onset[i];
         return total;
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Shared utilities
-    // ═══════════════════════════════════════════════════════════════════════
 
     private static float[] computeEnergy(float[] samples) {
         int nHops = samples.length / HOP;
@@ -380,7 +402,6 @@ public class BpmDetector {
             float diff = energy[i] - energy[i - 1];
             onset[i] = diff > 0 ? diff : 0;
         }
-        // Adaptive median threshold
         int window = 16;
         for (int i = 0; i < n; i++) {
             int lo = Math.max(0, i - window);
@@ -394,18 +415,8 @@ public class BpmDetector {
         return onset;
     }
 
-    private static float computeMedian(float[] arr) {
-        float[] s = arr.clone();
-        java.util.Arrays.sort(s);
-        return s[s.length / 2];
-    }
-
-    private static float computeMean(float[] arr) {
-        float sum = 0;
-        for (float v : arr) sum += v;
-        return sum / arr.length;
-    }
-
+    private static float computeMedian(float[] arr) { float[] s = arr.clone(); java.util.Arrays.sort(s); return s[s.length / 2]; }
+    private static float computeMean(float[] arr) { float sum = 0; for (float v : arr) sum += v; return sum / arr.length; }
     private static int clampBpm(float bpm) {
         if (bpm < MIN_BPM || bpm > MAX_BPM) return 120;
         int r = Math.round(bpm);
