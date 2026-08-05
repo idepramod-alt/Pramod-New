@@ -16,8 +16,8 @@ import com.pramod.audioeditor.data.EqSettings;
  */
 public class EqPanelView extends LinearLayout {
 
-    private SeekBar seekLow, seekMid, seekHigh, seekGain;
-    private TextView txtLow, txtMid, txtHigh, txtGain;
+    private SeekBar seekLow, seekMid, seekHigh, seekGain, seekVol;
+    private TextView txtLow, txtMid, txtHigh, txtGain, txtVol;
     private CheckBox cbBypass, cbClipGuard;
     private Listener listener;
     private final EqSettings settings = new EqSettings();
@@ -71,6 +71,7 @@ public class EqPanelView extends LinearLayout {
         seekMid  = addEqSlider("MID (1kHz)", -10, 10, 0);
         seekHigh = addEqSlider("HIGH (4kHz)", -10, 10, 0);
         seekGain = addEqSlider("GAIN", -10, 10, 0);
+        seekVol  = addEqSlider("VOLUME", -10, 10, 0);
     }
 
     private SeekBar addEqSlider(String label, int min, int max, int defaultVal) {
@@ -109,7 +110,8 @@ public class EqPanelView extends LinearLayout {
                     if (lbl.startsWith("LOW")) settings.lowDb = db;
                     else if (lbl.startsWith("MID")) settings.midDb = db;
                     else if (lbl.startsWith("HIGH")) settings.highDb = db;
-                    else settings.gainDb = db;
+                    else if (lbl.startsWith("GAIN")) settings.gainDb = db;
+                    else if (lbl.startsWith("VOL")) settings.volumeDb = db;
                     notifyChange();
                 }
             }

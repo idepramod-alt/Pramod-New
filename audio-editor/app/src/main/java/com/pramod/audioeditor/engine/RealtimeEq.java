@@ -3,7 +3,7 @@ package com.pramod.audioeditor.engine;
 import com.pramod.audioeditor.data.EqSettings;
 
 /**
- * Thread-safe real-time 3-band EQ + gain with parameter smoothing.
+ * Thread-safe real-time 3-band EQ + gain + volume with parameter smoothing.
  * Uses volatile chain swap to avoid blocking the audio thread.
  */
 public class RealtimeEq {
@@ -20,16 +20,38 @@ public class RealtimeEq {
     public void process(float[] buf, int frames, int channels) {
         EqChain cl = chainL;
         EqChain cr = chainR;
-        if (cl.settings.bypass || cl.settings.isFlat()) return;
+
+        boolean needsEq = !(cl.settings.bypass || cl.settings.isFlat());
+        float volLin = (float) Math.pow(10, cl.settings.volumeDb / 20.0);
+        boolean needsVol = Math.abs(cl.settings.volumeDb) > 0.01f;
+
+        if (!needsEq && !needsVol) return;
 
         if (channels == 2) {
             for (int i = 0; i < frames * 2; i += 2) {
-                buf[i]     = (float) cl.process(buf[i]);
-                buf[i + 1] = (float) cr.process(buf[i + 1]);
+                float l = buf[i];
+                float r = buf[i + 1];
+                if (needsEq) {
+                    l = (float) cl.process(l);
+                    r = (float) cr.process(r);
+                }
+                if (needsVol) {
+                    l *= volLin;
+                    r *= volLin;
+                }
+                buf[i] = l;
+                buf[i + 1] = r;
             }
         } else {
             for (int i = 0; i < frames; i++) {
-                buf[i] = (float) cl.process(buf[i]);
+                float s = buf[i];
+                if (needsEq) {
+                    s = (float) cl.process(s);
+                }
+                if (needsVol) {
+                    s *= volLin;
+                }
+                buf[i] = s;
             }
         }
     }

@@ -170,10 +170,21 @@ public class ProWaveformView extends View {
 
     public void setPyramid(WaveformPyramid p) {
         this.pyramid = p;
-        if (p != null && p.getTotalFrames() > 0) {
-            framesPerPixel = p.getTotalFrames() / (double) getWidth();
+        recalcZoom();
+        invalidate();
+    }
+
+    private void recalcZoom() {
+        if (pyramid != null && pyramid.getTotalFrames() > 0 && getWidth() > 0) {
+            framesPerPixel = pyramid.getTotalFrames() / (double) getWidth();
             if (framesPerPixel < 1) framesPerPixel = 1;
         }
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        recalcZoom();
         invalidate();
     }
 

@@ -8,6 +8,7 @@ public class EqSettings {
     public float midDb = 0f;    // Peaking (1 kHz)
     public float highDb = 0f;   // High shelf (4 kHz)
     public float gainDb = 0f;   // Master gain
+    public float volumeDb = 0f; // Output volume
     public boolean bypass = false;
     public boolean clipGuard = true;
 
@@ -17,6 +18,7 @@ public class EqSettings {
         s.midDb = midDb;
         s.highDb = highDb;
         s.gainDb = gainDb;
+        s.volumeDb = volumeDb;
         s.bypass = bypass;
         s.clipGuard = clipGuard;
         return s;

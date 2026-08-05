@@ -73,6 +73,7 @@ public class MappedPcmSource implements PcmSource {
         int bytesToRead = numFrames * bytesPerFrame;
 
         ByteBuffer buf = mapped.slice();
+        buf.order(ByteOrder.LITTLE_ENDIAN);
         buf.position(byteOffset);
 
         if (channels == 1) {

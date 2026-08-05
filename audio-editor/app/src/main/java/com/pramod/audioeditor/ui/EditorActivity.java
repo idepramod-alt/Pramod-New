@@ -146,6 +146,7 @@ public class EditorActivity extends AppCompatActivity {
             eqSettings.midDb = settings.midDb;
             eqSettings.highDb = settings.highDb;
             eqSettings.gainDb = settings.gainDb;
+            eqSettings.volumeDb = settings.volumeDb;
             eqSettings.bypass = settings.bypass;
             eqSettings.clipGuard = settings.clipGuard;
             if (realtimeEq != null) realtimeEq.setSettings(eqSettings);
