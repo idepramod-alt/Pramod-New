@@ -915,27 +915,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
             this.saveLoopsToMemory();
             Toast.makeText(this, "Loop Audio Loaded!", 0).show();
-            // Auto-detect BPM from imported file on background thread
-            final Uri bpmUri = data2;
-            final int bpmChannel = this.loopChannelIndex;
-            new Thread(() -> {
-                int detectedBpm = BpmDetector.detectBpm(LoopsActivity.this, bpmUri);
-                runOnUiThread(() -> {
-                    // Store detected BPM for this channel
-                    LoopsActivity.this.prefs.edit()
-                        .putFloat("loop_detected_bpm_" + bpmChannel, (float) detectedBpm).apply();
-                    LoopsActivity.this.prefs.edit()
-                        .putBoolean("loop_bpm_manual_" + bpmChannel, false).apply();
-                    // Auto-set the BPM
-                    float speed = Math.max(0.1f, Math.min(2.0f, detectedBpm / 120.0f));
-                    LoopsActivity.this.currentSpeed = speed;
-                    if (LoopsActivity.this.seekTempo != null) {
-                        LoopsActivity.this.seekTempo.setProgress((int) (speed * 100f));
-                    }
-                    Toast.makeText(LoopsActivity.this,
-                        "Auto BPM: " + detectedBpm, Toast.LENGTH_SHORT).show();
-                });
-            }).start();
         } else if (requestCode == REQ_SAVE_LOOP_FOLDER) {
             try {
                 getContentResolver().takePersistableUriPermission(data2, 3);
@@ -2158,9 +2137,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (seekTempo != null) {
                     seekTempo.setProgress((int)(speed * 100f));
                 }
-                // Mark as manual so auto-detection doesn't override
-                LoopsActivity.this.prefs.edit()
-                    .putBoolean("loop_bpm_manual_" + LoopsActivity.this.loopChannelIndex, true).apply();
                 if (dlg != null) dlg.dismiss();
             } catch (NumberFormatException e) {
                 android.widget.Toast.makeText(this, "Invalid BPM — enter a number (12–240)",
@@ -3332,7 +3308,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         }
         DocumentFile dataFile = loopFolder.findFile("loop_data.json");
-        boolean hasSavedSpeed = false;
         if (dataFile != null) {
             try {
                 InputStream in2 = getContentResolver().openInputStream(dataFile.getUri());
@@ -3347,7 +3322,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                         in2.close();
                         org.json.JSONObject jsonData = new org.json.JSONObject(sb.toString());
                         if (jsonData.has("speed")) {
-                            try { this.currentSpeed = (float) jsonData.getDouble("speed"); hasSavedSpeed = true; } catch (Exception ignored) {}
+                            try { this.currentSpeed = (float) jsonData.getDouble("speed"); } catch (Exception ignored) {}
                         }
                         if (jsonData.has("pitch")) {
                             try { this.currentPitch = (float) jsonData.getDouble("pitch"); } catch (Exception ignored) {}
@@ -3400,33 +3375,6 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         saveLoopsToMemory();
         loadLoopsFromMemory();
         Toast.makeText(this, "Loop Loaded Successfully!", 0).show();
-        // Auto-detect BPM if no saved speed in loop_data.json
-        if (!hasSavedSpeed) {
-            Uri firstUri = null;
-            for (int i = 0; i < 8; i++) {
-                if (this.loopUris[i] != null) { firstUri = this.loopUris[i]; break; }
-            }
-            if (firstUri != null) {
-                final Uri detectUri = firstUri;
-                final int detectChannel = this.loopChannelIndex;
-                new Thread(() -> {
-                    int detectedBpm = BpmDetector.detectBpm(LoopsActivity.this, detectUri);
-                    runOnUiThread(() -> {
-                        LoopsActivity.this.prefs.edit()
-                            .putFloat("loop_detected_bpm_" + detectChannel, (float) detectedBpm).apply();
-                        LoopsActivity.this.prefs.edit()
-                            .putBoolean("loop_bpm_manual_" + detectChannel, false).apply();
-                        float speed = Math.max(0.1f, Math.min(2.0f, detectedBpm / 120.0f));
-                        LoopsActivity.this.currentSpeed = speed;
-                        if (LoopsActivity.this.seekTempo != null) {
-                            LoopsActivity.this.seekTempo.setProgress((int) (speed * 100f));
-                        }
-                        Toast.makeText(LoopsActivity.this,
-                            "Auto BPM: " + detectedBpm, Toast.LENGTH_SHORT).show();
-                    });
-                }).start();
-            }
-        }
     }
 
     public void saveLoopsToMemory() {
