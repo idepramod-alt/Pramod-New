@@ -524,6 +524,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (this.loopPlaying[index]) {
                 this.loopPlaying[index] = false;
                 updatePadLabel(index);
+                maybeStopBpmBlinkIfIdle();
             }
             // chokeGroup: ONE-SHOT mode keeps index+1 (unique per pad) so retapping the
             // SAME pad cuts off its previous still-playing instance — without this,
@@ -642,6 +643,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.txtLoopStatus.setText("LOOP " + (index + 1) + " STOPPED");
             updatePadLabel(index);
             this.maybeReloadDeferredPad(index);
+            maybeStopBpmBlinkIfIdle();
             return;
         }
         // Start the loop via playLoopSP only. Previously this ALSO called
@@ -4993,6 +4995,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             bpmBlinkDot.setBackgroundResource(R.drawable.bpm_blink_off);
         }
         bpmBlinkOn = false;
+    }
+
+    /** Stop BPM blink when the LAST playing loop is toggled off (not via STOP button). */
+    private void maybeStopBpmBlinkIfIdle() {
+        for (int i = 0; i < 16; i++) {
+            if (this.loopPlaying[i]) return;
+        }
+        stopBpmBlink();
     }
 
     private void stopPadOrFade(int index) {

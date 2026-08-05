@@ -357,7 +357,21 @@ public class AudioEngine {
         if (sample != null) { sample.soundId = 0; sample.loaded = false; sample.uri = null; }
     }
 
-    public void preloadSample(SampleData sample) {}
+    /** Pre-decode a sample into native memory so the first tap is instant.
+     *  If already loaded, no-op. Otherwise decodes from URI on current thread
+     *  and uploads PCM to native. Call from a background thread. */
+    public void preloadSample(SampleData sample) {
+        if (sample == null || sample.loaded || !nativeAvailable || sample.uri == null) return;
+        try {
+            short[] pcm = decodeUriToPcm(sample.uri);
+            if (pcm != null && pcm.length > 0) {
+                uploadPcm(sample.soundId, pcm);
+                sample.loaded = true;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "preloadSample failed", e);
+        }
+    }
 
     // ── Playback ──────────────────────────────────────────────────────────────
 
@@ -621,9 +635,9 @@ public class AudioEngine {
             Log.d(TAG, "Format: compressed → MediaCodec decoder");
             pcm = decodeWithMediaCodec(data);
         }
-        // Peak-normalize so low-quality or quiet recordings play at
-        // consistent volume. Targets -3 dBFS; never reduces gain.
-        return normalizeAudio(pcm);
+        // Direct load — no normalize/processing. Pad output is exactly what
+        // the source file contains; volume is controlled by the pad slider.
+        return pcm;
     }
 
     /**
