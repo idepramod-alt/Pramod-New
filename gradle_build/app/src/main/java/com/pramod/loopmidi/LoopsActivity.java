@@ -113,10 +113,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // and delay settings instead of one global switch. seekDrumChoke's progress
     // (0-4) IS the chokeGroup value directly passed to playSample, same as
     // MainActivity's seekChokeGroup — 0 means choke disabled.
-    private int[] padDrumChokeGroup = new int[8];
-    private boolean[] padDrumDelayOn = new boolean[8];
-    private float[] padDrumDelayTime = new float[8];
-    private float[] padDrumDelayLevel = new float[8];
+    private int[] padDrumChokeGroup = new int[16];
+    private boolean[] padDrumDelayOn = new boolean[16];
+    private float[] padDrumDelayTime = new float[16];
+    private float[] padDrumDelayLevel = new float[16];
     private int currentScaleOffset;
     private PresetReverb globalReverb;
     private volatile boolean isVisible;
@@ -136,7 +136,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private TextView txtMidiStatus;
     private TextView txtPitchVal;
     private TextView txtTempoVal;
-    Button[] loopPads = new Button[8];
+    Button[] loopPads = new Button[16];
     private String currentLoopName = "LOOP 1";
     private String pendingSaveLoopName = null;
     private int loopChannelIndex = 1;
@@ -170,15 +170,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // toggle is ON, pads that are still looping keep their OLD PCM (so their
     // loop keeps sounding). Their new-kit source is recorded here so it can be
     // loaded once their loop stops (toggle-off or Stop button).
-    private final boolean[] pendingKitReload = new boolean[8];
-    private final String[]  pendingKitAsset  = new String[8];  // asset kit path, or null
-    private final Uri[]     pendingKitUri    = new Uri[8];     // memory-kit uri, or null
+    private final boolean[] pendingKitReload = new boolean[16];
+    private final String[]  pendingKitAsset  = new String[16];  // asset kit path, or null
+    private final Uri[]     pendingKitUri    = new Uri[16];     // memory-kit uri, or null
     private boolean editMode = false;
     private int selectedPad = 0;
-    private Uri[] loopUris = new Uri[8];
+    private Uri[] loopUris = new Uri[16];
     AudioEngine audioEngine;
-    private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[8];
-    boolean[] loopPlaying = new boolean[8];
+    private AudioEngine.SampleData[] loopSamples = new AudioEngine.SampleData[16];
+    boolean[] loopPlaying = new boolean[16];
 
     // ── BPM Beat Blink Indicator ────────────────────────────────────────────
     // Red dot next to BPM label that flashes like a 4/4 metronome, driven by a
@@ -217,7 +217,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button    btnMasterVolMode  = null;
     private android.widget.TextView txtMasterVolLabel = null;
     // Per-pad volumes — active when isMasterVolumeMode == false
-    private float[] padVolume = new float[]{1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f};
+    private float[] padVolume = new float[]{1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f};
+
+    // ── Loop Bank System (Bank A = pads 0-7, Bank B = pads 8-15) ────────────
+    private int currentLoopBank = 0; // 0=A, 1=B
+    private Button btnBankA = null;
+    private Button btnBankB = null;
+
+    /** Convert visible pad index (0-7) to global pad index based on current bank. */
+    private int getPadGlobalIndex(int localIdx) {
+        return currentLoopBank * 8 + localIdx;
+    }
+
+    /** Return visible button slot (0-7) for a global pad index, or -1 if not in current bank. */
+    private int getLocalPadIndex(int globalIdx) {
+        int local = globalIdx - currentLoopBank * 8;
+        return (local >= 0 && local < 8) ? local : -1;
+    }
+
+    /** Switch loop bank and update all pad visuals. */
+    private void switchLoopBank(int bank) {
+        currentLoopBank = bank;
+        if (btnBankA != null) btnBankA.setBackgroundResource(bank == 0 ? R.drawable.btn_3d_darkred : R.drawable.btn_3d_dark);
+        if (btnBankB != null) btnBankB.setBackgroundResource(bank == 1 ? R.drawable.btn_3d_darkred : R.drawable.btn_3d_dark);
+        // Only the 8 visible pad buttons update; global index = bank*8 + local
+        for (int i = 0; i < 8; i++) {
+            int gi = getPadGlobalIndex(i);
+            updatePadLabel(gi);
+            if (loopPads[i] != null) {
+                loopPads[i].setBackgroundResource(loopPlaying[gi] ? R.drawable.pad_blue_glow_selector : R.drawable.pad_black_selector);
+            }
+        }
+    }
 
     // ── Global Mute ───────────────────────────────────────────────────────────
     // true = entire audio system silent. Loops keep running (transport alive) so
@@ -229,7 +260,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // false = LOOP mode  (continuous loop, tap again to stop)
     // true  = DRUM mode  (one-shot hit on every tap, like a real drum pad)
     // Long-press any pad to toggle its mode.
-    private boolean[] padDrumMode = new boolean[8];  // default all LOOP
+    private boolean[] padDrumMode = new boolean[16];  // default all LOOP
     // ── Per-pad explicit-mode override ────────────────────────────────────────
     // true  = this pad's LOOP/DRUM mode was explicitly set by the user (via the
     //         ADD button or long-press) and must be respected no matter what the
@@ -237,13 +268,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // false = this pad has no override yet — it simply follows the global mode.
     // Cleared when the pad's sample changes (clearLoop / kit change), since a
     // fresh sample has no explicit user choice yet.
-    private boolean[] padModeOverride = new boolean[8];
+    private boolean[] padModeOverride = new boolean[16];
 
     // ── MIDI rolling protection ───────────────────────────────────────────────
     // System.currentTimeMillis() when each loop was last started via MIDI.
     // Used in midiTriggerDrumPadImmediate to retrigger (instead of toggle-stop)
     // when rapid rolls arrive before the loop has been playing 400 ms.
-    private long[] loopStartTimeMs = new long[8];
+    private long[] loopStartTimeMs = new long[16];
 
     // ── Loop Mode / Drum Mode (Roland SPD-SX Pro style) ──────────────────────
     // LOOP MODE (default): pads continuously loop their sample, tap again to stop
@@ -255,8 +286,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private boolean velocitySensitiveMode = false;
     private Button btnVelocity = null;
     // ── MIDI Key Mapping System ───────────────────────────────────────────────
-    // Default notes match the existing hardcoded switch (pad0=49, pad1=45, ...)
-    private static final int[] MIDI_NOTE_MAP_DEFAULT = {49, 45, 37, 39, 36, 38, 46, 42};
+    // Default notes match the existing hardcoded switch (pad0=49, pad1=45, ...).
+    // First 8 = Bank A pads, next 8 = Bank B pads (same key layout, +1 octave up).
+    private static final int[] MIDI_NOTE_MAP_DEFAULT = {49, 45, 37, 39, 36, 38, 46, 42,
+                                                         61, 57, 49, 51, 48, 50, 58, 54};
     private boolean         midiKeyMappingEnabled = false;  // master ON/OFF
     private int[]           midiNoteMap           = MIDI_NOTE_MAP_DEFAULT.clone();
     private volatile boolean midiLearnMode        = false;  // waiting to capture next note
@@ -264,7 +297,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button           btnMidiMap           = null;
 
     // ── MIDI CC → Pad mapping ─────────────────────────────────────────────────
-    private static final int[] MIDI_CC_PAD_DEFAULT = {-1,-1,-1,-1,-1,-1,-1,-1};
+    private static final int[] MIDI_CC_PAD_DEFAULT = {-1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1};
     private int[]              midiCCPadMap         = MIDI_CC_PAD_DEFAULT.clone();
     private volatile boolean   midiCCLearnMode      = false;
     private volatile int       midiCCLearnTargetPad = -1;
@@ -313,12 +346,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // PadPitch: per-pad multiplier on top of global currentPitch, default 1.0.
     // Pan: -1.0 (full L) to +1.0 (full R), stored for reference; L/R balance
     //      applied in effectiveVolume as volume gain (pan law simulation).
-    private float[] padLoopEqHigh = new float[8];
-    private float[] padLoopEqMid  = new float[8];
-    private float[] padLoopEqLow  = new float[8];
-    private float[] padLoopGain   = new float[]{1,1,1,1,1,1,1,1};
-    private float[] padLoopPitch  = new float[]{1,1,1,1,1,1,1,1};
-    private float[] padLoopPan    = new float[8];  // stored, reflected in volume balance
+    private float[] padLoopEqHigh = new float[16];
+    private float[] padLoopEqMid  = new float[16];
+    private float[] padLoopEqLow  = new float[16];
+    private float[] padLoopGain   = new float[]{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+    private float[] padLoopPitch  = new float[]{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+    private float[] padLoopPan    = new float[16];  // stored, reflected in volume balance
 
     // Saved pre-drum-mode values so switching back to Loop Mode truly restores them
     private boolean savedMultiMode    = false;
@@ -398,7 +431,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private volatile int loadGeneration = 0;
     // Per-pad flag: true while a background decode is in progress for that pad.
     // Prevents duplicate decode threads when user taps a not-yet-loaded pad rapidly.
-    private boolean[] padLoadingInFlight = new boolean[8];
+    private boolean[] padLoadingInFlight = new boolean[16];
 
     public static void callKitChange(LoopsActivity loopsActivity, int i) {
         loopsActivity.handleProgramChange(i);
@@ -535,7 +568,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 // tap, regardless of Multi-Pad mode — a one-shot hit should always be
                 // able to stop a running loop, that is the point of its choke.
                 // Smooth Pad Transition ON → loops fade out instead of popping.
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (this.loopPlaying[i]) {
                         this.stopPadOrFade(i);
                         this.loopPlaying[i] = false;
@@ -560,7 +593,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (MidiPlaybackPolicy.shouldEnforceSinglePadModeForMidi(this.isMultiMode, audioAlreadyTriggered, !effectiveDrumMode)) {
                 // One-shot hits should stop other active pads only when multi-play is OFF
                 // and the audio was not already fired by the MIDI fast path.
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (i != index) {
                         this.audioEngine.stopPad(i);
                         if (this.loopPlaying[i]) {
@@ -577,10 +610,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (audioAlreadyTriggered) {
             if (this.loopPlaying[index]) {
                 this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
-                this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
+                int li = getLocalPadIndex(index); if (li >= 0) this.loopPads[li].setBackgroundResource(R.drawable.pad_blue_glow_selector);
                 // Jo pads midiTriggerDrumPadImmediate ne single-pad enforcement se stop kiye,
                 // unka UI label bhi sync karo (loopPlaying[] already false set ho chuka hai).
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (i != index && !this.loopPlaying[i]) {
                         updatePadLabel(i);
                     }
@@ -620,7 +653,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.audioEngine.playLoopSP(index, effectiveVolume(index), this.currentSpeed, effectivePitch(index), padLoopPan[index]);
         this.loopPlaying[index] = true;
         this.txtLoopStatus.setText("PLAYING LOOP " + (index + 1));
-        this.loopPads[index].setBackgroundResource(R.drawable.pad_blue_glow_selector);
+        int li = getLocalPadIndex(index); if (li >= 0) this.loopPads[li].setBackgroundResource(R.drawable.pad_blue_glow_selector);
         startBpmBlink();
         // Keep Previous Loop: fade out old-kit loops on first new-pad play
         if (this.keepPreviousLoop) { fadeOutOldKitLoops(); }
@@ -641,7 +674,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // Single-pad mode: new pad starts → previous pad stops automatically
         // (with a 150 ms fade when Smooth Pad Transition is ON).
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (i != index && this.loopPlaying[i]) {
                 this.stopPadOrFade(i);
                 this.loopPlaying[i] = false;
@@ -681,21 +714,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      * </ul>
      * Call whenever {@code loopPlaying[i]} or {@code padDrumMode[i]} changes.
      */
-    private void updatePadLabel(int index) {
-        if (this.loopPads[index] == null) return;
+    private void updatePadLabel(int globalIdx) {
+        int localIdx = globalIdx - currentLoopBank * 8;
+        if (localIdx < 0 || localIdx >= 8) return; // pad not visible in current bank
+        if (this.loopPads[localIdx] == null) return;
         // Effective mode: an explicit per-pad override always wins; otherwise the
         // pad simply reflects whatever the global LOOP/DRUM toggle currently is.
-        // Pad colour: LOOP override pad stays in loop colour even when OneShot is ON
-        // (it retriggeres on tap but remains a loop pad, not a drum/one-shot pad).
-        boolean effectiveDrum = this.padModeOverride[index]
-                ? this.padDrumMode[index]
+        boolean effectiveDrum = this.padModeOverride[globalIdx]
+                ? this.padDrumMode[globalIdx]
                 : (this.isGlobalDrumMode || this.isOneShotMode);
-        if (this.loopPlaying[index]) {
+        if (this.loopPlaying[globalIdx]) {
             // Playing state handled by the caller (blue glow already set on play)
         } else if (effectiveDrum) {
-            this.loopPads[index].setBackgroundResource(R.drawable.pad_orange_selector);
+            this.loopPads[localIdx].setBackgroundResource(R.drawable.pad_orange_selector);
         } else {
-            this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
+            this.loopPads[localIdx].setBackgroundResource(R.drawable.pad_black_selector);
         }
     }
 
@@ -807,7 +840,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // With Keep Previous Loop ON, loops that are still playing are PRESERVED:
         // their pad keeps its old PCM (so the loop keeps sounding) and the new kit's
         // sample for that pad is deferred (pendingKitReload) until the loop stops.
-        for (int i2 = 0; i2 < 8; i2++) {
+        for (int i2 = 0; i2 < 16; i2++) {
             if (this.loopPlaying[i2]) {
                 if (this.keepPreviousLoop) {
                     this.pendingKitReload[i2] = true;
@@ -834,8 +867,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // adds 100-500 ms of jank before the first tap can play. Moving it off-thread
         // means pads are ready for playback as soon as loading finishes, with zero UI freeze.
         new Thread(() -> {
-            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[8];
-            for (int i2 = 0; i2 < 8; i2++) {
+            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[16];
+            for (int i2 = 0; i2 < 16; i2++) {
                 // Abort BEFORE touching the native pad buffer if a newer kit switch
                 // has already started. Without this check, a slow/stale load thread
                 // from a previously-selected kit can call nativeLoadSample() after a
@@ -859,7 +892,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             new Handler(Looper.getMainLooper()).post(() -> {
                 // Discard if user switched kit/channel while we were loading
                 if (myGeneration != this.loadGeneration) return;
-                for (int i2 = 0; i2 < 8; i2++) {
+                for (int i2 = 0; i2 < 16; i2++) {
                     // Keep Previous Loop: never clobber a still-playing pad's sample
                     if (this.pendingKitReload[i2]) continue;
                     this.loopSamples[i2] = loaded[i2];
@@ -1007,7 +1040,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             try { this.fileSoundPlayer.release(); } catch (Exception ignored) {}
             this.fileSoundPlayer = null;
         }
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
                 this.loopPlaying[i] = false;
@@ -1220,7 +1253,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (this.loopPlaying[i]) {
                 this.audioEngine.stopPad(i);
                 this.loopPlaying[i] = false;
@@ -1228,7 +1261,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         }
         // Keep Previous Loop: deferred pads get their new kit sample once stopped
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.maybeReloadDeferredPad(i);
         }
         // Push the latest loop/pad settings to Firebase for the signed-in account
@@ -1304,14 +1337,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 this.speedPitchHandler.removeCallbacks(this.speedPitchRunnable);
                 this.speedPitchRunnable = null;
             }
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 this.loopPlaying[i] = false;
                 updatePadLabel(i);    // drum-mode pads keep their orange indicator
             }
             stopBpmBlink();
             // Keep Previous Loop: pads whose loops survived a kit switch were
             // deferred — now that everything is stopped, load their new kit sample.
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 this.maybeReloadDeferredPad(i);
             }
             if (this.txtLoopStatus != null) {
@@ -1549,7 +1582,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.smoothPadTransition = this.prefs.getBoolean("smooth_pad_transition", false);
         // Restore per-pad volumes, per-pad drum/loop mode, and per-pad drum FX
         // (choke + delay) — same per-pad pattern MainActivity uses.
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.padVolume[i]   = this.prefs.getFloat("pad_volume_" + i, 1.0f);
             this.padDrumMode[i] = this.prefs.getBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + i, false);
             this.padModeOverride[i] = this.prefs.getBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
@@ -1562,7 +1595,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         this.isTempoSync = this.prefs.getBoolean("tempo_sync_enabled", false);
         updateTempoSyncButton();
         // Restore per-pad EQ/Gain/Pitch/Pan for the current kit
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.padLoopEqHigh[i] = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eqh_" + i, 0f);
             this.padLoopEqMid[i]  = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eqm_" + i, 0f);
             this.padLoopEqLow[i]  = this.prefs.getFloat("loop_ch_" + this.loopChannelIndex + "_eql_" + i, 0f);
@@ -1846,14 +1879,16 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     // Step 1: which pad?
                     final String[] padNames = new String[8];
                     for (int i = 0; i < 8; i++) {
+                        int gi = LoopsActivity.this.getPadGlobalIndex(i);
                         padNames[i] = "PAD " + (i + 1) + "  —  " +
-                            (LoopsActivity.this.padDrumMode[i] ? "🥁 DRUM" : "🔁 LOOP");
+                            (LoopsActivity.this.padDrumMode[gi] ? "🥁 DRUM" : "🔁 LOOP");
                     }
                     new android.app.AlertDialog.Builder(LoopsActivity.this)
                         .setTitle("Pad Select Karo")
                         .setItems(padNames, new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface d, final int padIndex) {
+                                final int gi = LoopsActivity.this.getPadGlobalIndex(padIndex);
                                 // Step 2: which mode for this pad?
                                 final String[] modes = {
                                     "🔁 LOOP MODE — continuous loop, tap to stop",
@@ -1865,26 +1900,23 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                         @Override
                                         public void onClick(DialogInterface d2, int modeIndex) {
                                             boolean isDrum = (modeIndex == 1);
-                                            LoopsActivity.this.padDrumMode[padIndex] = isDrum;
-                                            // Explicit choice — this pad now overrides the global
-                                            // LOOP/DRUM toggle and keeps this exact mode until the
-                                            // user changes it again here or via long-press.
-                                            LoopsActivity.this.padModeOverride[padIndex] = true;
+                                            LoopsActivity.this.padDrumMode[gi] = isDrum;
+                                            LoopsActivity.this.padModeOverride[gi] = true;
                                             // Drum mode is one-shot only — stop the pad if it was mid-loop,
                                             // same as the long-press toggle does, so state never contradicts UI.
-                                            if (isDrum && LoopsActivity.this.loopPlaying[padIndex]) {
+                                            if (isDrum && LoopsActivity.this.loopPlaying[gi]) {
                                                 if (LoopsActivity.this.audioEngine != null) {
-                                                    LoopsActivity.this.audioEngine.stopPad(padIndex);
+                                                    LoopsActivity.this.audioEngine.stopPad(gi);
                                                 }
-                                                LoopsActivity.this.loopPlaying[padIndex] = false;
+                                                LoopsActivity.this.loopPlaying[gi] = false;
                                             }
                                             LoopsActivity.this.prefs.edit()
-                                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + padIndex, isDrum)
-                                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + padIndex, true)
+                                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + gi, isDrum)
+                                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + gi, true)
                                                 .apply();
-                                            LoopsActivity.this.updatePadLabel(padIndex);
+                                            LoopsActivity.this.updatePadLabel(gi);
                                             Toast.makeText(LoopsActivity.this,
-                                                "PAD " + (padIndex + 1) + " → " +
+                                                "PAD " + (gi + 1) + " → " +
                                                     (isDrum ? "🥁 DRUM MODE" : "🔁 LOOP MODE"),
                                                 Toast.LENGTH_SHORT).show();
                                         }
@@ -1977,7 +2009,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     // Stop all active loops so they don't blast from speaker
                     final AudioEngine engine = LoopsActivity.this.audioEngine;
                     if (engine == null) return;
-                    for (int i = 0; i < 8; i++) {
+                    for (int i = 0; i < 16; i++) {
                         if (LoopsActivity.this.loopPlaying[i]) {
                             engine.stopPad(i);
                             LoopsActivity.this.loopPlaying[i] = false;
@@ -2013,8 +2045,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         } catch (NumberFormatException ignored) {}
 
         // Snapshot which pads were playing before the stream reinit
-        final boolean[] wasPlaying = new boolean[8];
-        for (int i = 0; i < 8; i++) wasPlaying[i] = this.loopPlaying[i];
+        final boolean[] wasPlaying = new boolean[16];
+        for (int i = 0; i < 16; i++) wasPlaying[i] = this.loopPlaying[i];
 
         // Restart the Oboe stream on the new device.
         // Native voices (sample data + active flags) are preserved inside
@@ -2024,7 +2056,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Re-trigger loop voices so they audibly resume on the new device.
         // (The native engine may have kept voice state, but re-issuing
         // playLoopSP ensures the loop is definitely running post-reinit.)
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (wasPlaying[i] && this.loopSamples[i] != null && this.loopSamples[i].loaded) {
                 engine.playLoopSP(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i), padLoopPan[i]);
             }
@@ -2067,7 +2099,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Stop all active loops so the new mode takes effect cleanly
         if (this.isDrumOctapadMode && this.audioEngine != null) {
             this.audioEngine.stopAll();
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 this.loopPlaying[i] = false;
                 updatePadLabel(i);   // respect per-pad drum/loop mode indicator
             }
@@ -2295,7 +2327,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     // When switching to one-shot mode, stop all active loops and clear stale state
                     // to avoid overlapping loop+oneshot playback and stuck-blue pads.
                     if (isChecked) {
-                        for (int i = 0; i < 8; i++) {
+                        for (int i = 0; i < 16; i++) {
                             if (LoopsActivity.this.loopPlaying[i]) {
                                 LoopsActivity.this.audioEngine.stopPad(i);
                                 LoopsActivity.this.loopPlaying[i] = false;
@@ -2350,7 +2382,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (audioEngine == null) return;
                 // Collect all currently playing loop pads
                 java.util.List<Integer> playing = new java.util.ArrayList<>();
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (loopPlaying[i]) playing.add(i);
                 }
                 if (playing.isEmpty()) {
@@ -2413,7 +2445,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             syncContainer.addView(stepRow);
 
             // One row per pad
-            for (int pi = 0; pi < 8; pi++) {
+            for (int pi = 0; pi < 16; pi++) {
                 final int padIdx = pi;
                 boolean hasContent = loopUris[padIdx] != null
                     || (loopSamples[padIdx] != null && loopSamples[padIdx].loaded);
@@ -2654,7 +2686,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (isMuted) {
             // Silence everything: kill one-shot/DRUM hits, drop playing loops to 0.
             if (audioEngine != null) {
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (!loopPlaying[i]) {
                         try { audioEngine.stopPad(i); } catch (Exception ignored) {}
                     }
@@ -2679,7 +2711,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // pads with no active voice (loop or drum), so we can safely send the
         // update for every loaded pad. This covers both LOOP mode (updates loop
         // voice) and DRUM/ONE-SHOT mode (updates active drum voices by padIndex).
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (this.loopSamples[i] != null && this.audioEngine != null) {
                 this.audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), this.currentSpeed, effectivePitch(i), padLoopPan[i]);
             }
@@ -2715,7 +2747,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         final float[] wPitch = padLoopPitch.clone();
         final float[] wPan   = padLoopPan.clone();
         final float[][] wArrays = {wEqH, wEqM, wEqL, wGain, wPitch, wPan};
-        final int[] selPad = {selectedPad};
+        final int[] selPad = {getLocalPadIndex(selectedPad) >= 0 ? selectedPad : getPadGlobalIndex(0)};
 
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
         root.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -2789,17 +2821,18 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             padRowLL.setLayoutParams(rowsLP);
             for (int col = 0; col < 4; col++) {
                 final int padIdx = row * 4 + col;
+                final int gi = getPadGlobalIndex(padIdx);
                 android.widget.Button pb = new android.widget.Button(this);
                 pb.setText("P" + (padIdx + 1));
                 pb.setTextSize(13f);
                 pb.setTextColor(0xFFFFFFFF);
-                pb.setBackgroundColor(padIdx == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+                pb.setBackgroundColor(gi == selPad[0] ? 0xFFFF6600 : 0xFF333355);
                 android.widget.LinearLayout.LayoutParams pbLP =
                     new android.widget.LinearLayout.LayoutParams(0, 110, 1f);
                 pbLP.setMargins(4, 4, 4, 4);
                 pb.setLayoutParams(pbLP);
                 pb.setOnClickListener(vv -> {
-                    selPad[0] = padIdx;
+                    selPad[0] = gi;
                     // Highlight selected pad, dim others
                     if (highlightRef[0] != null) highlightRef[0].run();
                     // Refresh seekbars for this pad
@@ -2812,13 +2845,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     } catch (Exception ignored) {}
                     // Real-time preview: play pad sound if sample loaded
                     try {
-                        AudioEngine.SampleData sd = loopSamples[padIdx];
+                        AudioEngine.SampleData sd = loopSamples[gi];
                         if (sd != null && sd.loaded && audioEngine != null) {
-                            audioEngine.playSample(padIdx, sd,
-                                effectiveVolume(padIdx), currentSpeed, effectivePitch(padIdx), 0,
+                            audioEngine.playSample(gi, sd,
+                                effectiveVolume(gi), currentSpeed, effectivePitch(gi), 0,
                                 false, 0f, 0f,
-                                wEqL[padIdx], wEqM[padIdx], wEqH[padIdx], 0, 0f, 0f, wPan[padIdx]);
-                            lastPreviewPadIdx = padIdx;
+                                wEqL[gi], wEqM[gi], wEqH[gi], 0, 0f, 0f, wPan[gi]);
+                            lastPreviewPadIdx = gi;
                         }
                     } catch (Exception ignored) {}
                 });
@@ -2831,7 +2864,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Wire the highlight runnable now that padBtns[] is complete
         highlightRef[0] = () -> {
             for (int i = 0; i < 8; i++) {
-                padBtns[i].setBackgroundColor(i == selPad[0] ? 0xFFFF6600 : 0xFF333355);
+                padBtns[i].setBackgroundColor(getPadGlobalIndex(i) == selPad[0] ? 0xFFFF6600 : 0xFF333355);
             }
         };
 
@@ -2992,15 +3025,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .setTitle("🎛️ Pad Edit — EQ / Gain / Pitch / Pan")
             .setView(sv)
             .setPositiveButton("💾 Save to Kit", (d, w) -> {
-                System.arraycopy(wEqH,   0, padLoopEqHigh, 0, 8);
-                System.arraycopy(wEqM,   0, padLoopEqMid,  0, 8);
-                System.arraycopy(wEqL,   0, padLoopEqLow,  0, 8);
-                System.arraycopy(wGain,  0, padLoopGain,   0, 8);
-                System.arraycopy(wPitch, 0, padLoopPitch,  0, 8);
-                System.arraycopy(wPan,   0, padLoopPan,    0, 8);
+                System.arraycopy(wEqH,   0, padLoopEqHigh, 0, 16);
+                System.arraycopy(wEqM,   0, padLoopEqMid,  0, 16);
+                System.arraycopy(wEqL,   0, padLoopEqLow,  0, 16);
+                System.arraycopy(wGain,  0, padLoopGain,   0, 16);
+                System.arraycopy(wPitch, 0, padLoopPitch,  0, 16);
+                System.arraycopy(wPan,   0, padLoopPan,    0, 16);
                 saveLoopsToMemory();
                 // Live-update any running loops with new settings
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (loopPlaying[i] && audioEngine != null)
                         audioEngine.updateLoopSpeedPitch(i, effectiveVolume(i), currentSpeed, effectivePitch(i), padLoopPan[i]);
                 }
@@ -3027,6 +3060,17 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     private void initPads() {
+        // ── Loop Bank Selector (A/B) ──────────────────────────────────────
+        btnBankA = (Button) findViewById(R.id.btnBankA);
+        btnBankB = (Button) findViewById(R.id.btnBankB);
+        if (btnBankA != null) {
+            btnBankA.setSoundEffectsEnabled(false);
+            btnBankA.setOnClickListener(v -> switchLoopBank(0));
+        }
+        if (btnBankB != null) {
+            btnBankB.setSoundEffectsEnabled(false);
+            btnBankB.setOnClickListener(v -> switchLoopBank(1));
+        }
         int[] padIds = {R.id.loopPad1, R.id.loopPad2, R.id.loopPad3, R.id.loopPad4, R.id.loopPad5, R.id.loopPad6, R.id.loopPad7, R.id.loopPad8};
         for (int i = 0; i < 8; i++) {
             this.loopPads[i] = (Button) findViewById(padIds[i]);
@@ -3047,31 +3091,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 public boolean onTouch(View v, MotionEvent event) throws IllegalStateException {
                     if (event.getAction() == MotionEvent.ACTION_DOWN) {
                         // ── Audio BEFORE visual — fires sound with zero UI overhead ──
-                        LoopsActivity.this.handlePadClick(index);
+                        LoopsActivity.this.handlePadClick(getPadGlobalIndex(index));
                         v.setPressed(true);
                         // Schedule 1-second hold: toggle this pad between LOOP and DRUM mode
+                        final int gi = getPadGlobalIndex(index); // local→global for state access
                         lpRunnable[0] = () -> {
-                            boolean currentlyDrum = LoopsActivity.this.padModeOverride[index]
-                                    ? LoopsActivity.this.padDrumMode[index]
+                            boolean currentlyDrum = LoopsActivity.this.padModeOverride[gi]
+                                    ? LoopsActivity.this.padDrumMode[gi]
                                     : (LoopsActivity.this.isGlobalDrumMode || LoopsActivity.this.isOneShotMode);
-                            LoopsActivity.this.padDrumMode[index] = !currentlyDrum;
-                            // Explicit choice — this pad now overrides the global LOOP/DRUM
-                            // toggle and keeps this exact mode until changed again.
-                            LoopsActivity.this.padModeOverride[index] = true;
-                            // Stop the pad if it was looping — drum mode is one-shot only
-                            if (LoopsActivity.this.padDrumMode[index] && LoopsActivity.this.loopPlaying[index]) {
+                            LoopsActivity.this.padDrumMode[gi] = !currentlyDrum;
+                            LoopsActivity.this.padModeOverride[gi] = true;
+                            if (LoopsActivity.this.padDrumMode[gi] && LoopsActivity.this.loopPlaying[gi]) {
                                 if (LoopsActivity.this.audioEngine != null)
-                                    LoopsActivity.this.audioEngine.stopPad(index);
-                                LoopsActivity.this.loopPlaying[index] = false;
+                                    LoopsActivity.this.audioEngine.stopPad(gi);
+                                LoopsActivity.this.loopPlaying[gi] = false;
                             }
-                            LoopsActivity.this.updatePadLabel(index);
+                            LoopsActivity.this.updatePadLabel(gi);
                             LoopsActivity.this.prefs.edit()
-                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + index, LoopsActivity.this.padDrumMode[index])
-                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + index, true)
+                                .putBoolean("pad_drum_mode_ch_" + LoopsActivity.this.loopChannelIndex + "_" + gi, LoopsActivity.this.padDrumMode[gi])
+                                .putBoolean("pad_mode_override_ch_" + LoopsActivity.this.loopChannelIndex + "_" + gi, true)
                                 .apply();
-                            String modeStr = LoopsActivity.this.padDrumMode[index] ? "🥁 DRUM" : "🔁 LOOP";
+                            String modeStr = LoopsActivity.this.padDrumMode[gi] ? "🥁 DRUM" : "🔁 LOOP";
                             LoopsActivity.this.txtLoopStatus.setText(
-                                "PAD " + (index + 1) + " → " + modeStr + " MODE (1-sec hold to toggle)");
+                                "PAD " + (gi + 1) + " → " + modeStr + " MODE (1-sec hold to toggle)");
                             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
                         };
                         lpHandler.postDelayed(lpRunnable[0], 1000);
@@ -3091,7 +3133,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // The 1-second hold toggle is handled entirely in the touch listener above.
 
             // Apply initial visual state (orange border for drum mode, dark for loop mode)
-            updatePadLabel(index);
+            updatePadLabel(getPadGlobalIndex(index));
         }
     }
 
@@ -3105,18 +3147,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      *        so {@link #toggleLoop} must not play it a second time.
      */
     public void handlePadClick(int index, boolean audioAlreadyTriggered) throws IllegalStateException {
+        // index is already GLOBAL
         this.selectedPad = index;
         if (this.editMode) {
             showEditOptions(index);
         } else {
             // ── AUDIO FIRST — zero UI work before sound starts ────────────────
-            // Previously 7 UI updates (seekBars, TextViews, CheckBox) ran before
-            // toggleLoop(), adding 3-8 ms of layout/draw overhead on every tap.
-            // Now audio fires immediately; UI refreshes after the sound has begun.
             toggleLoop(index, audioAlreadyTriggered);
 
             // ── UI updates AFTER audio — sliders/labels refresh once sound is rolling ──
-            // In PAD volume mode: update the slider to reflect this pad's individual volume
             if (!isMasterVolumeMode && seekMasterVolume != null) {
                 seekMasterVolume.setProgress((int)(padVolume[index] * 100f));
                 if (txtMasterVolVal != null)
@@ -3169,7 +3208,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .putBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + index, false)
             .putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + index, false)
             .apply();
-        this.loopPads[index].setBackgroundResource(R.drawable.pad_black_selector);
+        int li2 = getLocalPadIndex(index); if (li2 >= 0) this.loopPads[li2].setBackgroundResource(R.drawable.pad_black_selector);
         saveLoopsToMemory();
         Toast.makeText(this, "Loop " + (index + 1) + " Cleared!", 0).show();
     }
@@ -3231,7 +3270,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 Toast.makeText(this, "Cannot create loop folder!", 0).show();
                 return;
             }
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 if (this.loopUris[i] != null) {
                     String fileName = "loop_pad_" + (i + 1) + ".wav";
                     DocumentFile old = loopFolder.findFile(fileName);
@@ -3296,7 +3335,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // aac, m4a, wav, 3gp …). AudioEngine.decodeAudioToPcm handles them all
         // via MediaCodec for compressed formats and a pure-Java WAV decoder.
         final String[] AUDIO_EXTS = {"wav", "mp3", "ogg", "flac", "aac", "m4a", "3gp", "opus", "wma"};
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.loopUris[i] = null;
             String base = "loop_pad_" + (i + 1);
             for (String ext : AUDIO_EXTS) {
@@ -3379,7 +3418,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     public void saveLoopsToMemory() {
         SharedPreferences.Editor editor = this.prefs.edit();
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (this.loopUris[i] != null) {
                 editor.putString("loop_uri_ch_" + this.loopChannelIndex + "_" + i, this.loopUris[i].toString());
             } else {
@@ -3404,7 +3443,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     public void loadLoopsFromMemory() throws IllegalStateException {
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             boolean preserveLoop = false;
             if (this.loopPlaying[i]) {
                 if (this.keepPreviousLoop) {
@@ -3473,8 +3512,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Bump generation — stale background threads will discard their results
         final int myGeneration = ++this.loadGeneration;
         // Resolve URIs on the UI thread (cheap string parsing only)
-        final Uri[] urisToLoad = new Uri[8];
-        for (int i2 = 0; i2 < 8; i2++) {
+        final Uri[] urisToLoad = new Uri[16];
+        for (int i2 = 0; i2 < 16; i2++) {
             String uriStr = this.prefs.getString("loop_uri_ch_" + this.loopChannelIndex + "_" + i2, null);
             if (uriStr != null) {
                 Uri parsed = Uri.parse(uriStr);
@@ -3499,8 +3538,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Decode audio on a background thread — avoids blocking the UI thread for
         // potentially hundreds of milliseconds while MediaCodec decodes each file.
         new Thread(() -> {
-            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[8];
-            for (int i2 = 0; i2 < 8; i2++) {
+            final AudioEngine.SampleData[] loaded = new AudioEngine.SampleData[16];
+            for (int i2 = 0; i2 < 16; i2++) {
                 if (urisToLoad[i2] != null) {
                     try {
                         loaded[i2] = engine.loadWavFromUri(i2, urisToLoad[i2]);
@@ -3513,7 +3552,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             new Handler(Looper.getMainLooper()).post(() -> {
                 // Discard if user switched loop channel while we were decoding
                 if (myGeneration != this.loadGeneration) return;
-                for (int i2 = 0; i2 < 8; i2++) {
+                for (int i2 = 0; i2 < 16; i2++) {
                     // Keep Previous Loop: never clobber a still-playing pad's sample
                     if (this.pendingKitReload[i2]) continue;
                     this.loopSamples[i2] = loaded[i2];
@@ -4087,12 +4126,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             AudioEngine eng = audioEngine;
             if (eng != null) eng.stopAll();
             runOnUiThread(() -> {
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     loopPlaying[i] = false;
                     updatePadLabel(i);
                 }
                 // Keep Previous Loop: deferred pads get their new kit sample now
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     maybeReloadDeferredPad(i);
                 }
                 if (speedPitchRunnable != null) {
@@ -4240,7 +4279,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 return;
             }
             if (value > 0) {
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (midiCCPadMap[i] >= 0 && cc == midiCCPadMap[i]) {
                         final int padIdx = i;
                         final float velScale = velocitySensitiveMode
@@ -4248,11 +4287,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                                 : 1.0f;
                         final boolean audioFired = midiTriggerDrumPadImmediate(padIdx, velScale);
                         runOnUiThread(() -> {
-                            if (padIdx >= 0 && padIdx < loopPads.length && loopPads[padIdx] != null) {
-                                loopPads[padIdx].setPressed(true);
+                            if (padIdx >= 0 && padIdx < 16) {
                                 handlePadClick(padIdx, audioFired);
-                                new android.os.Handler(android.os.Looper.getMainLooper())
-                                    .postDelayed(() -> loopPads[padIdx].setPressed(false), 100);
+                                int localIdx = padIdx - currentLoopBank * 8;
+                                if (localIdx >= 0 && localIdx < 8 && loopPads[localIdx] != null) {
+                                    loopPads[localIdx].setPressed(true);
+                                    new android.os.Handler(android.os.Looper.getMainLooper())
+                                        .postDelayed(() -> loopPads[localIdx].setPressed(false), 100);
+                                }
                             }
                         });
                         break;
@@ -4411,7 +4453,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
             // ── Key Map: scan midiNoteMap[] for a match ────────────────────
             int noteVal = note & 0xFF;
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
             }
             if (padIndex == -1) return; // note map mein match nahi — trigger mat karo
@@ -4429,17 +4471,21 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 @Override // java.lang.Runnable
                 public void run() throws IllegalStateException {
                     int i = finalPadIndex;
-                    if (i >= 0 && i < 8) {
-                        LoopsActivity.this.loopPads[finalPadIndex].setPressed(true);
+                    if (i >= 0 && i < 16) {
+                        // Visual feedback on the visible button (map global→local for current bank)
+                        int localIdx = i - LoopsActivity.this.currentLoopBank * 8;
+                        if (localIdx >= 0 && localIdx < 8 && LoopsActivity.this.loopPads[localIdx] != null) {
+                            LoopsActivity.this.loopPads[localIdx].setPressed(true);
+                        }
                         LoopsActivity.this.handlePadClick(finalPadIndex, audioAlreadyTriggered);
                         Handler handler = new Handler(Looper.getMainLooper());
-                        final int i2 = finalPadIndex;
-                        handler.postDelayed(new Runnable() { // from class: com.pramod.loopmidi.LoopsActivity.22.1
-
-
-                            @Override // java.lang.Runnable
-                            public void run() {
-                                LoopsActivity.this.loopPads[i2].setPressed(false);
+                        final int i2 = i;
+                        handler.postDelayed(new Runnable() {
+                            @Override public void run() {
+                                int li = i2 - LoopsActivity.this.currentLoopBank * 8;
+                                if (li >= 0 && li < 8 && LoopsActivity.this.loopPads[li] != null) {
+                                    LoopsActivity.this.loopPads[li].setPressed(false);
+                                }
                             }
                         }, 100L);
                     }
@@ -4455,7 +4501,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     /** Load mapping ON/OFF state and per-pad notes from SharedPreferences. */
     private void loadMidiNoteMap() {
         midiKeyMappingEnabled = prefs.getBoolean("midi_key_mapping_on", false);
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             midiNoteMap[i] = prefs.getInt("midi_note_map_" + i, MIDI_NOTE_MAP_DEFAULT[i]);
         }
     }
@@ -4464,7 +4510,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private void saveMidiNoteMap() {
         SharedPreferences.Editor ed = prefs.edit();
         ed.putBoolean("midi_key_mapping_on", midiKeyMappingEnabled);
-        for (int i = 0; i < 8; i++) ed.putInt("midi_note_map_" + i, midiNoteMap[i]);
+        for (int i = 0; i < 16; i++) ed.putInt("midi_note_map_" + i, midiNoteMap[i]);
         ed.apply();
     }
 
@@ -4484,14 +4530,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ── MIDI CC → Pad map helpers ─────────────────────────────────────────────
 
     private void loadMidiCCPadMap() {
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             midiCCPadMap[i] = prefs.getInt("midi_cc_pad_" + i, MIDI_CC_PAD_DEFAULT[i]);
         }
     }
 
     private void saveMidiCCPadMap() {
         SharedPreferences.Editor ed = prefs.edit();
-        for (int i = 0; i < 8; i++) ed.putInt("midi_cc_pad_" + i, midiCCPadMap[i]);
+        for (int i = 0; i < 16; i++) ed.putInt("midi_cc_pad_" + i, midiCCPadMap[i]);
         ed.apply();
     }
 
@@ -4573,11 +4619,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         root.addView(tvInfo);
 
         // ── Per-pad rows ───────────────────────────────────────────────────────
-        final android.widget.EditText[] noteEdits  = new android.widget.EditText[8];
-        final android.widget.EditText[] ccEdits    = new android.widget.EditText[8];
-        final Button[]                  learnBtns  = new Button[8];
-        final Button[]                  ccLearnBtns = new Button[8];
-        for (int i = 0; i < 8; i++) {
+        final android.widget.EditText[] noteEdits  = new android.widget.EditText[16];
+        final android.widget.EditText[] ccEdits    = new android.widget.EditText[16];
+        final Button[]                  learnBtns  = new Button[16];
+        final Button[]                  ccLearnBtns = new Button[16];
+        for (int i = 0; i < 16; i++) {
             final int padIdx = i;
             android.widget.LinearLayout row = new android.widget.LinearLayout(this);
             row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -4717,7 +4763,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
         // Apply: read EditTexts and save (both Note and CC maps)
         btnApply.setOnClickListener(vv -> {
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 16; i++) {
                 try {
                     int val = Integer.parseInt(noteEdits[i].getText().toString().trim());
                     midiNoteMap[i] = Math.max(0, Math.min(127, val));
@@ -4745,9 +4791,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 .setTitle("Reset to Default?")
                 .setMessage("Sab pads ke notes wapas default par aa jayenge. CC map clear ho jayega.")
                 .setPositiveButton("RESET", (d, w) -> {
-                    System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 8);
-                    System.arraycopy(MIDI_CC_PAD_DEFAULT, 0, midiCCPadMap, 0, 8);
-                    for (int i = 0; i < 8; i++) {
+                    System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 16);
+                    System.arraycopy(MIDI_CC_PAD_DEFAULT, 0, midiCCPadMap, 0, 16);
+                    for (int i = 0; i < 16; i++) {
                         noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
                         ccEdits[i].setText("");
                     }
@@ -4847,7 +4893,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // matches touch behavior (one pad at a time). Real DRUM mode stays
             // polyphonic (!effectiveDrumMode guard).
             if (!this.isMultiMode && !effectiveDrumMode) {
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 16; i++) {
                     if (i != index) { engine.stopPad(i); }
                 }
             }
@@ -4897,7 +4943,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 loopStartTimeMs[index] = System.currentTimeMillis();
                 // Single-pad mode: stop old pads AFTER new pad starts
                 if (!this.isMultiMode && !this.keepPreviousLoop) {
-                    for (int i = 0; i < 8; i++) {
+                    for (int i = 0; i < 16; i++) {
                         if (i != index && this.loopPlaying[i]) {
                             if (this.smoothPadTransition) { try { engine.releasePad(i, 150f); } catch (Exception ignored2) {} }
                             else { try { engine.stopPad(i); } catch (Exception ignored2) {} }
@@ -4967,7 +5013,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      * {@link #maybeReloadDeferredPad}.
      */
     private void fadeOutOldKitLoops() {
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             if (this.pendingKitReload[i] && this.loopPlaying[i]) {
                 try { this.audioEngine.releasePad(i, 150f); } catch (Exception ignored) {}
                 this.loopPlaying[i] = false;
@@ -4985,7 +5031,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
      * Stop button.
      */
     private void maybeReloadDeferredPad(int index) {
-        if (index < 0 || index >= 8 || !this.pendingKitReload[index]) return;
+        if (index < 0 || index >= 16 || !this.pendingKitReload[index]) return;
         this.pendingKitReload[index] = false;
         final String asset = this.pendingKitAsset[index];
         final Uri    uri   = this.pendingKitUri[index];
@@ -5054,7 +5100,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Clear every per-pad explicit override so all 8 pads adopt the new
         // global LOOP/DRUM mode together — never a mixed UI. Long-press (or
         // ADD dialog) can still set a fresh override afterwards.
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.padModeOverride[i] = false;
             this.padDrumMode[i]     = false;   // follow global mode
         }
@@ -5067,7 +5113,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
         // Always refresh pad colors, even if engine is null — ensures
         // orange (drum) / black (loop) theme is correct after mode switch.
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             this.loopPlaying[i] = false;
             updatePadLabel(i);
         }
@@ -5079,7 +5125,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Persist the cleared per-pad overrides so a later kit reload does not
         // bring stale override flags back and re-create a mixed UI.
         SharedPreferences.Editor ovrEd = this.prefs.edit();
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             ovrEd.putBoolean("pad_drum_mode_ch_"     + this.loopChannelIndex + "_" + i, false);
             ovrEd.putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + i, false);
         }
@@ -5895,14 +5941,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     /** Load a recorded WAV track into a loop pad so it plays like a loop. */
     private void loadTrackIntoPad(String wavPath, int padIndex) {
         try {
+            int gi = getPadGlobalIndex(padIndex); // dialog passes local (0-7) → global
             Uri uri = Uri.fromFile(new File(wavPath));
-            AudioEngine.SampleData sd = audioEngine.loadWavFromUri(padIndex, uri);
-            loopSamples[padIndex] = sd;
-            loopUris[padIndex] = uri;
+            AudioEngine.SampleData sd = audioEngine.loadWavFromUri(gi, uri);
+            loopSamples[gi] = sd;
+            loopUris[gi] = uri;
             if (sd != null && sd.loaded) {
-                updatePadLabel(padIndex);
+                updatePadLabel(gi);
                 saveLoopsToMemory();
-                Toast.makeText(this, "Track → PAD " + (padIndex + 1) + " loaded!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Track → PAD " + (gi + 1) + " loaded!", Toast.LENGTH_SHORT).show();
             } else {
                 Toast.makeText(this, "Load failed — WAV not ready yet.", Toast.LENGTH_SHORT).show();
             }

@@ -20,8 +20,8 @@ extern "C" {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 static const int MAX_PADS        = 16;
-static const int LOOP_VOICES     = 8;   // voices 0-7  : loop playback (long-running)
-static const int DRUM_VOICES     = 16;  // voices 8-23 : drum/pad hits  (short, stackable)
+static const int LOOP_VOICES     = 16;  // voices 0-15 : loop playback (long-running)
+static const int DRUM_VOICES     = 16;  // voices 16-31 : drum/pad hits  (short, stackable)
 static const int NUM_VOICES      = LOOP_VOICES + DRUM_VOICES;
 // 4 seconds @ 96 kHz — safe for both 44100 and 48000 native rates
 static const int DELAY_BUF_SIZE  = 192000;

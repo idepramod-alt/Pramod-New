@@ -498,6 +498,21 @@
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="3dp" android:text="10" android:layout_weight="1"/>
     </LinearLayout>
+    <!-- ── Loop Bank Selector (A/B) ─────────────────────────────────────────── -->
+    <LinearLayout android:orientation="horizontal" android:background="#ff1a1a2e"
+        android:layout_width="match_parent" android:layout_height="30dp"
+        android:paddingLeft="2dp" android:paddingRight="2dp">
+        <Button android:id="@+id/btnBankA" android:text="BANK A"
+            android:background="@drawable/btn_3d_darkred"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_margin="2dp" android:textSize="11sp"
+            android:textColor="#ffffffff" android:textStyle="bold" android:layout_weight="1"/>
+        <Button android:id="@+id/btnBankB" android:text="BANK B"
+            android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_margin="2dp" android:textSize="11sp"
+            android:textColor="#ffffffff" android:textStyle="bold" android:layout_weight="1"/>
+    </LinearLayout>
     <LinearLayout android:orientation="vertical" android:id="@+id/loopPadArea"
         android:padding="2dp" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1">
