@@ -1651,24 +1651,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             }
         });
         this.btnEditLoops.setOnClickListener(v -> {
-            // Show dialog: toggle Edit Mode or open Pad Edit (per-pad EQ/Gain/Pitch/Pan)
-            String[] options = {
-                "✏️ Edit Mode " + (editMode ? "(currently ON — tap to turn OFF)" : "(currently OFF — tap to turn ON)"),
-                "🎛️ Pad Edit  (EQ / Gain / Pitch / Pan per pad)"
-            };
-            new android.app.AlertDialog.Builder(LoopsActivity.this)
-                .setTitle("Loop Edit")
-                .setItems(options, (dlg, which) -> {
-                    if (which == 0) {
-                        editMode = !editMode;
-                        btnEditLoops.setText(editMode ? "EDIT ON" : "EDIT OFF");
-                        btnEditLoops.setBackgroundResource(editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
-                    } else {
-                        showPadEditDialog();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+            // Direct toggle: no dialog, no extra step
+            editMode = !editMode;
+            btnEditLoops.setText(editMode ? "EDIT ON" : "EDIT OFF");
+            btnEditLoops.setBackgroundResource(editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
+        });
+        // Long-press EDIT → open Pad Edit (EQ/Gain/Pitch/Pan per pad), kept out of the tap flow
+        this.btnEditLoops.setOnLongClickListener(v -> {
+            showPadEditDialog();
+            return true;
         });
         Button button = this.btnAdvancedLoops;
         if (button != null) {
