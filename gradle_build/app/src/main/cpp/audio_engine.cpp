@@ -1058,6 +1058,7 @@ public:
             ->setUsage(oboe::Usage::Game)          // real-time instrument → max scheduler priority
             ->setContentType(oboe::ContentType::Music)
             ->setDataCallback(this)
+            ->setErrorCallback(this)
             ->openStream(stream);
 
         if (r != oboe::Result::OK) {
