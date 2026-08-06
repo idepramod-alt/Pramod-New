@@ -225,6 +225,22 @@
                 android:layout_weight="1" android:buttonTint="#ffffaa33"/>
         </LinearLayout>
 
+        <!-- Fade duration slider (0–1000 ms, applies when SMOOTH FADE is ON) -->
+        <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="2dp">
+            <TextView android:textSize="11sp" android:textColor="#ffffaa33"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="FADE MS"/>
+            <SeekBar android:id="@+id/seekFadeMs" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1"
+                android:max="1000" android:progress="200"
+                android:layout_marginLeft="6dp" android:layout_marginRight="6dp"/>
+            <TextView android:textSize="11sp" android:textColor="#ffffffff"
+                android:id="@+id/txtFadeMsVal" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="200ms"/>
+        </LinearLayout>
+
         <!-- Drum-mode-only FX (per pad — same as MainActivity's per-pad
              chkDelay/seekDelayTime/seekDelayLevel/seekChokeGroup, just scoped to
              whichever pad is selected here). Only affects real DRUM MODE hits;

@@ -160,12 +160,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // keepPreviousLoop:   ON → kit switches don't stop currently-playing loops;
     //                     only the Stop button / pad toggle-off silences them.
     // smoothPadTransition:ON → when a pad is stopped (single-pad mode switch or
-    //                     toggle-off), its loop fades out over 150 ms instead of
+    //                     toggle-off), its loop fades out over fadeMs instead of
     //                     being cut instantly — no crackle/pop.
     private volatile boolean keepPreviousLoop    = false;
     private volatile boolean smoothPadTransition = false;
+    private volatile int     fadeMs              = 200;   // fade duration (0-1000 ms)
     private CheckBox chkKeepPrevLoop;
     private CheckBox chkSmoothTransition;
+    private SeekBar  seekFadeMs;
+    private TextView txtFadeMsVal;
     // Keep-Previous-Loop deferred reload: when a kit switch happens while the
     // toggle is ON, pads that are still looping keep their OLD PCM (so their
     // loop keeps sounding). Their new-kit source is recorded here so it can be
@@ -677,7 +680,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             return;
         }
         // Single-pad mode: new pad starts (playLoopSP above) → previous pad stops
-        // automatically with a 200 ms click-free fade when Smooth Pad Transition ON.
+        // automatically with a fadeMs click-free fade when Smooth Pad Transition ON.
         for (int i = 0; i < 16; i++) {
             if (i != index && this.loopPlaying[i]) {
                 this.stopPadOrFade(i);
@@ -1601,6 +1604,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Transition behavior toggles — persisted, default OFF (existing behavior)
         this.keepPreviousLoop    = this.prefs.getBoolean("keep_previous_loop_playing", false);
         this.smoothPadTransition = this.prefs.getBoolean("smooth_pad_transition", false);
+        this.fadeMs              = Math.max(0, Math.min(1000,
+                this.prefs.getInt("smooth_fade_ms", 200)));
         // Restore per-pad volumes, per-pad drum/loop mode, and per-pad drum FX
         // (choke + delay) — same per-pad pattern MainActivity uses.
         for (int i = 0; i < 16; i++) {
@@ -2381,6 +2386,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             this.chkSmoothTransition.setChecked(this.smoothPadTransition);
             this.chkSmoothTransition.setOnCheckedChangeListener(transitionListener);
         }
+
+        // ── Fade duration slider (0–1000 ms, applies when SMOOTH FADE is ON) ──
+        this.seekFadeMs = findViewById(R.id.seekFadeMs);
+        this.txtFadeMsVal = findViewById(R.id.txtFadeMsVal);
+        if (this.seekFadeMs != null) {
+            this.seekFadeMs.setMax(1000);
+            this.seekFadeMs.setProgress(this.fadeMs);
+            this.seekFadeMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                    if (fromUser) {
+                        LoopsActivity.this.fadeMs = progress;
+                        if (LoopsActivity.this.txtFadeMsVal != null)
+                            LoopsActivity.this.txtFadeMsVal.setText(progress + "ms");
+                    }
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {}
+                @Override public void onStopTrackingTouch(SeekBar sb) {
+                    LoopsActivity.this.prefs.edit()
+                            .putInt("smooth_fade_ms", LoopsActivity.this.fadeMs).apply();
+                }
+            });
+        }
+        if (this.txtFadeMsVal != null) this.txtFadeMsVal.setText(this.fadeMs + "ms");
 
         // ── LOOP SYNC — SYNC ALL + per-pad NUDGE ─────────────────────────────
         Button btnSyncAll = findViewById(R.id.btnSyncAll);
@@ -4929,7 +4957,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     // the natural MIDI "roll" pattern is many quick hits, not a deliberate
                     // toggle-stop, so we treat short intervals as a retrigger.
                     long elapsed = System.currentTimeMillis() - loopStartTimeMs[index];
-                    if (this.smoothPadTransition) { try { engine.releasePad(index, 200f); } catch (Exception ignored) {} }
+                    if (this.smoothPadTransition) { try { engine.releasePad(index, this.fadeMs); } catch (Exception ignored) {} }
                     else { try { engine.stopPad(index); } catch (Exception ignored) {} }
                     if (elapsed < 400) {
                         // Retrigger: restart loop without stopping it perceptibly
@@ -4958,7 +4986,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 if (!this.isMultiMode && !this.keepPreviousLoop) {
                     for (int i = 0; i < 16; i++) {
                         if (i != index && this.loopPlaying[i]) {
-                            if (this.smoothPadTransition) { try { engine.releasePad(i, 200f); } catch (Exception ignored2) {} }
+                            if (this.smoothPadTransition) { try { engine.releasePad(i, this.fadeMs); } catch (Exception ignored2) {} }
                             else { try { engine.stopPad(i); } catch (Exception ignored2) {} }
                             this.loopPlaying[i] = false;
                             loopStartTimeMs[i] = 0;
@@ -5020,8 +5048,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         AudioEngine engine = this.audioEngine;
         if (engine == null) return;
         if (this.smoothPadTransition) {
-            // 200 ms click-free fade: new pad starts instantly, old pad rings out.
-            try { engine.releasePad(index, 200f); } catch (Exception ignored) {}
+            // fadeMs click-free fade (user slider): new pad starts instantly,
+            // old pad rings out over the chosen duration.
+            try { engine.releasePad(index, this.fadeMs); } catch (Exception ignored) {}
         } else {
             try { engine.stopPad(index); } catch (Exception ignored) {}
         }
@@ -5030,14 +5059,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     /**
      * Keep Previous Loop: fade out all loops from the PREVIOUS kit that survived
      * the kit switch via {@code pendingKitReload}. Called on the first new-pad
-     * play after a kit switch. The old loops fade smoothly (200 ms release
+     * play after a kit switch. The old loops fade smoothly (fadeMs release
      * envelope); their new-kit samples are loaded in background via
      * {@link #maybeReloadDeferredPad}.
      */
     private void fadeOutOldKitLoops() {
         for (int i = 0; i < 16; i++) {
             if (this.pendingKitReload[i] && this.loopPlaying[i]) {
-                try { this.audioEngine.releasePad(i, 200f); } catch (Exception ignored) {}
+                try { this.audioEngine.releasePad(i, this.fadeMs); } catch (Exception ignored) {}
                 this.loopPlaying[i] = false;
                 this.loopStartTimeMs[i] = 0;
                 updatePadLabel(i);
