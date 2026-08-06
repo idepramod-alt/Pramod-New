@@ -3829,23 +3829,24 @@ public class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onStop() {
         super.onStop();
-        // Cancel hold-repeat BEFORE destroying the engine.
+        // Cancel hold-repeat BEFORE stopping the engine.
         // kitRepeatRunnable fires on the main thread; if it fires after
-        // audioEngine = null below, changeKitBy() → loadKitFromMemory() crashes
-        // with NullPointerException. Cancelling here prevents that entirely.
+        // audioEngine.stop() below, changeKitBy() → loadKitFromMemory() could
+        // encounter a stopped engine. Cancelling here prevents that entirely.
         if (kitRepeatRunnable != null) {
             kitRepeatHandler.removeCallbacks(kitRepeatRunnable);
             kitRepeatRunnable = null;
         }
         saveKitToMemory(this.kitIndex);
-        // Full APK: when LoopsActivity comes to the foreground, MainActivity
-        // goes to onStop(). If we leave our Oboe stream running, two streams
-        // compete for the audio hardware simultaneously → underruns, crackling,
-        // and distortion in LoopsActivity ("kharab sound").
-        // Destroy the engine here; onResume() will recreate it + reload samples.
+        // Stop the Oboe stream so it doesn't compete with LoopsActivity's
+        // stream (which would cause underruns / crackling / distortion).
+        // But do NOT null the engine reference — keep it alive so that when
+        // the user unlocks the screen (onResume), all loaded samples are still
+        // in memory and only the stream needs reiniting. Nulling forced a full
+        // engine recreate + async reload, which caused a brief "kit reset"
+        // (pads played default/silence until the async decode completed).
         if (this.audioEngine != null) {
             try { this.audioEngine.stop(); } catch (Exception ignored) {}
-            this.audioEngine = null;
         }
     }
 
