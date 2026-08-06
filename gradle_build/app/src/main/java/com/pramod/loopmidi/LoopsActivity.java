@@ -287,9 +287,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button btnVelocity = null;
     // ── MIDI Key Mapping System ───────────────────────────────────────────────
     // Default notes match the existing hardcoded switch (pad0=49, pad1=45, ...).
-    // First 8 = Bank A pads, next 8 = Bank B pads (same key layout, +1 octave up).
-    private static final int[] MIDI_NOTE_MAP_DEFAULT = {49, 45, 37, 39, 36, 38, 46, 42,
-                                                         61, 57, 49, 51, 48, 50, 58, 54};
+    // Same 8 notes map the VISIBLE pads of whichever bank is active —
+    // Bank A pad 1 and Bank B pad 1 share the same note. Bank switch
+    // instantly re-routes via getPadGlobalIndex().
+    private static final int[] MIDI_NOTE_MAP_DEFAULT = {49, 45, 37, 39, 36, 38, 46, 42};
     private boolean         midiKeyMappingEnabled = false;  // master ON/OFF
     private int[]           midiNoteMap           = MIDI_NOTE_MAP_DEFAULT.clone();
     private volatile boolean midiLearnMode        = false;  // waiting to capture next note
@@ -297,7 +298,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private Button           btnMidiMap           = null;
 
     // ── MIDI CC → Pad mapping ─────────────────────────────────────────────────
-    private static final int[] MIDI_CC_PAD_DEFAULT = {-1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1};
+    // Same CC numbers map the VISIBLE pads of the active bank (0-7 = local).
+    private static final int[] MIDI_CC_PAD_DEFAULT = {-1,-1,-1,-1,-1,-1,-1,-1};
     private int[]              midiCCPadMap         = MIDI_CC_PAD_DEFAULT.clone();
     private volatile boolean   midiCCLearnMode      = false;
     private volatile int       midiCCLearnTargetPad = -1;
@@ -4285,9 +4287,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 return;
             }
             if (value > 0) {
-                for (int i = 0; i < 16; i++) {
+                // CC → pad trigger: local pad match, routed to active bank
+                for (int i = 0; i < 8; i++) {
                     if (midiCCPadMap[i] >= 0 && cc == midiCCPadMap[i]) {
-                        final int padIdx = i;
+                        final int padIdx = getPadGlobalIndex(i);
                         final float velScale = velocitySensitiveMode
                                 ? Math.min(1.4f, 0.2f + 1.2f * (value / 127.0f))
                                 : 1.0f;
@@ -4457,10 +4460,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         if (this.isVisible) {
             int padIndex = -1;
 
-            // ── Key Map: scan midiNoteMap[] for a match ────────────────────
+            // ── Key Map: scan midiNoteMap[] for a LOCAL match, then route to
+            //    the active bank's pad via getPadGlobalIndex(). Same note always
+            //    hits "pad N" of whichever bank is currently active. ─────────
             int noteVal = note & 0xFF;
-            for (int i = 0; i < 16; i++) {
-                if (midiNoteMap[i] == noteVal) { padIndex = i; break; }
+            for (int i = 0; i < 8; i++) {
+                if (midiNoteMap[i] == noteVal) { padIndex = getPadGlobalIndex(i); break; }
             }
             if (padIndex == -1) return; // note map mein match nahi — trigger mat karo
             final int finalPadIndex = padIndex;
@@ -4507,7 +4512,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     /** Load mapping ON/OFF state and per-pad notes from SharedPreferences. */
     private void loadMidiNoteMap() {
         midiKeyMappingEnabled = prefs.getBoolean("midi_key_mapping_on", false);
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 8; i++) {
             midiNoteMap[i] = prefs.getInt("midi_note_map_" + i, MIDI_NOTE_MAP_DEFAULT[i]);
         }
     }
@@ -4516,7 +4521,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private void saveMidiNoteMap() {
         SharedPreferences.Editor ed = prefs.edit();
         ed.putBoolean("midi_key_mapping_on", midiKeyMappingEnabled);
-        for (int i = 0; i < 16; i++) ed.putInt("midi_note_map_" + i, midiNoteMap[i]);
+        for (int i = 0; i < 8; i++) ed.putInt("midi_note_map_" + i, midiNoteMap[i]);
         ed.apply();
     }
 
@@ -4536,14 +4541,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // ── MIDI CC → Pad map helpers ─────────────────────────────────────────────
 
     private void loadMidiCCPadMap() {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 8; i++) {
             midiCCPadMap[i] = prefs.getInt("midi_cc_pad_" + i, MIDI_CC_PAD_DEFAULT[i]);
         }
     }
 
     private void saveMidiCCPadMap() {
         SharedPreferences.Editor ed = prefs.edit();
-        for (int i = 0; i < 16; i++) ed.putInt("midi_cc_pad_" + i, midiCCPadMap[i]);
+        for (int i = 0; i < 8; i++) ed.putInt("midi_cc_pad_" + i, midiCCPadMap[i]);
         ed.apply();
     }
 
@@ -4616,7 +4621,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         android.widget.TextView tvInfo = new android.widget.TextView(this);
         tvInfo.setTextColor(0xFF888888);
         tvInfo.setTextSize(11f);
-        tvInfo.setText("Har pad ke liye MIDI note number set karo (0–127).\n" +
+        tvInfo.setText("Har visible pad ke liye MIDI note set karo (0–127).\n" +
+                        "Ye mapping DONO banks par ek jaisi chalegi — jo bank active\n" +
+                        "hai (A/B) uske pads trigger honge. Same note, bank switch.\n" +
                         "LEARN: MIDI controller se koi button dabao — auto-assign hoga.");
         android.widget.LinearLayout.LayoutParams infoLP =
             new android.widget.LinearLayout.LayoutParams(-1, -2);
@@ -4624,12 +4631,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         tvInfo.setLayoutParams(infoLP);
         root.addView(tvInfo);
 
-        // ── Per-pad rows ───────────────────────────────────────────────────────
-        final android.widget.EditText[] noteEdits  = new android.widget.EditText[16];
-        final android.widget.EditText[] ccEdits    = new android.widget.EditText[16];
-        final Button[]                  learnBtns  = new Button[16];
-        final Button[]                  ccLearnBtns = new Button[16];
-        for (int i = 0; i < 16; i++) {
+        // ── Per-pad rows (8 visible pads of active bank) ──────────────────────
+        final android.widget.EditText[] noteEdits  = new android.widget.EditText[8];
+        final android.widget.EditText[] ccEdits    = new android.widget.EditText[8];
+        final Button[]                  learnBtns  = new Button[8];
+        final Button[]                  ccLearnBtns = new Button[8];
+        for (int i = 0; i < 8; i++) {
             final int padIdx = i;
             android.widget.LinearLayout row = new android.widget.LinearLayout(this);
             row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -4639,9 +4646,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             rowLP.setMargins(0, 4, 0, 4);
             row.setLayoutParams(rowLP);
 
-            // Pad label
+            // Pad label — bank-aware
             android.widget.TextView lbl = new android.widget.TextView(this);
-            lbl.setText("PAD " + (i + 1) + " →");
+            lbl.setText("PAD " + (i + 1) + " (" + (currentLoopBank == 0 ? "A" : "B") + ") →");
             lbl.setTextColor(0xFFCCCCCC);
             lbl.setTextSize(12f);
             lbl.setLayoutParams(new android.widget.LinearLayout.LayoutParams(-2, -2));
@@ -4769,7 +4776,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
         // Apply: read EditTexts and save (both Note and CC maps)
         btnApply.setOnClickListener(vv -> {
-            for (int i = 0; i < 16; i++) {
+            for (int i = 0; i < 8; i++) {
                 try {
                     int val = Integer.parseInt(noteEdits[i].getText().toString().trim());
                     midiNoteMap[i] = Math.max(0, Math.min(127, val));
@@ -4797,9 +4804,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 .setTitle("Reset to Default?")
                 .setMessage("Sab pads ke notes wapas default par aa jayenge. CC map clear ho jayega.")
                 .setPositiveButton("RESET", (d, w) -> {
-                    System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 16);
-                    System.arraycopy(MIDI_CC_PAD_DEFAULT, 0, midiCCPadMap, 0, 16);
-                    for (int i = 0; i < 16; i++) {
+                    System.arraycopy(MIDI_NOTE_MAP_DEFAULT, 0, midiNoteMap, 0, 8);
+                    System.arraycopy(MIDI_CC_PAD_DEFAULT, 0, midiCCPadMap, 0, 8);
+                    for (int i = 0; i < 8; i++) {
                         noteEdits[i].setText(String.valueOf(midiNoteMap[i]));
                         ccEdits[i].setText("");
                     }
