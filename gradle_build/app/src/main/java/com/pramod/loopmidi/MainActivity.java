@@ -1449,9 +1449,7 @@ public class MainActivity extends Activity {
         setupMidi();
         getWindow().getDecorView().setSoundEffectsEnabled(false);
         this.prefs = getSharedPreferences(PREF_NAME, 0);
-        // txtBrand marquee ke liye selected chahiye (XML me allowed nahi AAPT2 me)
-        TextView txtBrand = (TextView) findViewById(R.id.txtBrand);
-        if (txtBrand != null) txtBrand.setSelected(true);
+        // txtBrand auto-size to fit screen — no marquee scroll needed
         this.txtKitName = (TextView) findViewById(R.id.txtKitName);
         this.txtSelectedPad = (TextView) findViewById(R.id.txtSelectedPad);
         this.txtMidiStatus = (TextView) findViewById(R.id.txtMidiStatus);
