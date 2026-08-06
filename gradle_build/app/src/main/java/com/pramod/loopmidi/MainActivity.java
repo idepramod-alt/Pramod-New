@@ -201,7 +201,9 @@ public class MainActivity extends Activity {
     private static final int BANK_B   = 1;
     private static final int LAYER_AB = 2;
     private int    bankMode      = BANK_A;
-    private Button btnBankToggle = null;
+    private Button btnBankA      = null;
+    private Button btnBankB      = null;
+    private Button btnBankAB     = null;
     private Uri[]  selectedWavUrisB    = new Uri[8];
     private int[]  selectedRawResIdsB  = new int[8];
     private float[] padVolumeB         = new float[]{0.8f,0.8f,0.8f,0.8f,0.8f,0.8f,0.8f,0.8f};
@@ -1466,8 +1468,10 @@ public class MainActivity extends Activity {
         this.btnVelocity = (Button) findViewById(R.id.btnVelocity);
         // MIDI Key Mapping button
         this.btnMidiMap = (Button) findViewById(R.id.btnMidiMap);
-        // Bank B toggle button (already in main.xml as "BANK A")
-        this.btnBankToggle = (Button) findViewById(R.id.btnBankToggle);
+        // Bank selector buttons (BANK A / BANK B / A+B LAYER)
+        this.btnBankA  = (Button) findViewById(R.id.btnBankA);
+        this.btnBankB  = (Button) findViewById(R.id.btnBankB);
+        this.btnBankAB = (Button) findViewById(R.id.btnBankAB);
         Button button = (Button) findViewById(R.id.btnLoops);
         this.btnLoops = button;
         if (button != null) {
@@ -1671,38 +1675,16 @@ public class MainActivity extends Activity {
                 mainActivity.saveKitToMemory(mainActivity.kitIndex);
             }
         });
-        // ── Bank B toggle button ───────────────────────────────────────────────
-        // Cycles: BANK A → BANK B → A+B LAYER → BANK A
-        if (this.btnBankToggle != null) {
-            this.btnBankToggle.setOnClickListener(v -> {
-                bankMode = (bankMode + 1) % 3;
-                prefs.edit().putInt("bank_mode", bankMode).commit();
-                updateBankToggleButton();
-                // ── Reload the kit so the active bank's kit is fully reflected ──
-                // loadKitFromMemory always loads BOTH banks (Bank A under kitIndex,
-                // Bank B under kitIndexB) and sets txtKitName to the ACTIVE bank's
-                // kit name — so switching to Bank B now shows/loads Bank B's kit,
-                // and switching back to Bank A shows Bank A's. (Before, only the
-                // button label and seekbars changed; the kit name and loaded pads
-                // stayed on the previous bank.)
-                //
-                // OPTIMIZATION: Both banks' samples are always loaded together
-                // by loadKitFromMemory (called at init + every kit change). A
-                // bank toggle therefore does NOT need to reload samples — only
-                // the kit name display needs to flip to the active bank's name.
-                // loadKitFromMemory is ~1-2s (16 WAV decodes); removing it here
-                // makes the bank toggle instant.
-                if (bankMode == BANK_B) {
-                    txtKitName.setText(currentKitNameB);
-                } else {
-                    txtKitName.setText(currentKitName);
-                }
-                String msg;
-                if (bankMode == BANK_A)        msg = "🅰️ Bank A — only Bank A pads active";
-                else if (bankMode == BANK_B)   msg = "🅱️ Bank B — only Bank B pads active";
-                else                           msg = "🅰️+🅱️ A+B Layer — both banks play together";
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-            });
+        // ── Bank selector buttons (BANK A / BANK B / A+B LAYER) ───────────────
+        // Each button sets the bank mode directly — no cycling.
+        if (this.btnBankA != null) {
+            this.btnBankA.setOnClickListener(v -> setBankMode(BANK_A, "🅰️ Bank A — only Bank A pads active"));
+        }
+        if (this.btnBankB != null) {
+            this.btnBankB.setOnClickListener(v -> setBankMode(BANK_B, "🅱️ Bank B — only Bank B pads active"));
+        }
+        if (this.btnBankAB != null) {
+            this.btnBankAB.setOnClickListener(v -> setBankMode(LAYER_AB, "🅰️+🅱️ A+B Layer — both banks play together"));
         }
         this.btnRenameKit.setOnClickListener(new View.OnClickListener() { // from class: com.pramod.loopmidi.MainActivity.6
             @Override // android.view.View.OnClickListener
@@ -2035,21 +2017,34 @@ public class MainActivity extends Activity {
         this.btnEditMode.setBackgroundResource(this.editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
     }
 
-    /** Updates btnBankToggle label + colour to match the current bankMode. */
+    /** Highlights the active bank selector button (A / B / A+B) to match bankMode. */
     public void updateBankToggleButton() {
-        if (btnBankToggle == null) return;
-        if (bankMode == BANK_B) {
-            btnBankToggle.setText("BANK B");
-            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_blue);
-        } else if (bankMode == LAYER_AB) {
-            btnBankToggle.setText("A+B\nLAYER");
-            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_orange);
-        } else {
-            btnBankToggle.setText("BANK A");
-            btnBankToggle.setBackgroundResource(R.drawable.btn_3d_darkred);
+        // Highlight the active bank button; dim the others.
+        if (btnBankA != null) {
+            btnBankA.setBackgroundResource(bankMode == BANK_A ? R.drawable.btn_3d_darkred : R.drawable.btn_3d_dark);
+        }
+        if (btnBankB != null) {
+            btnBankB.setBackgroundResource(bankMode == BANK_B ? R.drawable.btn_3d_blue : R.drawable.btn_3d_dark);
+        }
+        if (btnBankAB != null) {
+            btnBankAB.setBackgroundResource(bankMode == LAYER_AB ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
         }
         // ── Refresh seekbars to show correct bank's values for current pad ──
         refreshSeekBarsForCurrentBankAndPad();
+    }
+
+    /** Set the active bank (BANK_A / BANK_B / LAYER_AB), persist and refresh UI. */
+    private void setBankMode(int mode, String toastMsg) {
+        bankMode = mode;
+        prefs.edit().putInt("bank_mode", bankMode).commit();
+        updateBankToggleButton();
+        // Show/load the active bank's kit name (both banks' samples stay loaded).
+        if (bankMode == BANK_B) {
+            txtKitName.setText(currentKitNameB);
+        } else {
+            txtKitName.setText(currentKitName);
+        }
+        if (toastMsg != null) Toast.makeText(this, toastMsg, Toast.LENGTH_SHORT).show();
     }
 
     /** Refresh all FX seekbars to reflect the currently selected bank + pad. */
@@ -3765,33 +3760,47 @@ public class MainActivity extends Activity {
         et.setHintTextColor(0xff888888);
         et.setGravity(Gravity.CENTER);
         et.setTextSize(26);
-        new AlertDialog.Builder(this)
+        et.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+
+        Runnable doJump = () -> {
+            String s = et.getText().toString().trim();
+            if (!s.isEmpty()) {
+                try {
+                    int target = Integer.parseInt(s);
+                    if (target >= 1 && target <= MAX_KITS) {
+                        saveKitToMemory(kitIndex);
+                        if (bankMode == BANK_B) {
+                            // Jump Bank B's kit independently
+                            kitIndexB = target;
+                            prefs.edit().putInt("kit_index_B", kitIndexB).commit();
+                        } else {
+                            kitIndex = target;
+                            prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
+                        }
+                        loadKitFromMemory(kitIndex);
+                    } else {
+                        Toast.makeText(this, "1 se " + MAX_KITS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+        };
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
             .setTitle("Kit number daalo (1–" + MAX_KITS + ")")
             .setView(et)
-            .setPositiveButton("GO ▶", (d, w) -> {
-                String s = et.getText().toString().trim();
-                if (!s.isEmpty()) {
-                    try {
-                        int target = Integer.parseInt(s);
-                        if (target >= 1 && target <= MAX_KITS) {
-                            saveKitToMemory(kitIndex);
-                            if (bankMode == BANK_B) {
-                                // Jump Bank B's kit independently
-                                kitIndexB = target;
-                                prefs.edit().putInt("kit_index_B", kitIndexB).commit();
-                            } else {
-                                kitIndex = target;
-                                prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
-                            }
-                            loadKitFromMemory(kitIndex);
-                        } else {
-                            Toast.makeText(this, "1 se " + MAX_KITS + " ke beech daalo!", Toast.LENGTH_SHORT).show();
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
-            })
             .setNegativeButton("Cancel", null)
-            .show();
+            .create();
+
+        et.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                doJump.run();
+                dlg.dismiss();
+                return true;
+            }
+            return false;
+        });
+
+        dlg.show();
         et.post(() -> {
             et.requestFocus();
             InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
