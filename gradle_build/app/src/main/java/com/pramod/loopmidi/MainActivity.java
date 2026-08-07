@@ -3840,13 +3840,13 @@ public class MainActivity extends Activity {
         saveKitToMemory(this.kitIndex);
         // Stop the Oboe stream so it doesn't compete with LoopsActivity's
         // stream (which would cause underruns / crackling / distortion).
-        // But do NOT null the engine reference — keep it alive so that when
-        // the user unlocks the screen (onResume), all loaded samples are still
-        // in memory and only the stream needs reiniting. Nulling forced a full
-        // engine recreate + async reload, which caused a brief "kit reset"
-        // (pads played default/silence until the async decode completed).
+        // Use stopStream() (NOT stop()) — stop() destroys the whole native
+        // engine and sets nativeAvailable=false, so onResume's reinitStream()
+        // silently no-ops and sound never comes back after screen lock.
+        // stopStream() closes only the stream and keeps the engine + all
+        // loaded samples in memory; onResume reopens it via reinitStream().
         if (this.audioEngine != null) {
-            try { this.audioEngine.stop(); } catch (Exception ignored) {}
+            try { this.audioEngine.stopStream(); } catch (Exception ignored) {}
         }
     }
 

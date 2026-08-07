@@ -55,6 +55,7 @@ public class AudioEngine {
     // Oboe with the device's exact hardware parameters (zero-resampling path).
     private native long nativeCreateAudioEngine(int nativeSR, int nativeBurst);
     private native void nativeDestroyAudioEngine();
+    private native void nativeStopStream();
     // frames = number of audio frames (samples per channel); channels = 1 or 2
     private native void nativeLoadSample(int padIndex, short[] pcm, int frames, int channels);
     private native void nativePlaySample(int padIndex, float volume, float pitch,
@@ -227,6 +228,19 @@ public class AudioEngine {
             catch (UnsatisfiedLinkError e) { Log.e(TAG, "destroy failed", e); }
             nativeHandle    = 0L;
             nativeAvailable = false;
+        }
+    }
+
+    /**
+     * Stop the Oboe output stream but keep the engine + all loaded samples in
+     * memory. Used by onStop() so the stream doesn't compete with another
+     * activity's stream, while a fast reinitStream() on resume restores sound
+     * without re-decoding the kit. Unlike stop(), this does NOT free samples.
+     */
+    public void stopStream() {
+        if (nativeAvailable && nativeHandle != 0) {
+            try { nativeStopStream(); }
+            catch (UnsatisfiedLinkError e) { Log.e(TAG, "stopStream failed", e); }
         }
     }
 

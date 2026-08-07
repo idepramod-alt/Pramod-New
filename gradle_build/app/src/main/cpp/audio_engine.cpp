@@ -1011,6 +1011,14 @@ public:
         return initLocked(nativeSR, nativeBurst);
     }
 
+    // Close the Oboe stream WITHOUT freeing the engine, pads, or Sonic streams.
+    // Same mutex as init() so a concurrent reinit/watchdog can't race the close.
+    // Reopen later via init() (nativeReinitStream) — the loaded kit survives.
+    void stopStream() {
+        std::lock_guard<std::mutex> lock(initMutex);
+        if (stream) { stream->stop(); stream->close(); stream.reset(); }
+    }
+
     // Body of init(), assumes initMutex is already held by the caller. Split out
     // so the ErrorDisconnected watchdog can re-check streamGeneration and run the
     // actual reinit atomically under a single lock acquisition (see
@@ -1360,6 +1368,16 @@ Java_com_pramod_loopmidi_AudioEngine_nativeReinitStream(
         JNIEnv* env, jobject obj, jint nativeSR, jint nativeBurst) {
     AudioEngineImpl* e = getEngine(env, obj);
     if (e) e->init((int)nativeSR, (int)nativeBurst);
+}
+
+// Stops and closes the Oboe output stream but PRESERVES the engine, all
+// loaded samples in pads[].pcm, voice state, and Sonic streams. Used by
+// onStop() to avoid competing with another activity's stream, while keeping
+// the loaded kit intact for a fast reinit via nativeReinitStream on resume.
+JNIEXPORT void JNICALL
+Java_com_pramod_loopmidi_AudioEngine_nativeStopStream(JNIEnv* env, jobject obj) {
+    AudioEngineImpl* e = getEngine(env, obj);
+    if (e) e->stopStream();
 }
 
 JNIEXPORT jint JNICALL
