@@ -1077,25 +1077,23 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
     /** Single loop channel step; safe to call from the UI thread. */
     private void changeLoopBy(int direction) {
-        if (direction < 0) {
-            if (loopChannelIndex > 1) {
-                saveLoopsToMemory();
-                loopChannelIndex--;
-                prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-                currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
-                txtLoopChannel.setText(currentLoopName);
-                loadCurrentKit();
-            }
-        } else {
-            if (loopChannelIndex < MAX_LOOPS) {
-                saveLoopsToMemory();
-                loopChannelIndex++;
-                prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-                currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
-                txtLoopChannel.setText(currentLoopName);
-                loadCurrentKit();
-            }
-        }
+        changeLoopTo(direction < 0 ? loopChannelIndex - 1 : loopChannelIndex + 1);
+    }
+
+    /**
+     * Select a specific Loop channel without changing the existing +/- behavior.
+     * Used by the absolute MIDI Kit CC, where the incoming CC value represents
+     * the requested channel rather than a one-step navigation command.
+     */
+    private void changeLoopTo(int targetLoop) {
+        if (targetLoop < 1 || targetLoop > MAX_LOOPS || targetLoop == loopChannelIndex) return;
+        saveLoopsToMemory();
+        loopChannelIndex = targetLoop;
+        prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
+        currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex,
+                "LOOP " + loopChannelIndex);
+        txtLoopChannel.setText(currentLoopName);
+        loadCurrentKit();
     }
 
     // ── Favorite Loop Bank (LoopsActivity) ────────────────────────────────────
@@ -3797,9 +3795,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     // MIDI CC (Control Change) — Roland SPD-20 Pro remote controls
     //
     // Default CC mapping (user-configurable via Settings → MIDI CC Settings):
-    //   CC  7  → Master Volume   (0-127 → 0%-100%)
-    //   CC 20  → Tempo / Speed   (0-127 → 0.0x-2.0x)
+    //   CC  7  → Volume (absolute) (0-127 → 0%-100%)
+    //   CC 20  → Tempo (absolute)  (0-127 → 0.1x-2.0x)
     //   CC 21  → Pitch           (0-127 → 0.0x-2.0x)
+    //   CC 22  → Kit (absolute)  (0-127 → Loop 1-100)
     //   CC 123 → Stop All        (value ≥ 64 triggers stop)
     //   CC 24  → Kit / Loop Prev (value ≥ 64 steps back one channel)
     //   CC 25  → Kit / Loop Next (value ≥ 64 steps forward one channel)
@@ -3831,19 +3830,25 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         sub.setPadding(0, 4, 0, 14);
         root.addView(sub);
 
-        final String[] labels = {"🎵 Pitch (absolute)",
+        final String[] labels = {"🔊 Volume (absolute)",
+                                  "⏱ Tempo (absolute)",
+                                  "🎵 Pitch (absolute)",
+                                  "🎛 Kit (absolute)",
                                   "🔊➖ Volume −1",        "🔊➕ Volume +1",
                                   "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
                                   "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
                                   "⏹ Stop All",            "⏮ Kit −1 (Loop Prev)",  "⏭ Kit +1 (Loop Next)",
                                   "🔌 MIDI Connect"};
-        final String[] keys   = {"midi_cc_pitch",
+        final String[] keys   = {"midi_cc_volume",
+                                  "midi_cc_tempo",
+                                  "midi_cc_pitch",
+                                  "midi_cc_kit",
                                   "midi_cc_volume_minus",    "midi_cc_volume_plus",
                                   "midi_cc_tempo_minus",     "midi_cc_tempo_plus",
                                   "midi_cc_pitch_minus",     "midi_cc_pitch_plus",
                                   "midi_cc_stop",            "midi_cc_kit_prev",        "midi_cc_kit_next",
                                   "midi_cc_connect_toggle"};
-        final int[]    defs   = {21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
+        final int[]    defs   = {7, 20, 21, 22, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
 
         final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
         final Button[]                  learnBtns = new Button[labels.length];
@@ -3908,7 +3913,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Pitch (absolute) CC 0-127: Pitch=21  Stop=123  Prev=24  Next=25  Connect=26\n" +
+        hint.setText("Absolute CC 0-127: Volume=7  Tempo=20  Pitch=21  Kit=22\n" +
+                     "Stop=123  Prev=24  Next=25  Connect=26\n" +
                      "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85");
         hint.setTextColor(0xFF666666);
         hint.setTextSize(9f);
@@ -4151,7 +4157,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
 
         // Read user-configured CC assignments (defaults match Roland SPD-20 Pro)
-        int ccPitch       = prefs.getInt("midi_cc_pitch",          21);
+        int ccVolume      = prefs.getInt("midi_cc_volume",          7);
+        int ccTempo       = prefs.getInt("midi_cc_tempo",           20);
+        int ccPitch       = prefs.getInt("midi_cc_pitch",            21);
+        int ccKit         = prefs.getInt("midi_cc_kit",              22);
         int ccStop        = prefs.getInt("midi_cc_stop",          123);
         int ccKitPrev     = prefs.getInt("midi_cc_kit_prev",       24);
         int ccKitNext     = prefs.getInt("midi_cc_kit_next",       25);
@@ -4180,6 +4189,38 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             // ── SPD-20 Pro button → connect / disconnect MIDI live ─────────────
             runOnUiThread(this::toggleMidiConnection);
 
+        } else if (cc == ccVolume) {
+            // Absolute Volume: CC 0-127 → 0%-100%.
+            // Keep the existing ALL/PAD volume modes exactly as they are.
+            final float newVolume = Math.max(0f, Math.min(1f, value / 127f));
+            runOnUiThread(() -> {
+                if (isMasterVolumeMode) {
+                    masterVolume = newVolume;
+                    prefs.edit().putFloat("loop_master_volume", masterVolume).apply();
+                } else {
+                    int pad = selectedPad;
+                    padVolume[pad] = newVolume;
+                    prefs.edit().putFloat("pad_volume_" + pad, padVolume[pad]).apply();
+                }
+                if (seekMasterVolume != null)
+                    seekMasterVolume.setProgress(Math.round(newVolume * 100f));
+                if (txtMasterVolVal != null)
+                    txtMasterVolVal.setText(Math.round(newVolume * 100f) + "%");
+                updateAllActiveLoops();
+            });
+
+        } else if (cc == ccTempo) {
+            // Absolute Tempo: CC 0-127 → 0.1x-2.0x, matching the tempo seekbar range.
+            final float newSpeed = Math.max(0.1f, Math.min(2f, value * 2f / 127f));
+            runOnUiThread(() -> {
+                currentSpeed = newSpeed;
+                if (seekTempo != null) seekTempo.setProgress(Math.round(newSpeed * 100f));
+                if (txtTempoVal != null)
+                    txtTempoVal.setText(String.format(java.util.Locale.US,
+                        "%.0f BPM (%.1fx)", currentSpeed * 120f, currentSpeed));
+                updateAllActiveLoops();
+            });
+
         } else if (cc == ccPitch) {
             // CC 0-127 → pitch 0.1x-2.0x (center 63-64 = ~1.0x)
             final float newPitch = Math.max(0.1f, value * 2.0f / 127f);
@@ -4199,6 +4240,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 };
                 speedPitchHandler.postDelayed(speedPitchRunnable, 40L);
             });
+
+        } else if (cc == ccKit) {
+            // Absolute Kit: CC 0-127 selects Loop channel 1-100.
+            final int targetLoop = 1 + Math.round(value * (MAX_LOOPS - 1) / 127f);
+            if (targetLoop != loopChannelIndex) {
+                runOnUiThread(() -> changeLoopTo(targetLoop));
+            }
 
         } else if (cc == prefs.getInt("midi_cc_volume_minus", 80)
                 && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
@@ -4368,19 +4416,19 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         root.addView(sub);
 
         // Helper: one row per control
-        String[] labels = {"Pitch (absolute)",
+        String[] labels = {"Volume (absolute)", "Tempo (absolute)", "Pitch (absolute)", "Kit (absolute)",
                            "Volume − (1 step)", "Volume + (1 step)",
                            "Tempo − (1 step)",  "Tempo + (1 step)",
                            "Pitch − (1 step)",  "Pitch + (1 step)",
                            "Stop All", "Kit −1 (Prev)", "Kit +1 (Next)",
                            "🔌 Connect Toggle (SPD btn)"};
-        String[] keys   = {"midi_cc_pitch",
+        String[] keys   = {"midi_cc_volume", "midi_cc_tempo", "midi_cc_pitch", "midi_cc_kit",
                            "midi_cc_volume_minus",  "midi_cc_volume_plus",
                            "midi_cc_tempo_minus",   "midi_cc_tempo_plus",
                            "midi_cc_pitch_minus",   "midi_cc_pitch_plus",
                            "midi_cc_stop", "midi_cc_kit_prev", "midi_cc_kit_next",
                            "midi_cc_connect_toggle"};
-        int[]    defs   = {21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
+        int[]    defs   = {7, 20, 21, 22, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
         android.widget.EditText[] edits = new android.widget.EditText[labels.length];
 
         for (int i = 0; i < labels.length; i++) {
@@ -4416,10 +4464,12 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("• Pitch (absolute) CC 0-127: Pitch=21, Stop=123, Prev=24, Next=25, Connect=26\n" +
+        hint.setText("• Absolute CC 0-127: Volume=7, Tempo=20, Pitch=21, Kit=22\n" +
+                     "• Stop=123, Prev=24, Next=25, Connect=26\n" +
                      "• +/- (1 step each press): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85\n" +
                      "• Connect Toggle: SPD-20 Pro ke kisi button pe ye CC assign karo — live connect/disconnect hoga.\n" +
-                     "• Program Change (Kit/Loop channel change) is always active, no CC needed.");
+                     "• Program Change (Kit/Loop channel change) is always active, no CC needed.\n" +
+                     "• Kit absolute CC 0-127 selects Loop 1-100.");
         hint.setTextColor(0xFF888888);
         hint.setTextSize(10f);
         hint.setPadding(0, 12, 0, 0);
@@ -4447,9 +4497,13 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             .setNegativeButton("Cancel", null)
             .setNeutralButton("Reset Defaults", (d, w) -> {
                 SharedPreferences.Editor ed2 = prefs.edit();
-                String[] k = {"midi_cc_pitch",
-                              "midi_cc_stop","midi_cc_kit_prev","midi_cc_kit_next"};
-                int[]    v = {21, 123, 24, 25};
+                String[] k = {"midi_cc_volume", "midi_cc_tempo", "midi_cc_pitch", "midi_cc_kit",
+                              "midi_cc_volume_minus", "midi_cc_volume_plus",
+                              "midi_cc_tempo_minus", "midi_cc_tempo_plus",
+                              "midi_cc_pitch_minus", "midi_cc_pitch_plus",
+                              "midi_cc_stop", "midi_cc_kit_prev", "midi_cc_kit_next",
+                              "midi_cc_connect_toggle"};
+                int[]    v = {7, 20, 21, 22, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
                 for (int i = 0; i < k.length; i++) ed2.putInt(k[i], v[i]);
                 ed2.apply();
                 android.widget.Toast.makeText(this,

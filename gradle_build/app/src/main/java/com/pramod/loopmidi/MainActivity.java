@@ -629,9 +629,10 @@ public class MainActivity extends Activity {
     // MIDI CC (Control Change) — Roland SPD-20 Pro drum-pad controls
     //
     // Default mapping (shares same SharedPrefs keys as LoopsActivity):
-    //   CC  7  → Volume  (delegates to LoopsActivity master volume)
-    //   CC 20  → Tempo   (delegates to LoopsActivity seekTempo)
+    //   CC  7  → Volume (absolute) (delegates to LoopsActivity volume)
+    //   CC 20  → Tempo (absolute)  (delegates to LoopsActivity seekTempo)
     //   CC 21  → Pitch   (delegates to LoopsActivity seekPitch)
+    //   CC 22  → Kit (absolute) (delegates to LoopsActivity loop channel)
     //   CC 123 → Stop All drums immediately
     //   CC 24  → Kit Prev (Bank A)
     //   CC 25  → Kit Next (Bank A)
@@ -661,19 +662,25 @@ public class MainActivity extends Activity {
         sub.setPadding(0, 4, 0, 14);
         root.addView(sub);
 
-        final String[] labels = {"🎵 Pitch (absolute)",
+        final String[] labels = {"🔊 Volume (absolute)",
+                                  "⏱ Tempo (absolute)",
+                                  "🎵 Pitch (absolute)",
+                                  "🎛 Kit (absolute)",
                                   "🔊➖ Volume −1",        "🔊➕ Volume +1",
                                   "⏱➖ Tempo −1",         "⏱➕ Tempo +1",
                                   "🎵➖ Pitch −1",         "🎵➕ Pitch +1",
                                   "⏹ Stop All",            "⏮ Kit −1 (Prev)",       "⏭ Kit +1 (Next)",
                                   "🔌 MIDI Connect"};
-        final String[] keys   = {"midi_cc_pitch",
+        final String[] keys   = {"midi_cc_volume",
+                                  "midi_cc_tempo",
+                                  "midi_cc_pitch",
+                                  "midi_cc_kit",
                                   "midi_cc_volume_minus",    "midi_cc_volume_plus",
                                   "midi_cc_tempo_minus",     "midi_cc_tempo_plus",
                                   "midi_cc_pitch_minus",     "midi_cc_pitch_plus",
                                   "midi_cc_stop",            "midi_cc_kit_prev",        "midi_cc_kit_next",
                                   "midi_cc_connect_toggle"};
-        final int[]    defs   = {21, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
+        final int[]    defs   = {7, 20, 21, 22, 80, 81, 82, 83, 84, 85, 123, 24, 25, 26};
 
         final android.widget.TextView[] valViews  = new android.widget.TextView[labels.length];
         final Button[]                  learnBtns = new Button[labels.length];
@@ -738,7 +745,8 @@ public class MainActivity extends Activity {
         }
 
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Pitch (absolute) CC 0-127: Pitch=21  Stop=123  Connect=26\n"
+        hint.setText("Absolute CC 0-127: Volume=7  Tempo=20  Pitch=21  Kit=22\n"
+                + "Stop=123  Connect=26\n"
                 + "+/- (1 step): Vol-=80 Vol+=81  Tempo-=82 Tempo+=83  Pitch-=84 Pitch+=85\n"
                 + "Kit: Prev(−1)=24  Next(+1)=25 — har ek press = 1 kit change");
         hint.setTextColor(0xFF666666);
@@ -996,7 +1004,10 @@ public class MainActivity extends Activity {
             return;
         }
 
-        int ccPitch      = prefs.getInt("midi_cc_pitch",          21);
+        int ccVolume     = prefs.getInt("midi_cc_volume",           7);
+        int ccTempo      = prefs.getInt("midi_cc_tempo",           20);
+        int ccPitch      = prefs.getInt("midi_cc_pitch",            21);
+        int ccKit        = prefs.getInt("midi_cc_kit",              22);
         int ccKitPrev    = prefs.getInt("midi_cc_kit_prev",       24);
         int ccKitNext    = prefs.getInt("midi_cc_kit_next",       25);
 
@@ -1011,14 +1022,16 @@ public class MainActivity extends Activity {
             // ── SPD-20 Pro button → connect / disconnect MIDI live ─────────────
             runOnUiThread(this::toggleMidiConnection);
 
-        } else if (cc == ccPitch
+        } else if (cc == ccVolume
+                || cc == ccTempo
+                || cc == ccPitch
+                || cc == ccKit
                 || cc == prefs.getInt("midi_cc_pitch_minus",   84)
                 || cc == prefs.getInt("midi_cc_pitch_plus",    85)
                 || cc == prefs.getInt("midi_cc_volume_minus",  80)
                 || cc == prefs.getInt("midi_cc_volume_plus",   81)) {
-            // Delegate pitch abs + Volume±/Pitch± to LoopsActivity.
-            // NOTE: Tempo CC is intentionally NOT handled here — MainActivity
-            // controls Volume/Pitch/Kit only (per user requirement).
+            // Delegate all Loop Activity global controls, including the
+            // absolute Volume/Tempo/Pitch/Kit CC modes.
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
