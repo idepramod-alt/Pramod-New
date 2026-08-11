@@ -241,6 +241,12 @@ public class MainActivity extends Activity {
             java.util.concurrent.Executors.newSingleThreadExecutor();
     private volatile int kitLoadGeneration = 0;
 
+    // ── CC kit-change debounce (prevents rapid pot events from cancelling loads) ─
+    private final android.os.Handler ccKitDebounceHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable ccKitDebounceRunnable;
+    private int ccKitDebounceTarget = -1;
+
     // ── Audio-routing callbacks (earphone / BT plug-unplug) ──────────────────
     private AudioDeviceCallback audioDeviceCallback = null;
     private BroadcastReceiver   noisyReceiver       = null;
@@ -1114,15 +1120,28 @@ public class MainActivity extends Activity {
                 drumMasterVolume = Math.min(1f, drumMasterVolume + 0.01f);
             } else if (cc == ccKitAbs) {
                 // Absolute Kit: CC 0-127 selects drum kit 1-100 (same mapping
-                // as the loop channel). Load it so the pads switch kit live.
+                // as the loop channel). Debounce the actual load so a sweeping
+                // pot doesn't keep invalidating the background sample load
+                // (kitLoadGeneration) before it can finish — without this the
+                // kit NAME updates instantly but the pad SOUNDS stay old.
                 final int target = 1 + Math.round(value * (MAX_KITS - 1) / 127f);
                 if (target >= 1 && target <= MAX_KITS && target != kitIndex) {
-                    runOnUiThread(() -> {
-                        saveKitToMemory(kitIndex);
-                        kitIndex = target;
-                        prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
-                        loadKitFromMemory(kitIndex);   // updates txtKitName
-                    });
+                    ccKitDebounceTarget = target;
+                    if (ccKitDebounceRunnable != null) {
+                        ccKitDebounceHandler.removeCallbacks(ccKitDebounceRunnable);
+                    }
+                    ccKitDebounceRunnable = () -> {
+                        int t = ccKitDebounceTarget;
+                        ccKitDebounceTarget = -1;
+                        ccKitDebounceRunnable = null;
+                        if (t >= 1 && t <= MAX_KITS && t != kitIndex) {
+                            saveKitToMemory(kitIndex);
+                            kitIndex = t;
+                            prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
+                            loadKitFromMemory(kitIndex);   // updates txtKitName + reloads pad samples
+                        }
+                    };
+                    ccKitDebounceHandler.postDelayed(ccKitDebounceRunnable, 150);
                 }
                 return;
             } else {
@@ -3927,6 +3946,10 @@ public class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onDestroy() {
         if (MainActivity.globalInstance == this) MainActivity.globalInstance = null;
+        if (ccKitDebounceRunnable != null) {
+            ccKitDebounceHandler.removeCallbacks(ccKitDebounceRunnable);
+            ccKitDebounceRunnable = null;
+        }
         super.onDestroy();
         if (deactivateListener != null && deactivateRef != null) {
             deactivateRef.removeEventListener(deactivateListener);
