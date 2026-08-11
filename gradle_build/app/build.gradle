@@ -79,6 +79,29 @@ android {
             resValue "string", "app_name", "Pramod Octapad Drums"
         }
     }
+    sourceSets {
+        // ── Per-flavor sound resources ──────────────────────────────────────
+        // Loop pad sounds (assets/) are used by LoopsActivity only.
+        // Drum pad sounds (raw WAVs) are used by MainActivity only.
+        // Shared dirs keep each flavor's APK free of the sounds it never plays.
+        //   full  → both
+        //   loops → loop sounds only (no drum WAVs)
+        //   drums → drum sounds only (no loop sounds)
+        main {
+            assets.srcDirs = []          // loop sounds live in loop_assets now
+        }
+        full {
+            assets.srcDirs = ['src/loop_assets']
+            res.srcDirs += ['src/drum_sounds']
+        }
+        loops {
+            assets.srcDirs = ['src/loop_assets']
+        }
+        drums {
+            res.srcDirs += ['src/drum_sounds']
+        }
+    }
+
     packagingOptions {
         resources {
             excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/NOTICE']
