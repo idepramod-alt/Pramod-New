@@ -165,6 +165,9 @@ public class MainActivity extends Activity {
     private int[] padChokeGroup = new int[8];
     private float[] padGain = new float[8];   // per-pad gain multiplier (default 1.0)
     private float[] padPan  = new float[8];   // per-pad pan (default 0.0 center)
+    // Global drum-pad master volume — applies on top of per-pad volumes.
+    // Synced with LoopsActivity.masterVolume via "loop_master_volume" prefs.
+    private float drumMasterVolume = 1.0f;
     private int selectedPad = 0;
     private boolean editMode = false;
     private int kitIndex  = 1;   // Bank A's active kit number
@@ -246,6 +249,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         this.isVisible = true;
+        // Refresh the drum master volume from prefs — LoopsActivity may have
+        // changed it (volume knob/seekbar) while this screen was backgrounded.
+        this.drumMasterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
 
         // ── Force-restore the SAVED kit index on every foreground ──────────────
         // onCreate's init order is: initPads()/initSeekBars()/setupFavorites()
@@ -1032,10 +1038,16 @@ public class MainActivity extends Activity {
                 || cc == prefs.getInt("midi_cc_volume_plus",   81)
                 || cc == prefs.getInt("midi_cc_tempo_minus",   82)
                 || cc == prefs.getInt("midi_cc_tempo_plus",    83)) {
-            // Delegate all Loop Activity global controls, including the
-            // absolute Volume/Tempo/Pitch/Kit CC modes and Tempo +/- steps.
+            // Delegate to LoopsActivity (controls background loops).
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
+            // ALWAYS apply volume/kit to THIS screen's drum-pad engine:
+            // - Volume: pad sounds use their own AudioEngine; masterVolume
+            //   from LoopsActivity doesn't affect them without this.
+            // - Kit: selecting a drum kit on the pad screen is useful even
+            //   when LoopsActivity is alive (it manages loop channels,
+            //   not drum kits).
+            applyGlobalCCLocally(cc, value);
 
         } else if (cc == ccKitPrev
                 && (System.currentTimeMillis() - ccStepDebounceMs[cc] > 100)) {
@@ -1076,6 +1088,50 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Local handling of the "global" CC controls on the drum-pad screen.
+     * Runs after the LoopsActivity delegation so the SPD-20 knobs are heard
+     * HERE even when LoopsActivity is dead (direct drum-pad launch) or when
+     * it only manages loops. Volume scales this screen's own drum engine via
+     * {@link #drumMasterVolume}; Kit selects a drum kit.
+     */
+    private void applyGlobalCCLocally(int cc, int value) {
+        try {
+            int ccVolume   = prefs.getInt("midi_cc_volume",  7);
+            int ccVolMinus = prefs.getInt("midi_cc_volume_minus", 80);
+            int ccVolPlus  = prefs.getInt("midi_cc_volume_plus",  81);
+            int ccKitAbs   = prefs.getInt("midi_cc_kit",     22);
+
+            if (cc == ccVolume) {
+                // Absolute Volume: CC 0-127 → 0%-100% (matches LoopsActivity).
+                drumMasterVolume = Math.max(0f, Math.min(1f, value / 127f));
+            } else if (cc == ccVolMinus) {
+                drumMasterVolume = Math.max(0f, drumMasterVolume - 0.01f);
+            } else if (cc == ccVolPlus) {
+                drumMasterVolume = Math.min(1f, drumMasterVolume + 0.01f);
+            } else if (cc == ccKitAbs) {
+                // Absolute Kit: CC 0-127 selects drum kit 1-100 (same mapping
+                // as the loop channel). Load it so the pads switch kit live.
+                final int target = 1 + Math.round(value * (MAX_KITS - 1) / 127f);
+                if (target >= 1 && target <= MAX_KITS && target != kitIndex) {
+                    runOnUiThread(() -> {
+                        saveKitToMemory(kitIndex);
+                        kitIndex = target;
+                        prefs.edit().putInt(KEY_KIT_INDEX, kitIndex).commit();
+                        loadKitFromMemory(kitIndex);   // updates txtKitName
+                    });
+                }
+                return;
+            } else {
+                // Tempo/Pitch have no drum-pad equivalent (pads are one-shot)
+                // — LoopsActivity delegation above already covered them.
+                return;
+            }
+            prefs.edit().putFloat("loop_master_volume", drumMasterVolume).apply();
+        } catch (Throwable ignored) {
         }
     }
 
@@ -1133,7 +1189,7 @@ public class MainActivity extends Activity {
             if (bankMode != BANK_B) {
                 AudioEngine.SampleData sampleData = this.samples[index];
                 if (sampleData != null && sampleData.loaded) {
-                    float vol = this.padVolume[index] * this.padGain[index] * velocityScale;
+                    float vol = this.padVolume[index] * this.padGain[index] * velocityScale * this.drumMasterVolume;
                     // Keep MIDI drum playback polyphonic: each hit should trigger its own
                     // voice immediately, without getting collapsed by the pad's global choke
                     // settings in a way that suppresses simultaneous hits from the SPD-20 Pro.
@@ -1148,7 +1204,7 @@ public class MainActivity extends Activity {
             if (bankMode != BANK_A) {
                 AudioEngine.SampleData sampleDataB = this.samplesB[index];
                 if (sampleDataB != null && sampleDataB.loaded) {
-                    float volB = this.padVolumeB[index] * this.padGainB[index] * velocityScale;
+                    float volB = this.padVolumeB[index] * this.padGainB[index] * velocityScale * this.drumMasterVolume;
                     this.audioEngine.playSample(index + 8, sampleDataB, volB, 1.0f, this.padPitchB[index], 0,
                         this.padDelayOnB[index], this.padDelayTimeB[index], this.padDelayLevelB[index],
                         this.padEqLowB[index], this.padEqMidB[index], this.padEqHighB[index],
@@ -1777,6 +1833,9 @@ public class MainActivity extends Activity {
             this.pads[i].setOnClickListener(null);
             this.pads[i].setOnTouchListener(new PadTouch(i));
         }
+        // Global drum master volume — share the same pref as LoopsActivity's
+        // master volume so a hardware knob heard on one screen carries to the other.
+        this.drumMasterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
     }
 
     private void initSeekBars() {
@@ -2092,7 +2151,7 @@ public class MainActivity extends Activity {
         if (sampleData == null) {
             Toast.makeText(this, "No WAV Selected!", 0).show();
         } else {
-            this.audioEngine.playSample(index, sampleData, this.padVolume[index] * this.padGain[index], 1.0f, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f, this.padPan[index]);
+            this.audioEngine.playSample(index, sampleData, this.padVolume[index] * this.padGain[index] * this.drumMasterVolume, 1.0f, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f, this.padPan[index]);
         }
     }
 
