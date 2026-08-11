@@ -147,6 +147,8 @@ public class MainActivity extends Activity {
     private SeekBar seekEqMid;
     private SeekBar seekPitch;
     private SeekBar seekVolume;
+    private SeekBar seekMasterVolume;
+    private SeekBar seekMasterPitch;
     private TextView txtKitName;
     private TextView txtMidiStatus;
     private TextView txtSelectedPad;
@@ -168,6 +170,9 @@ public class MainActivity extends Activity {
     // Global drum-pad master volume — applies on top of per-pad volumes.
     // Synced with LoopsActivity.masterVolume via "loop_master_volume" prefs.
     private float drumMasterVolume = 1.0f;
+    // Global drum-pad master pitch — applies on top of per-pad pitch (0.1–2.0x).
+    // Controllable via MIDI CC (pitch knob) and UI slider.
+    private float drumMasterPitch = 1.0f;
     private int selectedPad = 0;
     private boolean editMode = false;
     private int kitIndex  = 1;   // Bank A's active kit number
@@ -258,6 +263,15 @@ public class MainActivity extends Activity {
         // Refresh the drum master volume from prefs — LoopsActivity may have
         // changed it (volume knob/seekbar) while this screen was backgrounded.
         this.drumMasterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
+        // Restore the master pitch — independent from LoopsActivity's loop pitch.
+        this.drumMasterPitch = this.prefs.getFloat("drum_master_pitch", 1.0f);
+        // Move the M-VOL / M-PITCH sliders to match (CC knob turns move them too).
+        if (this.seekMasterVolume != null) {
+            this.seekMasterVolume.setProgress((int) (this.drumMasterVolume * 100.0f));
+        }
+        if (this.seekMasterPitch != null) {
+            this.seekMasterPitch.setProgress((int) (this.drumMasterPitch * 100.0f));
+        }
 
         // ── Force-restore the SAVED kit index on every foreground ──────────────
         // onCreate's init order is: initPads()/initSeekBars()/setupFavorites()
@@ -1025,6 +1039,7 @@ public class MainActivity extends Activity {
 
         if (cc == ccStop) {
             // Stop all drum sounds immediately on MIDI thread
+            if (this.audioEngine != null) this.audioEngine.stopAll();
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null && loops.audioEngine != null) {
                 loops.audioEngine.stopAll();
@@ -1110,6 +1125,9 @@ public class MainActivity extends Activity {
             int ccVolMinus = prefs.getInt("midi_cc_volume_minus", 80);
             int ccVolPlus  = prefs.getInt("midi_cc_volume_plus",  81);
             int ccKitAbs   = prefs.getInt("midi_cc_kit",     22);
+            int ccPitch    = prefs.getInt("midi_cc_pitch",   21);
+            int ccPitchMinus = prefs.getInt("midi_cc_pitch_minus", 84);
+            int ccPitchPlus  = prefs.getInt("midi_cc_pitch_plus",  85);
 
             if (cc == ccVolume) {
                 // Absolute Volume: CC 0-127 → 0%-100% (matches LoopsActivity).
@@ -1144,12 +1162,31 @@ public class MainActivity extends Activity {
                     ccKitDebounceHandler.postDelayed(ccKitDebounceRunnable, 150);
                 }
                 return;
+            } else if (cc == ccPitch) {
+                // Absolute Pitch: CC 0-127 → 0.1x-2.0x (matches LoopsActivity's
+                // currentPitch mapping). Applies to ALL drum pads here.
+                drumMasterPitch = Math.max(0.1f, Math.min(2.0f, value * 2f / 127f));
+            } else if (cc == ccPitchMinus) {
+                drumMasterPitch = Math.max(0.1f, drumMasterPitch - 0.01f);
+            } else if (cc == ccPitchPlus) {
+                drumMasterPitch = Math.min(2.0f, drumMasterPitch + 0.01f);
             } else {
-                // Tempo/Pitch have no drum-pad equivalent (pads are one-shot)
-                // — LoopsActivity delegation above already covered them.
+                // Tempo has no drum-pad equivalent (pads are one-shot)
+                // — LoopsActivity delegation above already covered it.
                 return;
             }
-            prefs.edit().putFloat("loop_master_volume", drumMasterVolume).apply();
+            prefs.edit().putFloat("loop_master_volume", drumMasterVolume)
+                    .putFloat("drum_master_pitch", drumMasterPitch).apply();
+            // Move the M-VOL / M-PITCH sliders live so the hardware knob visibly
+            // tracks on this screen (CC runs on the MIDI thread → post to main).
+            runOnUiThread(() -> {
+                if (seekMasterVolume != null) {
+                    seekMasterVolume.setProgress((int) (drumMasterVolume * 100.0f));
+                }
+                if (seekMasterPitch != null) {
+                    seekMasterPitch.setProgress((int) (drumMasterPitch * 100.0f));
+                }
+            });
         } catch (Throwable ignored) {
         }
     }
@@ -1213,7 +1250,7 @@ public class MainActivity extends Activity {
                     // voice immediately, without getting collapsed by the pad's global choke
                     // settings in a way that suppresses simultaneous hits from the SPD-20 Pro.
                     // NOTE: 16-arg overload — speed=1.0 (fixed), pitch=padPitch, pan=padPan.
-                    this.audioEngine.playSample(index, sampleData, vol, 1.0f, this.padPitch[index], 0,
+                    this.audioEngine.playSample(index, sampleData, vol, 1.0f, this.padPitch[index] * this.drumMasterPitch, 0,
                         this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index],
                         this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index],
                         0, 0.0f, 0.0f, this.padPan[index]);
@@ -1224,7 +1261,7 @@ public class MainActivity extends Activity {
                 AudioEngine.SampleData sampleDataB = this.samplesB[index];
                 if (sampleDataB != null && sampleDataB.loaded) {
                     float volB = this.padVolumeB[index] * this.padGainB[index] * velocityScale * this.drumMasterVolume;
-                    this.audioEngine.playSample(index + 8, sampleDataB, volB, 1.0f, this.padPitchB[index], 0,
+                    this.audioEngine.playSample(index + 8, sampleDataB, volB, 1.0f, this.padPitchB[index] * this.drumMasterPitch, 0,
                         this.padDelayOnB[index], this.padDelayTimeB[index], this.padDelayLevelB[index],
                         this.padEqLowB[index], this.padEqMidB[index], this.padEqHighB[index],
                         0, 0.0f, 0.0f, this.padPanB[index]);
@@ -1649,6 +1686,8 @@ public class MainActivity extends Activity {
 
         this.seekVolume = (SeekBar) findViewById(R.id.seekVolume);
         this.seekPitch = (SeekBar) findViewById(R.id.seekPitch);
+        this.seekMasterVolume = (SeekBar) findViewById(R.id.seekMasterVolume);
+        this.seekMasterPitch = (SeekBar) findViewById(R.id.seekMasterPitch);
         this.fxControlBar = findViewById(R.id.fxControlBar);
         this.advControlBar = findViewById(R.id.advControlBar);
 
@@ -1855,6 +1894,14 @@ public class MainActivity extends Activity {
         // Global drum master volume — share the same pref as LoopsActivity's
         // master volume so a hardware knob heard on one screen carries to the other.
         this.drumMasterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
+        this.drumMasterPitch = this.prefs.getFloat("drum_master_pitch", 1.0f);
+        // Seed M-VOL / M-PITCH slider positions (listeners attach later in initSeekBars).
+        if (this.seekMasterVolume != null) {
+            this.seekMasterVolume.setProgress((int) (this.drumMasterVolume * 100.0f));
+        }
+        if (this.seekMasterPitch != null) {
+            this.seekMasterPitch.setProgress((int) (this.drumMasterPitch * 100.0f));
+        }
     }
 
     private void initSeekBars() {
@@ -1918,7 +1965,55 @@ public class MainActivity extends Activity {
             public void onStopTrackingTouch(SeekBar s) {
             }
         });
-        this.chkDelay.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: com.pramod.loopmidi.MainActivity.14
+        // ── MASTER VOLUME (M-VOL) — applies on top of per-pad volumes ──────
+        // Synced with LoopsActivity.masterVolume via "loop_master_volume" so the
+        // hardware volume knob and this slider never fight.
+        this.seekMasterVolume.setMax(100);
+        this.seekMasterVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.MainActivity.14
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                MainActivity.this.drumMasterVolume = Math.max(0f, Math.min(1f, progress / 100.0f));
+                // Persist on user drag only — programmatic setProgress (CC knob /
+                // resume refresh) must not spam disk writes.
+                if (fromUser) {
+                    MainActivity.this.prefs.edit()
+                            .putFloat("loop_master_volume", MainActivity.this.drumMasterVolume)
+                            .apply();
+                }
+            }
+
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        // ── MASTER PITCH (M-PITCH) — applies on top of per-pad pitch ───────
+        // Progress 0–200 → 0.0–2.0x (default 100 → 1.0x), same range as the CC
+        // pitch knob (CC 21). 0.1 floor keeps pads audible.
+        this.seekMasterPitch.setMax(200);
+        this.seekMasterPitch.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() { // from class: com.pramod.loopmidi.MainActivity.15
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                MainActivity.this.drumMasterPitch = Math.max(0.1f, Math.min(2.0f, progress / 100.0f));
+                if (fromUser) {
+                    MainActivity.this.prefs.edit()
+                            .putFloat("drum_master_pitch", MainActivity.this.drumMasterPitch)
+                            .apply();
+                }
+            }
+
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override // android.widget.SeekBar.OnSeekBarChangeListener
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        this.chkDelay.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() { // from class: com.pramod.loopmidi.MainActivity.16
             @Override // android.widget.CompoundButton.OnCheckedChangeListener
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 // ── Bank-aware delay on/off ────────────────────────────────
@@ -2170,7 +2265,7 @@ public class MainActivity extends Activity {
         if (sampleData == null) {
             Toast.makeText(this, "No WAV Selected!", 0).show();
         } else {
-            this.audioEngine.playSample(index, sampleData, this.padVolume[index] * this.padGain[index] * this.drumMasterVolume, 1.0f, this.padPitch[index], 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f, this.padPan[index]);
+            this.audioEngine.playSample(index, sampleData, this.padVolume[index] * this.padGain[index] * this.drumMasterVolume, 1.0f, this.padPitch[index] * this.drumMasterPitch, 0, this.padDelayOn[index], this.padDelayTime[index], this.padDelayLevel[index], this.padEqLow[index], this.padEqMid[index], this.padEqHigh[index], this.padChokeGroup[index], 0.0f, 0.0f, this.padPan[index]);
         }
     }
 
