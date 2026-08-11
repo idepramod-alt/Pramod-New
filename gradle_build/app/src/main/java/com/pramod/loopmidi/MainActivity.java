@@ -1029,9 +1029,11 @@ public class MainActivity extends Activity {
                 || cc == prefs.getInt("midi_cc_pitch_minus",   84)
                 || cc == prefs.getInt("midi_cc_pitch_plus",    85)
                 || cc == prefs.getInt("midi_cc_volume_minus",  80)
-                || cc == prefs.getInt("midi_cc_volume_plus",   81)) {
+                || cc == prefs.getInt("midi_cc_volume_plus",   81)
+                || cc == prefs.getInt("midi_cc_tempo_minus",   82)
+                || cc == prefs.getInt("midi_cc_tempo_plus",    83)) {
             // Delegate all Loop Activity global controls, including the
-            // absolute Volume/Tempo/Pitch/Kit CC modes.
+            // absolute Volume/Tempo/Pitch/Kit CC modes and Tempo +/- steps.
             LoopsActivity loops = LoopsActivity.globalInstance;
             if (loops != null) loops.handleMidiCC(cc, value);
 
