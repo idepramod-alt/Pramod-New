@@ -177,6 +177,8 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private final String[]  pendingKitAsset  = new String[16];  // asset kit path, or null
     private final Uri[]     pendingKitUri    = new Uri[16];     // memory-kit uri, or null
     private boolean editMode = false;
+    private int copySourcePad = -1;
+    private int swapSourcePad = -1;
     private int selectedPad = 0;
     private Uri[] loopUris = new Uri[16];
     AudioEngine audioEngine;
@@ -1677,6 +1679,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             editMode = !editMode;
             btnEditLoops.setText(editMode ? "EDIT ON" : "EDIT OFF");
             btnEditLoops.setBackgroundResource(editMode ? R.drawable.btn_3d_red : R.drawable.btn_3d_dark);
+            if (!editMode) {
+                copySourcePad = -1;
+                swapSourcePad = -1;
+            }
         });
         Button button = this.btnAdvancedLoops;
         if (button != null) {
@@ -3183,6 +3189,23 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // index is already GLOBAL
         this.selectedPad = index;
         if (this.editMode) {
+            // Handle Copy mode: if copySourcePad is set, copy to this pad
+            if (this.copySourcePad != -1) {
+                if (this.copySourcePad != index) {
+                    copyLoopSound(this.copySourcePad, index);
+                }
+                this.copySourcePad = -1;
+                return;
+            }
+            // Handle Swap/Exchange mode: if swapSourcePad is set, swap with this pad
+            if (this.swapSourcePad != -1) {
+                if (this.swapSourcePad != index) {
+                    swapLoopSound(this.swapSourcePad, index);
+                }
+                this.swapSourcePad = -1;
+                return;
+            }
+            // Normal edit mode: show options dialog
             showEditOptions(index);
         } else {
             // ── AUDIO FIRST — zero UI work before sound starts ────────────────
@@ -3205,7 +3228,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     }
 
     private void showEditOptions(final int index) {
-        String[] options = {"Select Loop Audio", "Clear Loop"};
+        String copyText = this.copySourcePad == -1 ? "Loop Sound Copy (Select Source)" : "Loop Sound Copy (Paste Mode ON)";
+        String swapText = this.swapSourcePad == -1 ? "Loop Sound Exchange (Select First Pad)" : "Loop Sound Exchange (Swap Mode ON)";
+        String[] options = {"Select Loop Audio", copyText, swapText, "Clear Loop"};
         new AlertDialog.Builder(this).setTitle("EDIT LOOP " + (index + 1)).setItems(options, new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.17
 
 
@@ -3219,32 +3244,158 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     intent.addFlags(64);
                     LoopsActivity.this.startActivityForResult(intent, LoopsActivity.REQ_PICK_LOOP_WAV);
                 } else if (which == 1) {
+                    LoopsActivity.this.copySourcePad = index;
+                    LoopsActivity.this.swapSourcePad = -1;
+                    Toast.makeText(LoopsActivity.this, "Copy Mode ON: Now tap target LOOP to paste", 0).show();
+                } else if (which == 2) {
+                    LoopsActivity.this.swapSourcePad = index;
+                    LoopsActivity.this.copySourcePad = -1;
+                    Toast.makeText(LoopsActivity.this, "Exchange Mode ON: Now tap second LOOP to swap", 0).show();
+                } else if (which == 3) {
                     LoopsActivity.this.clearLoop(index);
                 }
             }
         }).setNegativeButton("Cancel", (DialogInterface.OnClickListener) null).show();
     }
 
-    public void clearLoop(int index) throws IllegalStateException {
-        if (this.loopPlaying[index]) {
-            this.audioEngine.stopPad(index);
-            this.loopPlaying[index] = false;
-            maybeStopBpmBlinkIfIdle();
+    /**
+     * Copy loop sound from one pad to another (mirrors MainActivity.copyPadSound).
+     */
+    public void copyLoopSound(int fromPad, int toPad) throws IllegalStateException {
+        if (fromPad == toPad) {
+            return;
         }
-        this.loopSamples[index] = null;
-        this.loopUris[index] = null;
-        // Cleared pad has no sample — force dark background regardless of mode,
-        // and drop any explicit override so a freshly loaded sample starts out
-        // following the global LOOP/DRUM mode again.
-        this.padDrumMode[index] = false;
-        this.padModeOverride[index] = false;
-        prefs.edit()
-            .putBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + index, false)
-            .putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + index, false)
-            .apply();
-        int li2 = getLocalPadIndex(index); if (li2 >= 0) this.loopPads[li2].setBackgroundResource(R.drawable.pad_black_selector);
+        // Copy all per-pad loop parameters
+        this.loopUris[toPad] = this.loopUris[fromPad];
+        this.padDrumMode[toPad] = this.padDrumMode[fromPad];
+        this.padModeOverride[toPad] = this.padModeOverride[fromPad];
+        this.padDrumChokeGroup[toPad] = this.padDrumChokeGroup[fromPad];
+        this.padDrumDelayOn[toPad] = this.padDrumDelayOn[fromPad];
+        this.padDrumDelayTime[toPad] = this.padDrumDelayTime[fromPad];
+        this.padDrumDelayLevel[toPad] = this.padDrumDelayLevel[fromPad];
+        this.padLoopEqHigh[toPad] = this.padLoopEqHigh[fromPad];
+        this.padLoopEqMid[toPad] = this.padLoopEqMid[fromPad];
+        this.padLoopEqLow[toPad] = this.padLoopEqLow[fromPad];
+        this.padLoopGain[toPad] = this.padLoopGain[fromPad];
+        this.padLoopPitch[toPad] = this.padLoopPitch[fromPad];
+        this.padLoopPan[toPad] = this.padLoopPan[fromPad];
+        this.padVolume[toPad] = this.padVolume[fromPad];
+
+        // Reload sample for target pad if source has a URI
+        Uri srcUri = this.loopUris[fromPad];
+        try {
+            if (srcUri != null) {
+                this.loopSamples[toPad] = this.audioEngine.loadWavFromUri(toPad, srcUri);
+            } else {
+                this.loopSamples[toPad] = null;
+            }
+        } catch (IOException e) {
+            this.loopSamples[toPad] = null;
+            Toast.makeText(this, "Error copying sound: " + e.getMessage(), 0).show();
+        }
+
         saveLoopsToMemory();
-        Toast.makeText(this, "Loop " + (index + 1) + " Cleared!", 0).show();
+        Toast.makeText(this, "Copied LOOP " + (fromPad + 1) + " -> LOOP " + (toPad + 1), 0).show();
+    }
+
+    /**
+     * Swap loop sounds between two pads (mirrors MainActivity.swapPadSound).
+     */
+    public void swapLoopSound(int padA, int padB) throws IllegalStateException {
+        if (padA == padB) {
+            return;
+        }
+        try {
+            // Swap loopUris
+            Uri tempUri = this.loopUris[padA];
+            this.loopUris[padA] = this.loopUris[padB];
+            this.loopUris[padB] = tempUri;
+
+            // Swap padDrumMode
+            boolean tempDrumMode = this.padDrumMode[padA];
+            this.padDrumMode[padA] = this.padDrumMode[padB];
+            this.padDrumMode[padB] = tempDrumMode;
+
+            // Swap padModeOverride
+            boolean tempOverride = this.padModeOverride[padA];
+            this.padModeOverride[padA] = this.padModeOverride[padB];
+            this.padModeOverride[padB] = tempOverride;
+
+            // Swap padDrumChokeGroup
+            int tempChoke = this.padDrumChokeGroup[padA];
+            this.padDrumChokeGroup[padA] = this.padDrumChokeGroup[padB];
+            this.padDrumChokeGroup[padB] = tempChoke;
+
+            // Swap padDrumDelayOn
+            boolean tempDly = this.padDrumDelayOn[padA];
+            this.padDrumDelayOn[padA] = this.padDrumDelayOn[padB];
+            this.padDrumDelayOn[padB] = tempDly;
+
+            // Swap padDrumDelayTime
+            float tempDlyT = this.padDrumDelayTime[padA];
+            this.padDrumDelayTime[padA] = this.padDrumDelayTime[padB];
+            this.padDrumDelayTime[padB] = tempDlyT;
+
+            // Swap padDrumDelayLevel
+            float tempDlyL = this.padDrumDelayLevel[padA];
+            this.padDrumDelayLevel[padA] = this.padDrumDelayLevel[padB];
+            this.padDrumDelayLevel[padB] = tempDlyL;
+
+            // Swap padLoopEqHigh
+            float tempEqH = this.padLoopEqHigh[padA];
+            this.padLoopEqHigh[padA] = this.padLoopEqHigh[padB];
+            this.padLoopEqHigh[padB] = tempEqH;
+
+            // Swap padLoopEqMid
+            float tempEqM = this.padLoopEqMid[padA];
+            this.padLoopEqMid[padA] = this.padLoopEqMid[padB];
+            this.padLoopEqMid[padB] = tempEqM;
+
+            // Swap padLoopEqLow
+            float tempEqL = this.padLoopEqLow[padA];
+            this.padLoopEqLow[padA] = this.padLoopEqLow[padB];
+            this.padLoopEqLow[padB] = tempEqL;
+
+            // Swap padLoopGain
+            float tempGain = this.padLoopGain[padA];
+            this.padLoopGain[padA] = this.padLoopGain[padB];
+            this.padLoopGain[padB] = tempGain;
+
+            // Swap padLoopPitch
+            float tempPitch = this.padLoopPitch[padA];
+            this.padLoopPitch[padA] = this.padLoopPitch[padB];
+            this.padLoopPitch[padB] = tempPitch;
+
+            // Swap padLoopPan
+            float tempPan = this.padLoopPan[padA];
+            this.padLoopPan[padA] = this.padLoopPan[padB];
+            this.padLoopPan[padB] = tempPan;
+
+            // Swap padVolume
+            float tempVol = this.padVolume[padA];
+            this.padVolume[padA] = this.padVolume[padB];
+            this.padVolume[padB] = tempVol;
+
+            // Reload swapped native slots
+            Uri uriA = this.loopUris[padA];
+            if (uriA != null) {
+                this.loopSamples[padA] = this.audioEngine.loadWavFromUri(padA, uriA);
+            } else {
+                this.loopSamples[padA] = null;
+            }
+            Uri uriB = this.loopUris[padB];
+            if (uriB != null) {
+                this.loopSamples[padB] = this.audioEngine.loadWavFromUri(padB, uriB);
+            } else {
+                this.loopSamples[padB] = null;
+            }
+
+        } catch (IOException e) {
+            Toast.makeText(this, "Error swapping sounds: " + e.getMessage(), 0).show();
+        }
+
+        saveLoopsToMemory();
+        Toast.makeText(this, "Swapped LOOP " + (padA + 1) + " <-> LOOP " + (padB + 1), 0).show();
     }
 
     public void renameLoopDialog() {
