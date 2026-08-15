@@ -66,7 +66,33 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private static final int LOOP_PAD_COUNT = 8;
     private static final int MAX_LOOPS = 100;
     private static final String PREF_NAME = "OctapadSettings";
-    private static final int REQ_LOAD_LOOP_FOLDER = 6003;
+    private static final String[] DEFAULT_LOOP_NAMES = {
+          "Natural Aur Piano Background",
+          "Kaharwa Loop",
+          "Duff all loop",
+          "Dadra Loop",
+          "Deepchandi aur Ghoomar",
+          "Garba Dandiya loop",
+          "Chattisgarhi loop",
+          "Dholak tabla fast bhangda",
+          "Bhojpuri Huk fast",
+          "Fast bhangda"
+      };
+
+      private static String defaultLoopName(int index) {
+          return (index >= 1 && index <= DEFAULT_LOOP_NAMES.length)
+              ? DEFAULT_LOOP_NAMES[index - 1]
+              : "LOOP " + index;
+      }
+
+      private String getSavedLoopName(int index) {
+          String legacyDefault = "LOOP " + index;
+          String saved = this.prefs.getString("loop_name_ch_" + index, null);
+          return (saved == null || saved.trim().length() == 0 || saved.equals(legacyDefault))
+              ? defaultLoopName(index)
+              : saved;
+      }
+        private static final int REQ_LOAD_LOOP_FOLDER = 6003;
     private static final int REQ_PICK_LOOP_WAV = 6001;
     private static final int REQ_SAVE_LOOP_FOLDER = 6002;
     private static final int REQ_PICK_FILE_SOUND  = 6010;
@@ -137,7 +163,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     private TextView txtPitchVal;
     private TextView txtTempoVal;
     Button[] loopPads = new Button[16];
-    private String currentLoopName = "LOOP 1";
+    private String currentLoopName = "Natural Aur Piano Background";
     private String pendingSaveLoopName = null;
     private int loopChannelIndex = 1;
 
@@ -1092,8 +1118,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         saveLoopsToMemory();
         loopChannelIndex = targetLoop;
         prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-        currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex,
-                "LOOP " + loopChannelIndex);
+        currentLoopName = getSavedLoopName(loopChannelIndex);
         txtLoopChannel.setText(currentLoopName);
         loadCurrentKit();
     }
@@ -1130,8 +1155,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             saveLoopsToMemory();
             loopChannelIndex = target;
             prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-            currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex,
-                "LOOP " + loopChannelIndex);
+            currentLoopName = getSavedLoopName(loopChannelIndex);
             if (txtLoopChannel != null) txtLoopChannel.setText(currentLoopName);
             loadCurrentKit();
         }
@@ -1224,7 +1248,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     saveLoopsToMemory();
                     loopChannelIndex = target;
                     prefs.edit().putInt(KEY_LOOP_INDEX, loopChannelIndex).apply();
-                    currentLoopName = prefs.getString("loop_name_ch_" + loopChannelIndex, "LOOP " + loopChannelIndex);
+                    currentLoopName = getSavedLoopName(loopChannelIndex);
                     txtLoopChannel.setText(currentLoopName);
                     loadCurrentKit();
                 } else {
@@ -1594,7 +1618,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         // Note: currentSpdKitNum stays -1 until first Program Change arrives —
         // this means on restart, lock is ON but notes are allowed until SPD sends PC.
         midiKitLockNumber = prefs.getInt("loop_midi_kit_lock", -1);
-        String string = this.prefs.getString("loop_name_ch_" + this.loopChannelIndex, "LOOP " + this.loopChannelIndex);
+        String string = getSavedLoopName(this.loopChannelIndex);
         this.currentLoopName = string;
         this.txtLoopChannel.setText(string);
         this.masterVolume = this.prefs.getFloat("loop_master_volume", 1.0f);
@@ -3430,7 +3454,7 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             public void onClick(DialogInterface d, int w) {
                 LoopsActivity.this.currentLoopName = edt.getText().toString().trim();
                 if (LoopsActivity.this.currentLoopName.length() == 0) {
-                    LoopsActivity.this.currentLoopName = "LOOP " + LoopsActivity.this.loopChannelIndex;
+                    LoopsActivity.this.currentLoopName = defaultLoopName(LoopsActivity.this.loopChannelIndex);
                 }
                 LoopsActivity.this.txtLoopChannel.setText(LoopsActivity.this.currentLoopName);
                 LoopsActivity.this.prefs.edit().putString("loop_name_ch_" + LoopsActivity.this.loopChannelIndex, LoopsActivity.this.currentLoopName).apply();
