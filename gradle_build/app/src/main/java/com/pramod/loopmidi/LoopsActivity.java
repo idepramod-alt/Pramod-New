@@ -3398,7 +3398,29 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         Toast.makeText(this, "Swapped LOOP " + (padA + 1) + " <-> LOOP " + (padB + 1), 0).show();
     }
 
-    public void renameLoopDialog() {
+    public void clearLoop(int index) throws IllegalStateException {
+          if (this.loopPlaying[index]) {
+              this.audioEngine.stopPad(index);
+              this.loopPlaying[index] = false;
+              maybeStopBpmBlinkIfIdle();
+          }
+          this.loopSamples[index] = null;
+          this.loopUris[index] = null;
+          // Cleared pad has no sample — force dark background regardless of mode,
+          // and drop any explicit override so a freshly loaded sample starts out
+          // following the global LOOP/DRUM mode again.
+          this.padDrumMode[index] = false;
+          this.padModeOverride[index] = false;
+          prefs.edit()
+              .putBoolean("pad_drum_mode_ch_" + this.loopChannelIndex + "_" + index, false)
+              .putBoolean("pad_mode_override_ch_" + this.loopChannelIndex + "_" + index, false)
+              .apply();
+          int li2 = getLocalPadIndex(index); if (li2 >= 0) this.loopPads[li2].setBackgroundResource(R.drawable.pad_black_selector);
+          saveLoopsToMemory();
+          Toast.makeText(this, "Loop " + (index + 1) + " Cleared!", 0).show();
+      }
+
+        public void renameLoopDialog() {
         final EditText edt = new EditText(this);
         edt.setText(this.currentLoopName);
         new AlertDialog.Builder(this).setTitle("Enter Loop Name").setView(edt).setPositiveButton("OK", new DialogInterface.OnClickListener() { // from class: com.pramod.loopmidi.LoopsActivity.18
