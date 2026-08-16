@@ -887,6 +887,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 }
                 this.audioEngine.stopPad(i2);
                 this.loopPlaying[i2] = false;
+                // Reset pad UI immediately so the blue glow doesn't carry over
+                // to the new kit's pad when switching kits while a pad is playing.
+                updatePadLabel(i2);
             }
             this.loopSamples[i2] = null;
             this.loopUris[i2] = null;
@@ -3311,7 +3314,14 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (srcUri != null) {
                 this.loopSamples[toPad] = this.audioEngine.loadWavFromUri(toPad, srcUri);
             } else {
-                this.loopSamples[toPad] = null;
+                // Preset kit: source has no URI but has a loaded sample (from assets).
+                // Copy the sample data directly so preset-kit pads can be copied too.
+                AudioEngine.SampleData srcSample = this.loopSamples[fromPad];
+                if (srcSample != null && srcSample.loaded) {
+                    this.loopSamples[toPad] = this.audioEngine.loadWavFromAsset(toPad, "kit" + this.loopChannelIndex + "/loop_pad_" + (fromPad + 1) + ".wav");
+                } else {
+                    this.loopSamples[toPad] = null;
+                }
             }
         } catch (IOException e) {
             this.loopSamples[toPad] = null;
@@ -3405,13 +3415,26 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
             if (uriA != null) {
                 this.loopSamples[padA] = this.audioEngine.loadWavFromUri(padA, uriA);
             } else {
-                this.loopSamples[padA] = null;
+                // Preset kit: source has no URI but has a loaded sample (from assets).
+                // Reload from the preset asset so swap works in preset kits too.
+                AudioEngine.SampleData sampleA = this.loopSamples[padA];
+                if (sampleA != null && sampleA.loaded) {
+                    this.loopSamples[padA] = this.audioEngine.loadWavFromAsset(padA, "kit" + this.loopChannelIndex + "/loop_pad_" + (padA + 1) + ".wav");
+                } else {
+                    this.loopSamples[padA] = null;
+                }
             }
             Uri uriB = this.loopUris[padB];
             if (uriB != null) {
                 this.loopSamples[padB] = this.audioEngine.loadWavFromUri(padB, uriB);
             } else {
-                this.loopSamples[padB] = null;
+                // Preset kit: source has no URI but has a loaded sample (from assets).
+                AudioEngine.SampleData sampleB = this.loopSamples[padB];
+                if (sampleB != null && sampleB.loaded) {
+                    this.loopSamples[padB] = this.audioEngine.loadWavFromAsset(padB, "kit" + this.loopChannelIndex + "/loop_pad_" + (padB + 1) + ".wav");
+                } else {
+                    this.loopSamples[padB] = null;
+                }
             }
 
         } catch (IOException e) {
@@ -3688,6 +3711,9 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                 } else {
                     this.audioEngine.stopPad(i);
                     this.loopPlaying[i] = false;
+                    // Reset pad UI immediately so the blue glow doesn't carry over
+                    // to the new kit's pad when switching kits while a pad is playing.
+                    updatePadLabel(i);
                 }
             }
             if (!preserveLoop) {

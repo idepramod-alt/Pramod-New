@@ -6,20 +6,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- ── Loop Activity Brand ── -->
-      <TextView
-          android:id="@+id/loopBrandTitle"
-          android:layout_width="match_parent"
-          android:layout_height="wrap_content"
-          android:gravity="center"
-          android:text="Pramod❤️&#10;Loop Sampler🥁"
-          android:textColor="#ffffffff"
-          android:textStyle="bold"
-          android:textSize="18sp"
-          android:lineSpacingExtra="0dp"
-          android:paddingTop="2dp"
-          android:paddingBottom="4dp" />
-
         <!-- ── Top Control Bar ── -->
     <LinearLayout
         android:gravity="center_vertical"
@@ -144,9 +130,9 @@
         <TextView android:id="@+id/txtBrandName"
             android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffff00"
             android:shadowColor="#ff000000" android:shadowDx="1" android:shadowDy="1" android:shadowRadius="2.5"
-            android:gravity="center" android:singleLine="true"
+            android:gravity="center"
             android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_marginLeft="4dp" android:text="PRAMOD OCTAPAD LOOPS" android:layout_weight="1.6"/>
+            android:layout_marginLeft="4dp" android:text="Pramod&#10;Loop Sampler🥁" android:layout_weight="1.6"/>
 
         <View android:background="#ff444444" android:layout_width="1dp"
             android:layout_height="match_parent"
