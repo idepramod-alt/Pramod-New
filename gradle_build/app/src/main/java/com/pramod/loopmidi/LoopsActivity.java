@@ -105,6 +105,11 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
     public static boolean sBackgroundPlayback = false;
     private View advancedControlPanel;
     private Button btnAdvancedLoops;
+    private Button btnPerformanceMode;
+    private View loopsRoot;
+    private View loopModeControlBar;
+    private View favLoopRow;
+    private boolean performanceMode = false;
     private Button btnBack;
     private Button btnEditLoops;
     private Button btnLoadLoop;
@@ -1473,6 +1478,10 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
         Button btnPadEdit = (Button) findViewById(R.id.btnPadEdit);
         btnPadEdit.setOnClickListener(v -> showPadEditDialog());
         this.btnAdvancedLoops = (Button) findViewById(R.id.btnAdvancedLoops);
+        this.btnPerformanceMode = (Button) findViewById(R.id.btnPerformanceMode);
+        this.loopsRoot                = findViewById(R.id.loopsRoot);
+        this.loopModeControlBar       = findViewById(R.id.loopModeControlBar);
+        this.favLoopRow                = findViewById(R.id.favLoopRow);
         this.advancedControlPanel     = findViewById(R.id.advancedControlPanelScroll);
         this.recControlPanelScroll    = findViewById(R.id.recControlPanelScroll);
         this.recPanelRoot             = (android.widget.LinearLayout) findViewById(R.id.recControlPanel);
@@ -1730,6 +1739,15 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
                     }
                 }
             });
+        }
+        // ── Gear / Performance Mode ─────────────────────────────────────────
+        // This is intentionally separate from the existing ADV button so the
+        // existing advanced-panel action stays unchanged. Performance mode only
+        // changes visibility/layout; audio, MIDI and pad listeners keep running.
+        if (this.btnPerformanceMode != null) {
+            this.btnPerformanceMode.setOnClickListener(v ->
+                    setPerformanceMode(!performanceMode, true));
+            updatePerformanceModeButton();
         }
         // ── Hold-repeat touch listeners (Roland SPD style) ────────────────────
         setupLoopHoldButton(this.btnPrevLoop, -1);
@@ -1991,6 +2009,66 @@ public class LoopsActivity extends Activity implements DialogInterface.OnClickLi
 
         // Apply initial mode UI state
         updateModeButtonsUI();
+    }
+
+    /**
+     * Toggle the focused live-performance layout without changing any playback
+     * state. Hidden views are made GONE so loopPadArea's existing weights
+     * automatically give the eight visible pads the released screen space.
+     */
+    private void setPerformanceMode(boolean enabled, boolean animate) {
+        performanceMode = enabled;
+
+        if (animate && loopsRoot instanceof android.view.ViewGroup) {
+            android.transition.AutoTransition transition = new android.transition.AutoTransition();
+            transition.setDuration(220L);
+            android.transition.TransitionManager.beginDelayedTransition(
+                    (android.view.ViewGroup) loopsRoot, transition);
+        }
+
+        setVisibility(loopModeControlBar, !enabled);
+        setVisibility(favLoopRow, !enabled);
+        setVisibility(advancedControlPanel,
+                !enabled && advancedControlPanel != null
+                        && advancedControlPanel.getVisibility() == View.VISIBLE);
+        setVisibility(recControlPanelScroll,
+                !enabled && recControlPanelScroll != null
+                        && recControlPanelScroll.getVisibility() == View.VISIBLE);
+        setVisibility(loopSyncPanelScroll,
+                !enabled && loopSyncPanelScroll != null
+                        && loopSyncPanelScroll.getVisibility() == View.VISIBLE);
+
+        // Keep navigation and the requested live controls available. These
+        // editing controls are still fully wired when Performance Mode is off.
+        setVisibility(findViewById(R.id.btnEditLoops), !enabled);
+        setVisibility(findViewById(R.id.btnPadEdit), !enabled);
+        setVisibility(findViewById(R.id.btnRenameLoop), !enabled);
+        setVisibility(btnAdvancedLoops, !enabled);
+        if (btnPerformanceMode != null) btnPerformanceMode.setVisibility(View.VISIBLE);
+
+        if (enabled) {
+            // A panel may have been open when the user entered Performance Mode.
+            // Close only its UI; do not stop recording or alter playback state.
+            if (btnAdvancedLoops != null) btnAdvancedLoops.setBackgroundResource(R.drawable.btn_3d_dark);
+            if (btnLoopSync != null) {
+                btnLoopSync.setBackgroundResource(R.drawable.btn_3d_dark);
+                btnLoopSync.setText("🔄SYNC\nOFF");
+            }
+        }
+        updatePerformanceModeButton();
+    }
+
+    private void setVisibility(View view, boolean visible) {
+        if (view != null) view.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    private void updatePerformanceModeButton() {
+        if (btnPerformanceMode == null) return;
+        btnPerformanceMode.setText(performanceMode ? "⚙\nPLAY" : "⚙\nFULL");
+        btnPerformanceMode.setBackgroundResource(
+                performanceMode ? R.drawable.btn_3d_orange : R.drawable.btn_3d_dark);
+        btnPerformanceMode.setContentDescription(
+                performanceMode ? "Exit Performance Mode" : "Enter Performance Mode");
     }
 
     /** Toggle Drum Octapad mode: one-shot + multi-play both on/off together.

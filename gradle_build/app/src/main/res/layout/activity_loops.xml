@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/loopsRoot"
     android:orientation="vertical"
     android:background="#ff111111"
     android:padding="8dp"
@@ -48,6 +49,12 @@
             android:id="@+id/btnAdvancedLoops" android:background="@drawable/btn_3d_dark"
             android:layout_width="0dp" android:layout_height="match_parent"
             android:layout_marginLeft="2dp" android:text="ADV" android:layout_weight="1"/>
+        <!-- Performance mode: hides non-essential controls so the pads can grow. -->
+        <Button android:textSize="9sp" android:textStyle="bold" android:textColor="#ffffffff"
+            android:id="@+id/btnPerformanceMode" android:background="@drawable/btn_3d_dark"
+            android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_marginLeft="2dp" android:text="⚙&#10;FULL"
+            android:contentDescription="Toggle Performance Mode" android:layout_weight="1"/>
         <Button android:textSize="10sp" android:textStyle="bold" android:textColor="#ffffffff"
             android:id="@+id/btnSaveLoop" android:background="@drawable/btn_glossy_3d"
             android:layout_width="0dp" android:layout_height="match_parent"
@@ -69,6 +76,7 @@
 
     <!-- ── Mode Bar: Loop Mode / Drum Mode + ADD + REC ── -->
     <LinearLayout
+        android:id="@+id/loopModeControlBar"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:background="#ff1a1a2e"
@@ -347,6 +355,7 @@
 
     <!-- ── Speed / Pitch / BPM bar ── -->
     <LinearLayout android:gravity="center_vertical" android:orientation="horizontal"
+        android:id="@+id/speedPitchControlBar"
         android:background="#ff222222" android:padding="4dp"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginBottom="4dp">
@@ -521,6 +530,7 @@
     </LinearLayout>
     <!-- ── Loop Bank Selector (A/B) ─────────────────────────────────────────── -->
     <LinearLayout android:orientation="horizontal" android:background="#ff1a1a2e"
+        android:id="@+id/loopBankRow"
         android:layout_width="match_parent" android:layout_height="30dp"
         android:paddingLeft="2dp" android:paddingRight="2dp">
         <Button android:id="@+id/btnBankA" android:text="BANK A"
